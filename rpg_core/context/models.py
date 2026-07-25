@@ -43,6 +43,7 @@ class MsgKey:
     TURN_ID = "turn_id"
     SEQ_IN_TURN = "seq_in_turn"
     MODE = "mode"
+    REASONING_CONTENT = "reasoning_content"
 
 
 class Message:
@@ -57,6 +58,7 @@ class Message:
         "_seq_in_turn",
         "_tool_call_id",
         "_tool_calls",
+        "_reasoning_content",
     )
 
     def __init__(
@@ -68,6 +70,7 @@ class Message:
         seq_in_turn: int = 0,
         tool_call_id: str = "",
         tool_calls: list[JsonObject] | None = None,
+        reasoning_content: str | None = None,
         mode: str = "neutral",
     ) -> None:
         self._role = Role(role) if isinstance(role, str) else role
@@ -78,6 +81,14 @@ class Message:
         self._seq_in_turn = int(seq_in_turn)
         self._tool_call_id = tool_call_id
         self._tool_calls = tool_calls or None
+        normalized_reasoning = (
+            reasoning_content
+            if isinstance(reasoning_content, str) and reasoning_content.strip()
+            else None
+        )
+        if normalized_reasoning is not None and self._role is not Role.ASSISTANT:
+            raise ValueError("reasoning_content is only valid for assistant messages")
+        self._reasoning_content = normalized_reasoning
 
     @property
     def role(self) -> Role:
@@ -119,6 +130,10 @@ class Message:
     def tool_calls(self, value: list[JsonObject] | None) -> None:
         self._tool_calls = value
 
+    @property
+    def reasoning_content(self) -> str | None:
+        return self._reasoning_content
+
     def is_user(self) -> bool:
         return self._role is Role.USER
 
@@ -143,10 +158,13 @@ class Message:
             data["tool_call_id"] = self._tool_call_id
         if self._tool_calls:
             data["tool_calls"] = self._tool_calls
+        if self._reasoning_content is not None:
+            data[MsgKey.REASONING_CONTENT] = self._reasoning_content
         return data
 
     def to_persistence_dict(self) -> dict[str, object]:
         data = self.to_provider_dict()
+        data.pop(MsgKey.REASONING_CONTENT, None)
         data[MsgKey.MODE] = self._mode
         if self._uid:
             data[MsgKey.UID] = self._uid
@@ -170,6 +188,11 @@ class Message:
             tool_calls=(
                 cast(list[JsonObject], raw_tool_calls)
                 if isinstance(raw_tool_calls, list)
+                else None
+            ),
+            reasoning_content=(
+                str(data[MsgKey.REASONING_CONTENT])
+                if isinstance(data.get(MsgKey.REASONING_CONTENT), str)
                 else None
             ),
         )

@@ -135,6 +135,12 @@ async def run_chat_loop(
             content = result.get("content", "")
             tool_calls = result.get("tool_calls")
             finish_reason = result.get("finish_reason")
+            raw_reasoning_content = result.get("reasoning_content")
+            reasoning_content = (
+                raw_reasoning_content
+                if isinstance(raw_reasoning_content, str)
+                else None
+            )
             if settings.verbose_logging:
                 tool_names = [tc.get("function", {}).get("name", "") for tc in tool_calls or []]
                 logger.info(
@@ -150,7 +156,12 @@ async def run_chat_loop(
             if not tool_calls:
                 return content, records
             tool_call_count += 1
-            asst_msg_obj = Message(role=Role.ASSISTANT, content=content, tool_calls=tool_calls)
+            asst_msg_obj = Message(
+                role=Role.ASSISTANT,
+                content=content,
+                tool_calls=tool_calls,
+                reasoning_content=reasoning_content,
+            )
             asst_msg = asst_msg_obj.to_dict()
             messages.append(asst_msg_obj)
             tool_results: list[dict[str, object]] = []
@@ -162,7 +173,13 @@ async def run_chat_loop(
                 tool_msg = tool_msg_obj.to_dict()
                 messages.append(tool_msg_obj)
                 tool_results.append(tool_msg)
-            records.append(ToolCallRecord(asst_msg, tool_results))
+            records.append(
+                ToolCallRecord(
+                    asst_msg,
+                    tool_results,
+                    reasoning_content=reasoning_content,
+                )
+            )
             continue
 
         # ── Record call in turn_stats ──────────────────────────────
@@ -198,7 +215,12 @@ async def run_chat_loop(
             )
 
         # Assistant tool-call message
-        asst_msg_obj = Message(role=Role.ASSISTANT, content=result.content, tool_calls=result.tool_calls)
+        asst_msg_obj = Message(
+            role=Role.ASSISTANT,
+            content=result.content,
+            tool_calls=result.tool_calls,
+            reasoning_content=result.reasoning_content,
+        )
         asst_msg = asst_msg_obj.to_dict()
         messages.append(asst_msg_obj)
 
@@ -313,6 +335,11 @@ async def run_chat_loop_stream(
             return
 
         duration_ms = (time.monotonic() - t0) * 1000
+        reasoning_text = (
+            "".join(round_reasoning_parts)
+            if round_reasoning_parts
+            else None
+        )
 
         # ── Record LLM call in turn_stats ──────────────────────────
         if turn_stats is not None:
@@ -321,6 +348,7 @@ async def run_chat_loop_stream(
                 model=last_model or provider.get_default_model(),
                 usage=last_usage,
                 duration_ms=duration_ms,
+                reasoning_content=reasoning_text,
             ))
 
         round_text = "".join(round_content_parts)
@@ -368,7 +396,6 @@ async def run_chat_loop_stream(
 
         # ── No tool calls → final answer ───────────────────────────
         if not tool_calls:
-            reasoning_text = "".join(round_reasoning_parts) if round_reasoning_parts else None
             yield AgentStreamEvent(
                 kind=StreamEventKind.DONE,
                 content=round_text,
@@ -402,7 +429,12 @@ async def run_chat_loop_stream(
             )
 
         # ── Append assistant message ───────────────────────────────
-        asst_msg_obj = Message(role=Role.ASSISTANT, content=round_text, tool_calls=tool_calls)
+        asst_msg_obj = Message(
+            role=Role.ASSISTANT,
+            content=round_text,
+            tool_calls=tool_calls,
+            reasoning_content=reasoning_text,
+        )
         asst_msg = asst_msg_obj.to_dict()
         messages.append(asst_msg_obj)
 
@@ -438,6 +470,7 @@ async def run_chat_loop_stream(
             usage=last_usage,
             model=last_model,
             duration_ms=duration_ms,
+            reasoning_content=reasoning_text,
         ))
 
         # ── Loop back for next phase ───────────────────────────────

@@ -938,21 +938,45 @@ LLM provider 选择放在 `llm_service/llm.yaml`：
 
 ```yaml
 base:
+  providers:
+    deepseek_v4_flash:
+      provider: openai
+      openai:
+        model: deepseek-v4-flash
+        api_dialect: deepseek
+
   biz:
     agent.main:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: enabled
+      reasoning_effort: max
+    agent.status_sub_agent:
+      kind: chat
+      provider_key: deepseek_v4_flash
+      thinking_mode: enabled
+      reasoning_effort: high
     dream.shallow:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: enabled
+      reasoning_effort: max
     dream.deep:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: enabled
+      reasoning_effort: max
     memory.rerank:
       kind: rerank
       provider_key: memory_rerank
       rerank_model_type: qwen3_logit
 ```
+
+OpenAI-compatible Provider 通过 `api_dialect: openai | deepseek` 显式选择请求协议，
+不得根据模型名或 `base_url` 猜测。思考策略属于 biz：主 Agent 和 Dream 使用
+`max`，StatusSubAgent 与 Plot Scheduler 使用 `high`，其它 chat biz 显式关闭。
+DeepSeek 思考模式不接受有效的 `temperature` 配置；该限制由 DeepSeek dialect
+校验，不扩散成所有 OpenAI-compatible 模型的全局规则。
 
 `rerank_score_weight` 是排序业务参数，留在 `rpg_core/settings.yaml`；不要写入 `llm_service/llm.yaml` 的 provider 配置。
 

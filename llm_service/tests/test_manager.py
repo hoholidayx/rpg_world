@@ -3,6 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from llm_service.manager import LLMManager
+from llm_service.keys import (
+    OPENAI_API_DIALECT_DEEPSEEK,
+    REASONING_EFFORT_MAX,
+    THINKING_MODE_ENABLED,
+)
 from llm_service.openai_provider import OpenAIProvider
 
 
@@ -23,7 +28,10 @@ def _openai_cfg(provider_key: str, *, max_tokens: int | None = None):
         openai_api_key="test-key",
         openai_base_url="https://llm.example",
         openai_max_tokens=max_tokens,
-        openai_temperature=0.2,
+        openai_temperature=None,
+        openai_api_dialect=OPENAI_API_DIALECT_DEEPSEEK,
+        thinking_mode=THINKING_MODE_ENABLED,
+        reasoning_effort=REASONING_EFFORT_MAX,
     )
 
 
@@ -46,6 +54,7 @@ def test_shared_provider_key_reuses_raw_client_but_not_biz_provider(monkeypatch)
     assert main._client is status._client
     assert main._max_tokens == 512
     assert status._max_tokens == 128
+    assert main._dialect.reasoning_effort == REASONING_EFFORT_MAX
     assert len(_DummyAsyncOpenAI.instances) == 1
     assert manager.get_provider("agent.main") is main
 

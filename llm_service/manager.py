@@ -24,11 +24,13 @@ from llm_service.keys import (
     LLM_KIND_EMBEDDING,
     LLM_KIND_RERANK,
     LLM_KIND_SPEECH,
+    OPENAI_API_DIALECT_OPENAI,
     PROVIDER_LLAMA,
     PROVIDER_OPENAI,
     PROVIDER_KINDS,
     RERANK_MODEL_TYPE_CHAT_POINTWISE,
     RERANK_MODEL_TYPE_QWEN3_LOGIT,
+    THINKING_MODE_DISABLED,
 )
 from llm_service.llama_provider import (
     LlamaCompletionProvider,
@@ -274,6 +276,9 @@ class LLMManager:
         base_url: str | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        api_dialect: str = OPENAI_API_DIALECT_OPENAI,
+        thinking_mode: str = THINKING_MODE_DISABLED,
+        reasoning_effort: str | None = None,
     ) -> OpenAIProvider:
         client = self._build_openai_client(scope=scope, api_key=api_key, base_url=base_url)
         return OpenAIProvider(
@@ -282,6 +287,9 @@ class LLMManager:
             base_url=base_url,
             max_tokens=max_tokens,
             temperature=temperature,
+            api_dialect=api_dialect,
+            thinking_mode=thinking_mode,
+            reasoning_effort=reasoning_effort,
             client=client,
         )
 
@@ -481,6 +489,9 @@ class LLMManager:
                 base_url=cfg.openai_base_url,
                 max_tokens=cfg.openai_max_tokens,
                 temperature=cfg.openai_temperature,
+                api_dialect=cfg.openai_api_dialect,
+                thinking_mode=cfg.thinking_mode,
+                reasoning_effort=cfg.reasoning_effort,
             )
         if backend == PROVIDER_LLAMA:
             return self._build_llama_provider(

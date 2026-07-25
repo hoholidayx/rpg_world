@@ -277,7 +277,7 @@ Media Job 默认由单 worker 消费，无自动重试；服务启动时扫描 `
 
 ### 配置（`settings.yaml` / `llm.yaml` / WebUI config）
 
-配置已拆分到各进程/模块目录：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听、Agent/LLM 客户端和 Derivation 终态 publisher，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听、事件 Hub 与日志，`dream_service/settings.yaml` 管 Dream 监听、客户端、Map/Reduce 参数和终态 publisher，`rpg_media/settings.yaml` 管简报与图片 Provider，`media_service/settings.yaml` 管 Media 监听、客户端与 worker，`rpg_tts/settings.yaml` 管正文清洗与分段，`tts_service/settings.yaml` 管 TTS 监听、客户端与 worker，`llm_service/settings.yaml` 管 LLM 服务监听/鉴权/runtime，`llm_service/llm.yaml` 仅供 LLM Service 解析 provider、模型、上下文窗口、speech 音色、温度、超时和密钥，`play_webui/play_webui.config.json` 管 Play WebUI 通用前端配置。YAML 配置采用 `base + profiles`，通过 `RPG_WORLD_PROFILE` 选择 profile，默认 `local`；同级 `settings.local.yaml` / `llm.local.yaml` 等 profile 覆盖文件会自动加载。
+配置已拆分到各进程/模块目录：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听、Agent/LLM 客户端和 Derivation 终态 publisher，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听、事件 Hub 与日志，`dream_service/settings.yaml` 管 Dream 监听、客户端、Map/Reduce 参数和终态 publisher，`rpg_media/settings.yaml` 管简报与图片 Provider，`media_service/settings.yaml` 管 Media 监听、客户端与 worker，`rpg_tts/settings.yaml` 管正文清洗与分段，`tts_service/settings.yaml` 管 TTS 监听、客户端与 worker，`llm_service/settings.yaml` 管 LLM 服务监听/鉴权/runtime，`llm_service/llm.yaml` 仅供 LLM Service 解析 provider、模型、OpenAI-compatible dialect、biz 级思考策略、上下文窗口、speech 音色、温度、超时和密钥，`play_webui/play_webui.config.json` 管 Play WebUI 通用前端配置。YAML 配置采用 `base + profiles`，通过 `RPG_WORLD_PROFILE` 选择 profile，默认 `local`；同级 `settings.local.yaml` / `llm.local.yaml` 等 profile 覆盖文件会自动加载。
 进程启停不由配置控制。监听和客户端配置通过 `ChannelsSettings` 的类型化属性访问（`channels/config.py`），外部调用不做字符串拼接：
 
 ```python
@@ -294,6 +294,8 @@ channels_settings.cli_session_id
 - Dream Map/Reduce 分别只使用 `dream.shallow` / `dream.deep` biz key；test profile 可将二者显式覆盖到 `deepseek_v4_flash`，不得在 Dream 代码或文档复制 API key。
 - TTS 通过 loop-owned `llm_client` 的 `get_speech_profile()` / `speech()` 使用 Speech 能力，不直接创建 OpenAI client，也不读取 Provider 密钥。
 - `LLMManager` 与 `llm_service.config.resolve_biz_config()` 只允许在 LLM Service 实现内部使用。
+- OpenAI-compatible Provider 必须以 `api_dialect: openai | deepseek` 显式声明协议；`thinking_mode` 与 `reasoning_effort: high | max` 按 biz 解析。同一 provider 可被不同 biz 以不同思考等级复用，DeepSeek 思考与 temperature 的互斥只在其 dialect 内校验。
+- DeepSeek 工具调用链必须在同一玩家 turn 的后续模型请求中回传临时 assistant `reasoning_content`。该字段可进入 thinking SSE 与 telemetry，但不得进入持久消息、Story Memory、状态表或 message metadata；跨玩家 turn 不保留中间工具推理轨迹。
 - memory 检索、融合、chunk 和 rerank pool 参数都属于 `settings.yaml`，包括 `keyword_tokenizer`、`keyword_k`、`raw_md_mode`、`raw_md_min_results`、`hybrid_*_weight`、`rerank_candidate_k`、`rerank_score_weight`。
 - `keyword_k` / `hybrid_keyword_weight` 是当前 keyword 架构配置；不要恢复旧 `bigram_k` / `hybrid_bigram_weight`。
 - `llm.yaml` 的 `memory.rerank` 只放 provider/model/model_path/n_ctx/temperature/request_timeout_ms 等 LLM 参数，并且 `kind: rerank` 必须显式声明 `rerank_model_type`。

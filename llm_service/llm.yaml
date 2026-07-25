@@ -19,6 +19,8 @@ base:
       openai:
         # OpenAI-compatible 模型名。
         model: deepseek-v4-flash
+        # 显式选择 DeepSeek Chat Completions 扩展，不按 URL 或模型名猜测协议。
+        api_dialect: deepseek
         # 明文 API Key；不推荐提交真实值。
         api_key: null
         # 从环境变量读取 API Key。
@@ -106,6 +108,8 @@ base:
     agent.main:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: enabled
+      reasoning_effort: max
       # Web/API 可为主 Agent 选择的 provider 白名单，顺序即展示顺序。
       provider_option_keys:
         - deepseek_v4_flash
@@ -114,41 +118,53 @@ base:
     agent.status_sub_agent:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: enabled
+      reasoning_effort: high
 
     # 记忆子 Agent 独立绑定；当前引用同一池项，但不跟随主 Agent 动态切换。
     agent.memory_sub_agent:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: disabled
 
     # 软约束剧情事件的适宜性判断；不跟随主 Agent 的 Session 模型覆盖。
     agent.plot_scheduler:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: enabled
+      reasoning_effort: high
 
     # Dream 记忆服务的浅层派生源归纳与深层主历史校准。
     dream.shallow:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: enabled
+      reasoning_effort: max
 
     dream.deep:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: enabled
+      reasoning_effort: max
 
     # Media 服务的离线场景背景匹配 Agent；不跟随主 Agent 的动态选择。
     media.scene_background_match:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: disabled
 
     # 单张图片语义识别。默认纯文本 Provider 会返回能力不支持，便于 WebUI 手工降级；
     # 后续只需把该 biz 切到声明 [text, image] 的 OpenAI-compatible Provider。
     media.image_metadata:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: disabled
 
     # 手动生图前的可编辑视觉简报，复用现有文本模型。
     media.visual_brief:
       kind: chat
       provider_key: deepseek_v4_flash
+      thinking_mode: disabled
       temperature: 0.2
 
     # 记忆向量嵌入模型。

@@ -16,7 +16,11 @@ from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
     LLMConfigKey,
     MEMORY_RERANK_BIZ_KEY,
+    OPENAI_API_DIALECT_DEEPSEEK,
+    REASONING_EFFORT_HIGH,
+    REASONING_EFFORT_MAX,
     RERANK_MODEL_TYPE_QWEN3_LOGIT,
+    THINKING_MODE_ENABLED,
 )
 
 
@@ -111,6 +115,180 @@ def test_biz_overrides_openai_effective_parameters(tmp_path: Path, monkeypatch) 
     assert cfg.openai_max_tokens == 1024
     assert cfg.openai_temperature == 0.7
     assert cfg.openai_cfg[LLMConfigKey.CONTEXT_WINDOW] == 128000
+
+
+def test_biz_resolves_deepseek_thinking_policy(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    deepseek:
+      provider: openai
+      openai:
+        model: deepseek-model
+        api_dialect: deepseek
+""",
+        biz="""
+    agent.main:
+      kind: chat
+      provider_key: deepseek
+      thinking_mode: enabled
+      reasoning_effort: max
+    agent.status_sub_agent:
+      kind: chat
+      provider_key: deepseek
+      thinking_mode: enabled
+      reasoning_effort: high
+""",
+    )
+    _use_llm(path, monkeypatch)
+
+    main = resolve_biz_config(AGENT_MAIN_BIZ_KEY)
+    status = resolve_biz_config("agent.status_sub_agent")
+
+    assert main.openai_api_dialect == OPENAI_API_DIALECT_DEEPSEEK
+    assert main.thinking_mode == THINKING_MODE_ENABLED
+    assert main.reasoning_effort == REASONING_EFFORT_MAX
+    assert status.reasoning_effort == REASONING_EFFORT_HIGH
+
+
+@pytest.mark.parametrize(
+    ("thinking_yaml", "message"),
+    [
+        (
+            "      thinking_mode: enabled\n",
+            "reasoning_effort is required",
+        ),
+        (
+            "      thinking_mode: disabled\n"
+            "      reasoning_effort: high\n",
+            "reasoning_effort must be omitted",
+        ),
+        (
+            "      thinking_mode: enabled\n"
+            "      reasoning_effort: medium\n",
+            "reasoning_effort must be one of",
+        ),
+    ],
+)
+def test_biz_rejects_invalid_thinking_policy(
+    tmp_path: Path,
+    monkeypatch,
+    thinking_yaml: str,
+    message: str,
+) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    chat:
+      provider: openai
+      openai:
+        model: test-model
+        api_dialect: deepseek
+""",
+        biz=(
+            "\n    agent.main:\n"
+            "      kind: chat\n"
+            "      provider_key: chat\n"
+            f"{thinking_yaml}"
+        ),
+    )
+    _use_llm(path, monkeypatch)
+
+    with pytest.raises(ValueError, match=message):
+        resolve_biz_config(AGENT_MAIN_BIZ_KEY)
+
+
+def test_deepseek_thinking_rejects_temperature_but_openai_dialect_allows_it(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    deepseek:
+      provider: openai
+      openai:
+        model: deepseek-model
+        api_dialect: deepseek
+    openai:
+      provider: openai
+      openai:
+        model: openai-model
+        api_dialect: openai
+""",
+        biz="""
+    agent.main:
+      kind: chat
+      provider_key: deepseek
+      thinking_mode: enabled
+      reasoning_effort: max
+      temperature: 0.8
+    agent.status_sub_agent:
+      kind: chat
+      provider_key: openai
+      thinking_mode: enabled
+      reasoning_effort: high
+      temperature: 0.2
+""",
+    )
+    _use_llm(path, monkeypatch)
+
+    with pytest.raises(ValueError, match="temperature must be omitted"):
+        resolve_biz_config(AGENT_MAIN_BIZ_KEY)
+
+    openai_cfg = resolve_biz_config("agent.status_sub_agent")
+    assert openai_cfg.openai_temperature == 0.2
+    assert openai_cfg.reasoning_effort == REASONING_EFFORT_HIGH
+
+
+def test_biz_rejects_unknown_api_dialect(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    chat:
+      provider: openai
+      openai:
+        model: test-model
+        api_dialect: compatible-ish
+""",
+        biz="""
+    agent.main:
+      kind: chat
+      provider_key: chat
+""",
+    )
+    _use_llm(path, monkeypatch)
+
+    with pytest.raises(ValueError, match="api_dialect must be one of"):
+        resolve_biz_config(AGENT_MAIN_BIZ_KEY)
+
+
+def test_llama_biz_rejects_thinking_policy(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    local:
+      provider: llama
+      llama:
+        model_path: data/models/chat.gguf
+""",
+        biz="""
+    agent.main:
+      kind: chat
+      provider_key: local
+      thinking_mode: enabled
+      reasoning_effort: high
+""",
+    )
+    _use_llm(path, monkeypatch)
+
+    with pytest.raises(ValueError, match="requires provider='openai'"):
+        resolve_biz_config(AGENT_MAIN_BIZ_KEY)
 
 
 def test_biz_context_window_maps_to_llama_n_ctx(tmp_path: Path, monkeypatch) -> None:

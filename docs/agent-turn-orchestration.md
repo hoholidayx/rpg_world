@@ -317,6 +317,19 @@ DeepSeek 的 context cache 由服务端自动、best-effort 管理。以 `A` 为
 
 这些诊断只进入日志，不新增 API、持久化字段或 WebUI 状态。
 
+### 思考模式与工具链状态
+
+LLM Service 按 Provider 的显式 `api_dialect` 编码思考请求，业务层只选择 biz。
+DeepSeek dialect 使用 `thinking.type` 与 `reasoning_effort`；OpenAI dialect 不发送
+DeepSeek 专用字段。DeepSeek 思考模式与 temperature 的互斥是 Provider 协议限制，
+不是所有推理模型的通用业务规则。
+
+主 Agent 在一个玩家 turn 内发生工具调用时，同步和流式 runner 都把该轮临时
+assistant 的 `content + reasoning_content + tool_calls` 与工具结果一起交给下一次
+Provider 请求，使模型延续当前工具链推理。最终正文完成后不把 reasoning 或中间
+工具 transcript 写入主历史；它们只进入现有 SSE/telemetry/tool record。下一玩家
+turn 仍由正式剧情历史重建 Context，并开始新的 Provider 推理链。
+
 ### 主 Agent 的补判与状态修正
 
 Status preflight 的结果决定主 Agent 能看到什么：

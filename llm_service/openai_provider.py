@@ -9,6 +9,11 @@ from loguru import logger
 from openai import AsyncOpenAI
 
 from llm_client.types import LLMProvider, LLMResponse, LLMUsage, ProviderChunk
+from llm_service.chat_dialect import build_chat_completion_dialect
+from llm_service.keys import (
+    OPENAI_API_DIALECT_OPENAI,
+    THINKING_MODE_DISABLED,
+)
 
 
 def _build_usage(raw, raw_dict: dict[str, object] | None) -> LLMUsage | None:
@@ -53,6 +58,9 @@ class OpenAIProvider(LLMProvider):
         base_url: str | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        api_dialect: str = OPENAI_API_DIALECT_OPENAI,
+        thinking_mode: str = THINKING_MODE_DISABLED,
+        reasoning_effort: str | None = None,
         http_client: httpx.AsyncClient | None = None,
         client: AsyncOpenAI | None = None,
     ) -> None:
@@ -63,6 +71,11 @@ class OpenAIProvider(LLMProvider):
         self._api_key = api_key
         self._base_url = base_url
         self._http_client = http_client
+        self._dialect = build_chat_completion_dialect(
+            api_dialect,
+            thinking_mode=thinking_mode,
+            reasoning_effort=reasoning_effort,
+        )
 
         if client is not None:
             self._client = client
@@ -84,7 +97,8 @@ class OpenAIProvider(LLMProvider):
         messages: list[dict],
         tools: list[dict] | None = None,
     ) -> LLMResponse:
-        kwargs: dict = {"model": self._model, "messages": messages}
+        kwargs: dict[str, object] = {"model": self._model}
+        self._dialect.apply_request(kwargs, messages)
         if self._max_tokens is not None:
             kwargs["max_tokens"] = self._max_tokens
         if self._temperature is not None:
@@ -105,11 +119,7 @@ class OpenAIProvider(LLMProvider):
                 raw_dict = None
         usage = _build_usage(response.usage, raw_dict)
 
-        reasoning_content: str | None = None
-        if hasattr(msg, "reasoning_content"):
-            reasoning_content = msg.reasoning_content
-        if not reasoning_content and hasattr(msg, "reasoning"):
-            reasoning_content = msg.reasoning
+        reasoning_content = self._dialect.response_reasoning_content(msg)
 
         tool_calls: list[dict[str, object]] | None = None
         if getattr(msg, "tool_calls", None):
@@ -151,12 +161,12 @@ class OpenAIProvider(LLMProvider):
         messages: list[dict],
         tools: list[dict] | None = None,
     ) -> AsyncIterator[ProviderChunk]:
-        kwargs: dict = {
+        kwargs: dict[str, object] = {
             "model": self._model,
-            "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        self._dialect.apply_request(kwargs, messages)
         if self._max_tokens is not None:
             kwargs["max_tokens"] = self._max_tokens
         if self._temperature is not None:
@@ -186,8 +196,7 @@ class OpenAIProvider(LLMProvider):
                 delta = choice.delta
                 if delta.content:
                     content_delta = delta.content
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    reasoning_delta = delta.reasoning_content
+                reasoning_delta = self._dialect.response_reasoning_content(delta)
                 if delta.tool_calls:
                     for tc_delta in delta.tool_calls:
                         idx = tc_delta.index

@@ -26,13 +26,21 @@ from commons.settings import (
 from llm_service.keys import (
     LLMConfigKey,
     LLM_KIND_CHAT,
+    LLM_KIND_PLANNER,
     LLM_KIND_RERANK,
     LLM_KIND_SPEECH,
     LLM_KINDS,
+    OPENAI_API_DIALECT_DEEPSEEK,
+    OPENAI_API_DIALECTS,
+    OPENAI_API_DIALECT_OPENAI,
     PROVIDER_KINDS,
     PROVIDER_LLAMA,
     PROVIDER_OPENAI,
+    REASONING_EFFORTS,
     RERANK_MODEL_TYPES,
+    THINKING_MODE_DISABLED,
+    THINKING_MODE_ENABLED,
+    THINKING_MODES,
     LLM_INPUT_MODALITIES,
     LLM_INPUT_MODALITY_TEXT,
 )
@@ -63,6 +71,9 @@ class ResolvedLLMConfig:
     openai: ConfigDict
     llama: ConfigDict
     input_modalities: tuple[str, ...]
+    api_dialect: str | None
+    thinking_mode: str
+    reasoning_effort: str | None
 
 
 @dataclass(frozen=True)
@@ -76,6 +87,9 @@ class AgentLLMDefaults:
     max_tokens: int | None = None
     context_window: int | None = None
     temperature: float | None = None
+    api_dialect: str | None = None
+    thinking_mode: str = THINKING_MODE_DISABLED
+    reasoning_effort: str | None = None
 
 
 def _resolve_profile_name() -> str:
@@ -141,6 +155,13 @@ def resolve_llm_config(
         openai=dict(cfg.openai_cfg),
         llama=dict(cfg.llama_cfg),
         input_modalities=cfg.input_modalities,
+        api_dialect=(
+            cfg.openai_api_dialect
+            if cfg.provider == PROVIDER_OPENAI
+            else None
+        ),
+        thinking_mode=cfg.thinking_mode,
+        reasoning_effort=cfg.reasoning_effort,
     )
 
 
@@ -163,6 +184,9 @@ def resolve_agent_defaults(
             max_tokens=cfg.openai_max_tokens,
             context_window=cfg.openai_context_window,
             temperature=cfg.openai_temperature,
+            api_dialect=cfg.openai_api_dialect,
+            thinking_mode=cfg.thinking_mode,
+            reasoning_effort=cfg.reasoning_effort,
         )
     return AgentLLMDefaults(
         provider_key=cfg.provider_key,
@@ -171,6 +195,8 @@ def resolve_agent_defaults(
         openai=dict(cfg.openai_cfg),
         llama=dict(cfg.llama_cfg),
         context_window=cfg.llama_n_ctx,
+        thinking_mode=cfg.thinking_mode,
+        reasoning_effort=cfg.reasoning_effort,
     )
 
 
@@ -301,6 +327,20 @@ class BizConfig:
         return self._optional_str(self._openai_sub.get(LLMConfigKey.BASE_URL))
 
     @property
+    def openai_api_dialect(self) -> str:
+        label = f"{self._key}.{PROVIDER_OPENAI}.{LLMConfigKey.API_DIALECT}"
+        value = (
+            self._optional_str(self._openai_sub.get(LLMConfigKey.API_DIALECT)).lower()
+            or OPENAI_API_DIALECT_OPENAI
+        )
+        if value not in OPENAI_API_DIALECTS:
+            raise ValueError(
+                f"{label} must be one of {', '.join(sorted(OPENAI_API_DIALECTS))}; "
+                f"got {value!r}"
+            )
+        return value
+
+    @property
     def openai_max_tokens(self) -> int | None:
         return optional_int(self._openai_sub.get(LLMConfigKey.MAX_TOKENS), None)
 
@@ -314,6 +354,35 @@ class BizConfig:
             self._openai_sub.get(LLMConfigKey.TEMPERATURE),
             f"{self._key}.{PROVIDER_OPENAI}.{LLMConfigKey.TEMPERATURE}",
         )
+
+    @property
+    def thinking_mode(self) -> str:
+        label = f"{self._key}.{LLMConfigKey.THINKING_MODE}"
+        value = (
+            self._optional_str(self._raw.get(LLMConfigKey.THINKING_MODE)).lower()
+            or THINKING_MODE_DISABLED
+        )
+        if value not in THINKING_MODES:
+            raise ValueError(
+                f"{label} must be one of {', '.join(sorted(THINKING_MODES))}; "
+                f"got {value!r}"
+            )
+        return value
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        label = f"{self._key}.{LLMConfigKey.REASONING_EFFORT}"
+        value = self._optional_str(
+            self._raw.get(LLMConfigKey.REASONING_EFFORT)
+        ).lower()
+        if not value:
+            return None
+        if value not in REASONING_EFFORTS:
+            raise ValueError(
+                f"{label} must be one of {', '.join(sorted(REASONING_EFFORTS))}; "
+                f"got {value!r}"
+            )
+        return value
 
     @property
     def speech_voice(self) -> str:
@@ -469,6 +538,8 @@ _BIZ_FIELDS = frozenset(
         LLMConfigKey.CONTEXT_WINDOW,
         LLMConfigKey.MAX_TOKENS,
         LLMConfigKey.TEMPERATURE,
+        LLMConfigKey.THINKING_MODE,
+        LLMConfigKey.REASONING_EFFORT,
         LLMConfigKey.RERANK_MODEL_TYPE,
     }
 )
@@ -566,6 +637,14 @@ def _resolve_biz_entry(
     effective = dict(provider_cfg)
     effective[LLMConfigKey.PROVIDER_KEY] = provider_key
     effective[LLMConfigKey.KIND] = biz_cfg.get(LLMConfigKey.KIND)
+    effective[LLMConfigKey.THINKING_MODE] = biz_cfg.get(
+        LLMConfigKey.THINKING_MODE,
+        THINKING_MODE_DISABLED,
+    )
+    if LLMConfigKey.REASONING_EFFORT in biz_cfg:
+        effective[LLMConfigKey.REASONING_EFFORT] = biz_cfg[
+            LLMConfigKey.REASONING_EFFORT
+        ]
     cfg = BizConfig(biz_key, provider_key, provider_option_keys, effective)
     backend = cfg.provider
     kind = cfg.kind
@@ -592,6 +671,41 @@ def _resolve_biz_entry(
 
     resolved = BizConfig(biz_key, provider_key, provider_option_keys, effective)
     resolved.input_modalities
+    thinking_mode = resolved.thinking_mode
+    reasoning_effort = resolved.reasoning_effort
+    if kind not in {LLM_KIND_CHAT, LLM_KIND_PLANNER} and (
+        LLMConfigKey.THINKING_MODE in biz_cfg
+        or LLMConfigKey.REASONING_EFFORT in biz_cfg
+    ):
+        raise ValueError(
+            f"{biz_key} thinking configuration is only supported for chat or planner"
+        )
+    if thinking_mode == THINKING_MODE_ENABLED:
+        if reasoning_effort is None:
+            raise ValueError(
+                f"{biz_key}.{LLMConfigKey.REASONING_EFFORT} is required when "
+                f"{LLMConfigKey.THINKING_MODE} is enabled"
+            )
+        if resolved.provider != PROVIDER_OPENAI:
+            raise ValueError(
+                f"{biz_key} thinking configuration requires provider={PROVIDER_OPENAI!r}"
+            )
+    elif reasoning_effort is not None:
+        raise ValueError(
+            f"{biz_key}.{LLMConfigKey.REASONING_EFFORT} must be omitted when "
+            f"{LLMConfigKey.THINKING_MODE} is disabled"
+        )
+    if resolved.provider == PROVIDER_OPENAI:
+        dialect = resolved.openai_api_dialect
+        if (
+            dialect == OPENAI_API_DIALECT_DEEPSEEK
+            and thinking_mode == THINKING_MODE_ENABLED
+            and resolved.openai_temperature is not None
+        ):
+            raise ValueError(
+                f"{biz_key}.{LLMConfigKey.TEMPERATURE} must be omitted when "
+                "DeepSeek thinking mode is enabled"
+            )
     if kind == LLM_KIND_RERANK:
         resolved.rerank_model_type
     if kind == LLM_KIND_SPEECH:

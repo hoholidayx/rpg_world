@@ -73,6 +73,99 @@ class _DiceThenNarrateStreamProvider:
         yield ProviderChunk(finish_reason="stop", model=self.get_default_model())
 
 
+class _ReasoningDiceThenNarrateProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_default_model(self) -> str:
+        return "reasoning-dice"
+
+    async def chat(self, messages, tools=None):  # noqa: ANN001
+        del tools
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResponse(
+                content="",
+                reasoning_content="先进行检定。",
+                tool_calls=[{
+                    "id": "call_reasoning_dice",
+                    "function": {
+                        "name": "rp_dice_check_dc",
+                        "arguments": '{"reason":"搜索线索"}',
+                    },
+                }],
+                finish_reason="tool_calls",
+                model=self.get_default_model(),
+            )
+        assert any(
+            message.get("role") == "assistant"
+            and message.get("reasoning_content") == "先进行检定。"
+            and message.get("tool_calls")
+            for message in messages
+        )
+        assert any(message.get("role") == "tool" for message in messages)
+        return LLMResponse(
+            content="你找到了线索。",
+            tool_calls=None,
+            finish_reason="stop",
+            model=self.get_default_model(),
+        )
+
+    async def chat_stream(self, messages, tools=None):  # noqa: ANN001
+        del messages, tools
+        raise AssertionError("non-stream test must not call chat_stream")
+
+
+class _ReasoningDiceThenNarrateStreamProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_default_model(self) -> str:
+        return "reasoning-dice-stream"
+
+    async def chat(self, messages, tools=None):  # noqa: ANN001
+        del messages, tools
+        raise AssertionError("stream test must not call chat")
+
+    async def chat_stream(self, messages, tools=None):  # noqa: ANN001
+        del tools
+        self.calls += 1
+        if self.calls == 1:
+            yield ProviderChunk(reasoning_content="先进行检定。")
+            yield ProviderChunk(
+                tool_calls=[{
+                    "id": "call_reasoning_dice_stream",
+                    "function": {
+                        "name": "rp_dice_check_dc",
+                        "arguments": '{"reason":"搜索线索"}',
+                    },
+                }],
+                finish_reason="tool_calls",
+                model=self.get_default_model(),
+            )
+            return
+        assert any(
+            message.get("role") == "assistant"
+            and message.get("reasoning_content") == "先进行检定。"
+            and message.get("tool_calls")
+            for message in messages
+        )
+        assert any(message.get("role") == "tool" for message in messages)
+        yield ProviderChunk(content="你找到了线索。")
+        yield ProviderChunk(finish_reason="stop", model=self.get_default_model())
+
+
+def _reasoning_dice_registry() -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register(
+        DiceCheckDCTool(
+            DiceRoller(DiceModuleSettings(), rng=random.Random(4)),
+            default_dc=13,
+        )
+    )
+    return registry
+
+
 @pytest.mark.asyncio
 async def test_non_stream_loop_rejects_missing_tool_payload():
     with pytest.raises(RuntimeError, match="finish_reason=tool_calls"):
@@ -139,3 +232,55 @@ async def test_stream_loop_executes_defaulted_dice_check_and_feeds_result_back()
     assert "expression=1d20" in (events[3].tool_result or "")
     assert "dc=13" in (events[3].tool_result or "")
     assert events[-1].content == "你在祭坛附近发现了一道新划痕。"
+
+
+@pytest.mark.asyncio
+async def test_non_stream_loop_returns_reasoning_within_tool_chain_only():
+    provider = _ReasoningDiceThenNarrateProvider()
+    messages = [Message(Role.USER, "碰碰运气找线索")]
+
+    reply, records = await run_chat_loop(
+        provider=provider,
+        tool_registry=_reasoning_dice_registry(),
+        messages=messages,
+        schemas=[],
+    )
+
+    assert provider.calls == 2
+    assert reply == "你找到了线索。"
+    assert records[0].reasoning_content == "先进行检定。"
+    assert messages[1].reasoning_content == "先进行检定。"
+    assert "reasoning_content" in messages[1].to_provider_dict()
+    assert "reasoning_content" not in messages[1].to_persistence_dict()
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_returns_reasoning_within_tool_chain_only():
+    provider = _ReasoningDiceThenNarrateStreamProvider()
+    messages = [Message(Role.USER, "碰碰运气找线索")]
+
+    events = [
+        event
+        async for event in run_chat_loop_stream(
+            provider=provider,
+            tool_registry=_reasoning_dice_registry(),
+            messages=messages,
+            schemas=[],
+        )
+    ]
+
+    assert provider.calls == 2
+    assert [event.kind for event in events] == [
+        StreamEventKind.ROUND_START,
+        StreamEventKind.THINKING,
+        StreamEventKind.ROUND_END,
+        StreamEventKind.TOOL_CALL,
+        StreamEventKind.TOOL_RESULT,
+        StreamEventKind.ROUND_START,
+        StreamEventKind.TEXT,
+        StreamEventKind.ROUND_END,
+        StreamEventKind.DONE,
+    ]
+    assert messages[1].reasoning_content == "先进行检定。"
+    assert "reasoning_content" not in messages[1].to_persistence_dict()
+    assert events[-1].content == "你找到了线索。"
