@@ -12,6 +12,7 @@ export type VisualBrief = {
   style: string
   negativeConstraints: string
   aspectRatio: MediaAspectRatio
+  userPrompt: string
 }
 
 export type MediaProvider = {
@@ -252,4 +253,8 @@ export type CreateMediaJobInput = {
   sourceFingerprint: string
   visualBrief: VisualBrief
   generationParams?: Record<string, unknown>
+}
+
+export type RetryMediaJobInput = {
+  visualBrief: VisualBrief
 }

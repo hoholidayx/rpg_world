@@ -27,6 +27,7 @@ class VisualBriefSchema(MediaSchema):
     style: str = ""
     negative_constraints: str = Field(default="", alias="negativeConstraints")
     aspect_ratio: str = Field(default="16:9", alias="aspectRatio")
+    user_prompt: str = Field(default="", alias="userPrompt")
 
     @field_validator("aspect_ratio")
     @classmethod
@@ -46,6 +47,7 @@ class VisualBriefSchema(MediaSchema):
             style=self.style,
             negative_constraints=self.negative_constraints,
             aspect_ratio=self.aspect_ratio,
+            user_prompt=self.user_prompt,
         )
 
     @classmethod
@@ -96,6 +98,10 @@ class MediaJobCreateRequest(MediaBriefRequest):
     source_fingerprint: str = Field(alias="sourceFingerprint", min_length=64, max_length=64)
     visual_brief: VisualBriefSchema = Field(alias="visualBrief")
     generation_params: dict[str, Any] = Field(default_factory=dict, alias="generationParams")
+
+
+class MediaJobRetryRequest(MediaSchema):
+    visual_brief: VisualBriefSchema = Field(alias="visualBrief")
 
 
 class MediaJobResponse(MediaSchema):

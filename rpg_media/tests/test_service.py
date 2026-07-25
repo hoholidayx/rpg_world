@@ -5,7 +5,11 @@ import pytest
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway
 from rpg_media.brief import DemoVisualBriefPlanner
-from rpg_media.errors import MediaAssetInUseDomainError, MediaSourceChangedError
+from rpg_media.errors import (
+    MediaAssetInUseDomainError,
+    MediaError,
+    MediaSourceChangedError,
+)
 from rpg_media.service import MediaApplicationService
 from rpg_media.providers.catalog import MediaProviderCatalog
 from rpg_media.providers.local_file import LocalFileProvider
@@ -131,6 +135,64 @@ async def test_job_creation_rejects_changed_source(tmp_path) -> None:
         )
 
     assert exc_info.value.code == "MEDIA_SOURCE_CHANGED"
+
+
+@pytest.mark.asyncio
+async def test_retry_can_preserve_or_replace_brief_without_changing_job_inputs(
+    tmp_path,
+) -> None:
+    gateway, session, message, service, _workspace_root = _service(tmp_path)
+    brief_result = await service.create_visual_brief(
+        session.id,
+        start_turn_id=1,
+        end_turn_id=1,
+    )
+    original_brief = VisualBrief(
+        **{
+            **brief_result.brief.__dict__,
+            "style": "original style",
+            "user_prompt": "保持银色长发",
+        }
+    )
+    original = service.create_job(
+        session.id,
+        provider_key="local_file",
+        start_turn_id=1,
+        end_turn_id=1,
+        source_fingerprint=brief_result.source.fingerprint,
+        visual_brief=original_brief,
+        generation_params={"seed": 17, "steps": 30},
+    )
+    assert gateway.media.claim_next_job() is not None
+    assert await service.execute_job(original.id) is not None
+
+    exact = service.retry_job(session.id, original.id)
+    edited_brief = VisualBrief(
+        **{
+            **original_brief.__dict__,
+            "style": "edited style",
+            "user_prompt": "优先表现雨中的对视",
+        }
+    )
+    edited = service.retry_job(
+        session.id,
+        original.id,
+        visual_brief=edited_brief,
+    )
+
+    assert exact.retry_of_job_id == original.id
+    assert exact.provider_key == edited.provider_key == original.provider_key
+    assert exact.source_fingerprint == edited.source_fingerprint == original.source_fingerprint
+    assert exact.generation_params_json == edited.generation_params_json == original.generation_params_json
+    assert VisualBrief.from_json(exact.visual_brief_json) == original_brief
+    assert VisualBrief.from_json(edited.visual_brief_json) == edited_brief
+
+    with pytest.raises(MediaError, match="cannot be retried"):
+        service.retry_job(session.id, exact.id)
+
+    gateway.messages.update(message.id, content="来源剧情已经变化")
+    with pytest.raises(MediaSourceChangedError):
+        service.retry_job(session.id, original.id, visual_brief=edited_brief)
 
 
 @pytest.mark.asyncio

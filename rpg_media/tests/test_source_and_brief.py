@@ -8,6 +8,7 @@ from rpg_media.brief import DemoVisualBriefPlanner
 from rpg_media.errors import MediaSourceRangeError
 from rpg_media.settings import DemoBriefSettings
 from rpg_media.source import build_source_snapshot, visible_excerpt
+from rpg_media.types import VisualBrief
 
 
 def test_source_fingerprint_tracks_persisted_message_changes(tmp_path) -> None:
@@ -77,6 +78,32 @@ def test_visible_excerpt_uses_first_middle_last_sixteen_characters() -> None:
     assert parts[0] == text[:16]
     assert parts[-1] == text[-16:]
     assert all(len(part) == 16 for part in parts)
+
+
+def test_visual_brief_user_prompt_round_trip_and_priority_rendering() -> None:
+    brief = VisualBrief(
+        scene_description="雨夜咖啡馆",
+        style="柔和动画风格",
+        aspect_ratio="16:9",
+        user_prompt="  必须保持角色金色眼睛。\n画面重点表现两人对视。  ",
+    )
+
+    restored = VisualBrief.from_json(brief.to_json())
+    prompt = restored.to_prompt()
+
+    assert restored.user_prompt == brief.user_prompt
+    assert prompt.endswith("必须保持角色金色眼睛。\n画面重点表现两人对视。")
+    assert prompt.index("Style: 柔和动画风格") < prompt.index(
+        "USER PRIORITY OVERRIDE"
+    )
+    assert "provider safety rules" in prompt
+    assert VisualBrief.from_json(
+        '{"sceneDescription":"旧简报","aspectRatio":"16:9"}'
+    ).user_prompt == ""
+    assert "USER PRIORITY OVERRIDE" not in VisualBrief(
+        scene_description="空用户要求",
+        user_prompt="  ",
+    ).to_prompt()
 
 
 @pytest.mark.asyncio

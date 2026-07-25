@@ -267,11 +267,11 @@ LLM Service
 
 ### RPG Media 与图片资产
 
-`rpg_media/` 是与 `rpg_core/` 同级的无框架高级能力模块。v1 的用户链路是：手动选择 1–20 个连续已提交 turn，生成可检查和编辑的九字段 `VisualBrief`，再提交数据库持久异步任务。当前 `DemoVisualBriefPlanner` 是配置驱动的确定性实现，不发起外部文本模型调用；`VisualBriefPlanner` 保留可替换契约。未来 LLM planner 应通过 `llm_client` 复用通用 chat biz 选择，不硬编码 OpenAI/llama 等 Provider 黑名单；Media service 不读取 LLM 配置或创建 Provider，本地 llama runtime 只能由 LLM Service 持有。
+`rpg_media/` 是与 `rpg_core/` 同级的无框架高级能力模块。用户链路是：手动选择 1–20 个连续已提交 turn，生成可检查和编辑的结构化 `VisualBrief`，再提交数据库持久异步任务。`userPrompt` 是只由用户填写的最高优先级画面要求，Planner 必须始终返回空值；非空内容裁剪首尾空白后作为最终 Provider prompt 的最后区块，可覆盖前述冲突的画面语义，但不能覆盖 Provider 安全规则或画幅、尺寸等硬生成参数。当前 `DemoVisualBriefPlanner` 是配置驱动的确定性实现，不发起外部文本模型调用；`VisualBriefPlanner` 保留可替换契约。未来 LLM planner 应通过 `llm_client` 复用通用 chat biz 选择，不硬编码 OpenAI/llama 等 Provider 黑名单；Media service 不读取 LLM 配置或创建 Provider，本地 llama runtime 只能由 LLM Service 持有。
 
 来源快照保存 message ID、version、role、content、turn/seq，并以 SHA-256 指纹检测提交或重试前的历史变化。工作区图片只接受经魔数识别的 PNG、JPEG、WebP，原始内容写到 `{workspace_root}/assets/images/{sha256}.<ext>`。Blob 在数据库中按 `(workspace_id, sha256)` 去重；hash 不是业务 Asset ID，每次成功生成仍建立独立 UUID Asset，以保留不同的 Provider、简报、参数和来源语义。
 
-Media Job 默认由单 worker 消费，无自动重试；服务启动时扫描 `queued`，创建/重试通过进程内事件即时唤醒，队列排空后阻塞等待而不轮询数据库。重启把遗留 `running/cancelling` 标成 `interrupted`，用户可显式重试。Session Gallery、背景引用与消息历史完全分离，不写入正文、message metadata、turn/SSE 或 localStorage。背景使用中的 Asset 禁止删除；最后一个 Asset 引用删除后才回收 Blob 行和文件。`/clear` 清除 Session Job/Gallery/背景但保留 Workspace Asset/Blob，Session 永久删除也依靠外键清理 Session 关联而保留 Workspace 资产。
+Media Job 默认由单 worker 消费，无自动重试；服务启动时扫描 `queued`，创建/重试通过进程内事件即时唤醒，队列排空后阻塞等待而不轮询数据库。重启把遗留 `running/cancelling` 标成 `interrupted`。终态 Job 支持原样直接重抽/重试，或载入完整 VisualBrief 编辑后重抽/重试；编辑入口不得再次调用 Planner，两种入口都固定继承直接来源 Job 的 Provider、turn 范围、来源指纹和 generation params，并在入队前重新校验来源。Session Gallery、背景引用与消息历史完全分离，VisualBrief 与 `userPrompt` 只随 Job/Asset 保存，不写入正文、message metadata、turn/SSE 或 localStorage。背景使用中的 Asset 禁止删除；最后一个 Asset 引用删除后才回收 Blob 行和文件。`/clear` 清除 Session Job/Gallery/背景但保留 Workspace Asset/Blob，Session 永久删除也依靠外键清理 Session 关联而保留 Workspace 资产。
 
 上述来源、图库、删除、背景状态机与 worker 恢复规则统一由 `MediaApplicationService` 决定；`media_service` worker 不直接操作数据层。`MediaDataService` 只负责 typed CRUD/read model、CAS claim、引用查询、条件状态更新及调用方准备的原子 completion。
 

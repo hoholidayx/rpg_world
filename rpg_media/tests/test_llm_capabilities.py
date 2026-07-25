@@ -98,13 +98,15 @@ async def test_llm_visual_brief_planner_uses_snapshot_and_rejects_invalid_output
         '{"sceneDescription":"覆雪石门被推开","subjects":["Alice"],'
         '"environment":"雪夜森林","action":"推开石门","composition":"广角",'
         '"moodLighting":"冷色月光","style":"电影概念艺术",'
-        '"negativeConstraints":"文字、水印","aspectRatio":"16:9"}'
+        '"negativeConstraints":"文字、水印","aspectRatio":"16:9",'
+        '"userPrompt":"模型不得填充的用户专属要求"}'
     )
 
     brief = await LLMVisualBriefPlanner(provider=provider).plan(source)  # type: ignore[arg-type]
 
     assert brief.scene_description == "覆雪石门被推开"
     assert brief.subjects == ("Alice",)
+    assert brief.user_prompt == ""
     assert provider.messages is not None
     assert provider.messages[1]["content"] == source.snapshot_json
 

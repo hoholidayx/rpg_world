@@ -19,6 +19,7 @@ import {
   setMediaBackground,
 } from '@/lib/api/media'
 import { sessionMediaConfig } from '@/lib/config/appConfig'
+import type { VisualBrief } from '@/types/media'
 
 const activeEvaluationStatuses = new Set(['queued', 'running'])
 
@@ -175,7 +176,22 @@ export function useSessionMedia({
     mutationFn: (jobId: string) => retryMediaJob(sessionId, jobId),
     onSuccess: () => {
       void refreshGallery()
-      showToast('已创建新的重试任务')
+      showToast('已创建新的直接重抽任务')
+    },
+    onError: (error) => {
+      showToast(`重抽失败：${error instanceof Error ? error.message : '未知错误'}`)
+    },
+  })
+  const editRetryJobMutation = useMutation({
+    mutationFn: (input: { jobId: string; visualBrief: VisualBrief }) => (
+      retryMediaJob(sessionId, input.jobId, { visualBrief: input.visualBrief })
+    ),
+    onSuccess: () => {
+      void refreshGallery()
+      showToast('已创建编辑后的重抽任务')
+    },
+    onError: (error) => {
+      showToast(`编辑重抽失败：${error instanceof Error ? error.message : '未知错误'}`)
     },
   })
   const setBackgroundMutation = useMutation({
@@ -213,6 +229,7 @@ export function useSessionMedia({
     createJobMutation,
     cancelJobMutation,
     retryJobMutation,
+    editRetryJobMutation,
     setBackgroundMutation,
     clearBackgroundMutation,
     deleteAssetMutation,

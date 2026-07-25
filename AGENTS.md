@@ -76,7 +76,7 @@
 
 ## Media、TTS 与后台事件
 
-- 生图保持“手动选择 1–20 个连续已提交 turn → 检查/编辑 `VisualBrief` → 异步提交”；来源快照/指纹在提交和重试前校验历史变化。图片、Gallery、背景引用不得写入消息正文、metadata、turn/SSE 或 localStorage。
+- 生图保持“手动选择 1–20 个连续已提交 turn → 检查/编辑 `VisualBrief` → 异步提交”；来源快照/指纹在提交和重试前校验历史变化。`userPrompt` 只由用户填写，Planner 必须留空；非空内容裁剪后固定作为最终 Provider prompt 的末尾最高语义优先级区块，只能覆盖冲突的画面语义，不得绕过 Provider 安全规则或画幅、尺寸等硬参数。终态 Job 支持原样直接重抽/重试和载入完整 Brief 编辑后重抽/重试；编辑入口不得重新调用 Planner，两者均继承直接来源 Job 的 Provider、turn 范围、来源指纹和 generation params。VisualBrief/userPrompt 只随 Job/Asset 保存；图片、Gallery、背景引用不得写入消息正文、metadata、turn/SSE 或 localStorage。
 - 图片二进制存入 `{workspace_root}/assets/images/{sha256}.<ext>`，只接受魔数确认的 PNG/JPEG/WebP；Blob 按 `(workspace_id, sha256)` 去重，但每次成功生成独立 UUID Asset。Media Job 使用持久单 worker 队列、无自动重试；重启保留 queued 并中断遗留 active job。正在作为背景的 Asset 不可删除，最后一个引用删除后才回收 Blob 与文件。
 - Media 来源范围、VisualBrief 来源确认、Library metadata、删除门禁、背景选择/评估和 worker 恢复策略归 `MediaApplicationService`；worker 只依赖该业务入口。`MediaDataService` 仅执行 typed CRUD/read model、CAS claim、引用查询、条件转换和调用方准备的原子 completion。
 - TTS 只按已提交 assistant `message_id` 派生，正文清洗、分段、指纹和 MP3 缓存归 `rpg_tts`；语音不得进入 Agent turn、正文 SSE、message metadata 或 localStorage，OpenAI Speech 仍通过 LLM Service。

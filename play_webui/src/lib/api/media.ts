@@ -17,6 +17,7 @@ import type {
   MediaLibraryReconcileResult,
   MediaProviderCatalog,
   MediaSourceTurns,
+  RetryMediaJobInput,
 } from '@/types/media'
 import { playApiFetch } from './client'
 import { createApiError, readApiError } from './errors'
@@ -64,9 +65,14 @@ export function cancelMediaJob(sessionId: string, jobId: string) {
   })
 }
 
-export function retryMediaJob(sessionId: string, jobId: string) {
+export function retryMediaJob(
+  sessionId: string,
+  jobId: string,
+  input?: RetryMediaJobInput,
+) {
   return playApiFetch<MediaJob>(`${mediaPath(sessionId)}/jobs/${encodeURIComponent(jobId)}/retry`, {
     method: 'POST',
+    body: input ? JSON.stringify(input) : undefined,
   })
 }
 

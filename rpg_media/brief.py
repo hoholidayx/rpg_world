@@ -35,7 +35,19 @@ class LLMVisualBriefPlanner:
                 ]
             )
             payload = parse_json_object(result.content, label="visual brief response")
-            return VisualBrief.from_mapping(payload)
+            planned = VisualBrief.from_mapping(payload)
+            return VisualBrief(
+                scene_description=planned.scene_description,
+                subjects=planned.subjects,
+                environment=planned.environment,
+                action=planned.action,
+                composition=planned.composition,
+                mood_lighting=planned.mood_lighting,
+                style=planned.style,
+                negative_constraints=planned.negative_constraints,
+                aspect_ratio=planned.aspect_ratio,
+                user_prompt="",
+            )
         except LLMServiceClientError as exc:
             raise MediaVisualBriefFailedError(str(exc)) from exc
         except (TypeError, ValueError) as exc:

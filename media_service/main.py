@@ -37,6 +37,7 @@ from media_service.schemas import (
     MediaLibraryResponse,
     MediaLibraryUpdateRequest,
     MediaJobCreateRequest,
+    MediaJobRetryRequest,
     MediaJobResponse,
     MediaProviderCatalogResponse,
     MediaProviderResponse,
@@ -534,10 +535,22 @@ async def cancel_job(session_id: str, job_id: str) -> MediaJobResponse:
     f"{_prefix()}/sessions/{{session_id}}/jobs/{{job_id}}/retry",
     response_model=MediaJobResponse,
 )
-async def retry_job(session_id: str, job_id: str) -> MediaJobResponse:
+async def retry_job(
+    session_id: str,
+    job_id: str,
+    body: MediaJobRetryRequest | None = None,
+) -> MediaJobResponse:
     runtime = get_runtime()
     try:
-        job = runtime.service.retry_job(session_id, job_id)
+        job = runtime.service.retry_job(
+            session_id,
+            job_id,
+            visual_brief=(
+                body.visual_brief.to_domain()
+                if body is not None
+                else None
+            ),
+        )
     except Exception as exc:
         raise _http_error(exc) from exc
     runtime.worker.wake()

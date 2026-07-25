@@ -114,7 +114,9 @@ def test_media_service_manual_generation_contract(tmp_path) -> None:
             )
             assert brief_response.status_code == 200
             brief_payload = brief_response.json()
+            assert brief_payload["brief"]["userPrompt"] == ""
             brief_payload["brief"]["style"] = "edited"
+            brief_payload["brief"]["userPrompt"] = "保持角色金色眼睛"
 
             created = client.post(
                 f"/media/v1/sessions/{session.id}/jobs",
@@ -148,6 +150,7 @@ def test_media_service_manual_generation_contract(tmp_path) -> None:
             assert retried.status_code == 200
             retry_payload = retried.json()
             assert retry_payload["retryOfJobId"] == job_id
+            assert retry_payload["visualBrief"]["userPrompt"] == "保持角色金色眼睛"
             retry_job_id = retry_payload["jobId"]
             for _ in range(100):
                 current = client.get(
@@ -160,15 +163,46 @@ def test_media_service_manual_generation_contract(tmp_path) -> None:
                 time.sleep(0.01)
             assert retry_payload["status"] == "succeeded"
 
+            edited_brief = dict(brief_payload["brief"])
+            edited_brief["style"] = "edited retry style"
+            edited_brief["userPrompt"] = "最高优先级：表现雨中对视"
+            edited_retry = client.post(
+                f"/media/v1/sessions/{session.id}/jobs/{job_id}/retry",
+                json={"visualBrief": edited_brief},
+            )
+            assert edited_retry.status_code == 200
+            edited_retry_payload = edited_retry.json()
+            assert edited_retry_payload["retryOfJobId"] == job_id
+            assert edited_retry_payload["providerKey"] == created.json()["providerKey"]
+            assert edited_retry_payload["generationParams"] == created.json()["generationParams"]
+            assert edited_retry_payload["visualBrief"]["style"] == "edited retry style"
+            assert edited_retry_payload["visualBrief"]["userPrompt"] == "最高优先级：表现雨中对视"
+            edited_retry_job_id = edited_retry_payload["jobId"]
+            for _ in range(100):
+                current = client.get(
+                    f"/media/v1/sessions/{session.id}/jobs/{edited_retry_job_id}"
+                )
+                assert current.status_code == 200
+                edited_retry_payload = current.json()
+                if edited_retry_payload["status"] not in {"queued", "running", "cancelling"}:
+                    break
+                time.sleep(0.01)
+            assert edited_retry_payload["status"] == "succeeded"
+
             gallery = client.get(
                 f"/media/v1/sessions/{session.id}/gallery"
             )
             assert gallery.status_code == 200
             gallery_payload = gallery.json()
             assert gallery_payload["activeJobs"] == []
-            assert len(gallery_payload["items"]) == 2
-            item = gallery_payload["items"][0]
-            assert item["visualBrief"]["style"] == "edited"
+            assert len(gallery_payload["items"]) == 3
+            item = next(
+                gallery_item
+                for gallery_item in gallery_payload["items"]
+                if gallery_item["jobId"] == edited_retry_job_id
+            )
+            assert item["visualBrief"]["style"] == "edited retry style"
+            assert item["visualBrief"]["userPrompt"] == "最高优先级：表现雨中对视"
             asset_id = item["assetId"]
 
             background = client.put(

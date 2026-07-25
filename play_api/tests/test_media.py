@@ -24,6 +24,7 @@ from media_service.schemas import (
     MediaLibraryItemResponse,
     MediaLibraryReconcileResponse,
     MediaLibraryResponse,
+    MediaJobRetryRequest,
     MediaJobResponse,
     MediaProviderCatalogResponse,
     MediaProviderResponse,
@@ -123,6 +124,9 @@ def _evaluation(status: str = "queued") -> MediaBackgroundEvaluationResponse:
 
 
 class _FakeMediaClient:
+    def __init__(self) -> None:
+        self.retry_requests: list[MediaJobRetryRequest | None] = []
+
     async def aclose(self) -> None:
         return None
 
@@ -230,7 +234,13 @@ class _FakeMediaClient:
     async def cancel_job(self, session_id: str, job_id: str) -> MediaJobResponse:
         return _job("cancelling")
 
-    async def retry_job(self, session_id: str, job_id: str) -> MediaJobResponse:
+    async def retry_job(
+        self,
+        session_id: str,
+        job_id: str,
+        body: MediaJobRetryRequest | None = None,
+    ) -> MediaJobResponse:
+        self.retry_requests.append(body)
         return _job("queued")
 
     async def get_gallery(self, session_id: str) -> MediaGalleryResponse:
@@ -299,7 +309,8 @@ def _prepare(tmp_path, monkeypatch, fake) -> None:  # noqa: ANN001
 
 
 def test_play_media_proxy_contract_and_content_stream(tmp_path, monkeypatch) -> None:
-    _prepare(tmp_path, monkeypatch, _FakeMediaClient())
+    fake = _FakeMediaClient()
+    _prepare(tmp_path, monkeypatch, fake)
     with TestClient(app) as client:
         providers = client.get(
             "/play-api/v1/sessions/s_forest001/media/providers"
@@ -313,6 +324,36 @@ def test_play_media_proxy_contract_and_content_stream(tmp_path, monkeypatch) -> 
         )
         assert brief.status_code == 200
         assert brief.json()["sourceFingerprint"] == "a" * 64
+        assert brief.json()["brief"]["userPrompt"] == ""
+
+        direct_retry = client.post(
+            "/play-api/v1/sessions/s_forest001/media/jobs/job1/retry"
+        )
+        assert direct_retry.status_code == 200
+        assert fake.retry_requests == [None]
+
+        edited_retry = client.post(
+            "/play-api/v1/sessions/s_forest001/media/jobs/job1/retry",
+            json={
+                "visualBrief": {
+                    "sceneDescription": "雨夜咖啡馆",
+                    "subjects": ["言沁", "夏澄"],
+                    "environment": "临窗座",
+                    "action": "雨中对视",
+                    "composition": "中景",
+                    "moodLighting": "暖色灯光",
+                    "style": "动画电影",
+                    "negativeConstraints": "文字、水印",
+                    "aspectRatio": "16:9",
+                    "userPrompt": "必须保持角色金色眼睛",
+                }
+            },
+        )
+        assert edited_retry.status_code == 200
+        assert len(fake.retry_requests) == 2
+        edited_body = fake.retry_requests[1]
+        assert edited_body is not None
+        assert edited_body.visual_brief.user_prompt == "必须保持角色金色眼睛"
 
         gallery = client.get(
             "/play-api/v1/sessions/s_forest001/media/gallery"

@@ -411,7 +411,13 @@ class MediaApplicationService:
             generation_params_json=mapping_json(generation_params or {}),
         )
 
-    def retry_job(self, session_id: str, job_id: str) -> models.MediaJob:
+    def retry_job(
+        self,
+        session_id: str,
+        job_id: str,
+        *,
+        visual_brief: VisualBrief | None = None,
+    ) -> models.MediaJob:
         original = self._data.get_job(session_id, job_id)
         if original is None:
             raise FileNotFoundError(f"Media job not found: {job_id}")
@@ -436,7 +442,11 @@ class MediaApplicationService:
             source_end_turn_id=source.end_turn_id,
             source_fingerprint=source.fingerprint,
             source_snapshot_json=source.snapshot_json,
-            visual_brief_json=original.visual_brief_json,
+            visual_brief_json=(
+                visual_brief.to_json()
+                if visual_brief is not None
+                else original.visual_brief_json
+            ),
             generation_params_json=original.generation_params_json,
             retry_of_job_id=original.id,
         )

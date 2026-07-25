@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Ban,
-  Check,
   ImagePlus,
   Images,
   Loader2,
+  PencilLine,
   RefreshCcw,
   RotateCcw,
   Square,
@@ -19,7 +19,6 @@ import { MediaImageFrame } from '@/components/common/MediaImageFrame'
 import { mediaAssetContentUrl, mediaLibraryContentUrl } from '@/lib/api/media'
 import { cn } from '@/lib/utils/cn'
 import {
-  MEDIA_ASPECT_RATIOS,
   type MediaBrief,
   type MediaGalleryItem,
   type MediaJob,
@@ -27,6 +26,8 @@ import {
   type VisualBrief,
 } from '@/types/media'
 import type { SessionMediaController } from './hooks/useSessionMedia'
+import { MediaRetryDialog } from './MediaRetryDialog'
+import { VisualBriefEditor } from './VisualBriefEditor'
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误'
@@ -50,66 +51,6 @@ function jobTone(status: MediaJob['status']) {
   return 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200'
 }
 
-function BriefEditor({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: VisualBrief
-  disabled: boolean
-  onChange: (next: VisualBrief) => void
-}) {
-  const set = <Key extends keyof VisualBrief,>(key: Key, fieldValue: VisualBrief[Key]) => {
-    onChange({ ...value, [key]: fieldValue })
-  }
-  const textFields: Array<{ key: Exclude<keyof VisualBrief, 'subjects' | 'aspectRatio'>; label: string; rows?: number }> = [
-    { key: 'sceneDescription', label: '场景描述', rows: 4 },
-    { key: 'environment', label: '环境' },
-    { key: 'action', label: '动作' },
-    { key: 'composition', label: '构图' },
-    { key: 'moodLighting', label: '氛围与光线' },
-    { key: 'style', label: '视觉风格' },
-    { key: 'negativeConstraints', label: '负面约束', rows: 2 },
-  ]
-
-  return (
-    <div className="space-y-3">
-      {textFields.map((field) => (
-        <label key={field.key} className="block text-xs font-black text-slate-600 dark:text-slate-300">
-          {field.label}
-          <textarea
-            value={value[field.key]}
-            rows={field.rows ?? 2}
-            disabled={disabled}
-            onChange={(event) => set(field.key, event.target.value)}
-            className="mt-1.5 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none transition focus:border-violet-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          />
-        </label>
-      ))}
-      <label className="block text-xs font-black text-slate-600 dark:text-slate-300">
-        主体（逗号分隔）
-        <input
-          value={value.subjects.join(', ')}
-          disabled={disabled}
-          onChange={(event) => set('subjects', event.target.value.split(',').map((item) => item.trim()).filter(Boolean))}
-          className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-violet-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-        />
-      </label>
-      <label className="block text-xs font-black text-slate-600 dark:text-slate-300">
-        画幅
-        <select
-          value={value.aspectRatio}
-          disabled={disabled}
-          onChange={(event) => set('aspectRatio', event.target.value as VisualBrief['aspectRatio'])}
-          className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-        >
-          {MEDIA_ASPECT_RATIOS.map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
-        </select>
-      </label>
-    </div>
-  )
-}
-
 function GalleryCard({
   sessionId,
   item,
@@ -117,7 +58,8 @@ function GalleryCard({
   pending,
   onSetBackground,
   onClearBackground,
-  onRegenerate,
+  onDirectRetry,
+  onEditRetry,
   onDelete,
 }: {
   sessionId: string
@@ -126,7 +68,8 @@ function GalleryCard({
   pending: boolean
   onSetBackground: () => void
   onClearBackground: () => void
-  onRegenerate: () => void
+  onDirectRetry: () => void
+  onEditRetry: () => void
   onDelete: () => void
 }) {
   const isBackground = backgroundAssetId === item.assetId
@@ -158,13 +101,26 @@ function GalleryCard({
           </button>
           <button
             type="button"
-            disabled={pending || !item.jobId}
-            onClick={onRegenerate}
+            disabled={pending || !item.jobId || item.source.stale}
+            onClick={onDirectRetry}
             className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-xs font-black text-slate-600 transition hover:border-violet-300 hover:text-violet-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
           >
-            <RefreshCcw size={14} />再生成
+            <RefreshCcw size={14} />直接重抽
           </button>
         </div>
+        <button
+          type="button"
+          disabled={pending || !item.jobId || item.source.stale}
+          onClick={onEditRetry}
+          className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 text-xs font-black text-violet-700 transition hover:border-violet-400 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
+        >
+          <PencilLine size={14} />编辑提示词后重抽
+        </button>
+        {item.source.stale ? (
+          <p className="mt-2 text-center text-[11px] font-bold text-amber-600 dark:text-amber-300">
+            来源剧情已变化，请重新选择 Turn 生成简报。
+          </p>
+        ) : null}
         <button
           type="button"
           disabled={pending}
@@ -232,6 +188,7 @@ export function SessionMediaGallery({
   const [briefResult, setBriefResult] = useState<MediaBrief | null>(null)
   const [draftBrief, setDraftBrief] = useState<VisualBrief | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MediaGalleryItem | null>(null)
+  const [retryEditJobId, setRetryEditJobId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open || !turns.length) return
@@ -256,6 +213,10 @@ export function SessionMediaGallery({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startTurnId, endTurnId])
 
+  useEffect(() => {
+    if (!open) setRetryEditJobId(null)
+  }, [open])
+
   const selectedTurns = useMemo(() => {
     if (startTurnId === null || endTurnId === null) return []
     return turns.filter((turn) => turn.turnId >= startTurnId && turn.turnId <= endTurnId)
@@ -270,6 +231,7 @@ export function SessionMediaGallery({
   const actionPending = media.setBackgroundMutation.isPending
     || media.clearBackgroundMutation.isPending
     || media.retryJobMutation.isPending
+    || media.editRetryJobMutation.isPending
     || media.deleteAssetMutation.isPending
 
   const applyShortcut = (count: number) => {
@@ -305,6 +267,11 @@ export function SessionMediaGallery({
     } catch {
       // The mutation error is rendered inline.
     }
+  }
+
+  const openEditRetry = (jobId: string) => {
+    media.editRetryJobMutation.reset()
+    setRetryEditJobId(jobId)
   }
 
   if (!open) return null
@@ -368,7 +335,7 @@ export function SessionMediaGallery({
             {draftBrief ? (
               <section className="mt-6 border-t border-slate-200 pt-5 dark:border-slate-700">
                 <strong className="text-xs font-black uppercase tracking-wide text-slate-500 dark:text-slate-300">2 · 检查并编辑简报</strong>
-                <div className="mt-3"><BriefEditor value={draftBrief} disabled={media.createJobMutation.isPending} onChange={setDraftBrief} /></div>
+                <div className="mt-3"><VisualBriefEditor value={draftBrief} disabled={media.createJobMutation.isPending} onChange={setDraftBrief} /></div>
                 <label className="mt-3 block text-xs font-black text-slate-600 dark:text-slate-300">图片 Provider
                   <select value={providerKey ?? ''} onChange={(event) => setProviderKey(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-black dark:border-slate-700 dark:bg-slate-950">
                     {(media.providersQuery.data?.providers ?? []).map((provider) => <option key={provider.key} value={provider.key} disabled={!provider.available}>{provider.displayName}{provider.available ? '' : '（不可用）'}</option>)}
@@ -427,7 +394,10 @@ export function SessionMediaGallery({
                       {['queued', 'running', 'cancelling'].includes(job.status) ? (
                         <button type="button" disabled={job.status === 'cancelling' || media.cancelJobMutation.isPending} onClick={() => media.cancelJobMutation.mutate(job.jobId)} className="inline-flex h-7 items-center gap-1 rounded-md border border-current/20 px-2"><Square size={11} />取消</button>
                       ) : (
-                        <button type="button" disabled={media.retryJobMutation.isPending} onClick={() => media.retryJobMutation.mutate(job.jobId)} className="inline-flex h-7 items-center gap-1 rounded-md border border-current/20 px-2"><RefreshCcw size={11} />重试</button>
+                        <>
+                          <button type="button" disabled={actionPending} onClick={() => media.retryJobMutation.mutate(job.jobId)} className="inline-flex h-7 items-center gap-1 rounded-md border border-current/20 px-2"><RefreshCcw size={11} />直接重试</button>
+                          <button type="button" disabled={actionPending} onClick={() => openEditRetry(job.jobId)} className="inline-flex h-7 items-center gap-1 rounded-md border border-current/20 px-2"><PencilLine size={11} />编辑后重试</button>
+                        </>
                       )}
                     </span>
                   </div>
@@ -450,7 +420,8 @@ export function SessionMediaGallery({
                     pending={actionPending}
                     onSetBackground={() => media.setBackgroundMutation.mutate(item.assetId)}
                     onClearBackground={() => media.clearBackgroundMutation.mutate()}
-                    onRegenerate={() => item.jobId && media.retryJobMutation.mutate(item.jobId)}
+                    onDirectRetry={() => item.jobId && media.retryJobMutation.mutate(item.jobId)}
+                    onEditRetry={() => item.jobId && openEditRetry(item.jobId)}
                     onDelete={() => setDeleteTarget(item)}
                   />
                 ))}
@@ -465,6 +436,15 @@ export function SessionMediaGallery({
           </section>
         </div>
       </Dialog>
+      {retryEditJobId ? (
+        <MediaRetryDialog
+          key={retryEditJobId}
+          sessionId={sessionId}
+          jobId={retryEditJobId}
+          media={media}
+          onClose={() => setRetryEditJobId(null)}
+        />
+      ) : null}
       {deleteTarget ? (
         <ConfirmDialog
           title="删除图片资产"

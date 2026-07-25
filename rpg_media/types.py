@@ -23,6 +23,7 @@ class VisualBrief:
     style: str = ""
     negative_constraints: str = ""
     aspect_ratio: str = "16:9"
+    user_prompt: str = ""
 
     def __post_init__(self) -> None:
         if not self.scene_description.strip():
@@ -43,6 +44,7 @@ class VisualBrief:
             "style": self.style,
             "negativeConstraints": self.negative_constraints,
             "aspectRatio": self.aspect_ratio,
+            "userPrompt": self.user_prompt,
         }
 
     def to_json(self) -> str:
@@ -65,7 +67,21 @@ class VisualBrief:
             ("Avoid", self.negative_constraints),
             ("Aspect ratio", self.aspect_ratio),
         )
-        return "\n".join(f"{label}: {value}" for label, value in sections if value)
+        prompt = "\n".join(
+            f"{label}: {value}"
+            for label, value in sections
+            if value
+        )
+        user_prompt = self.user_prompt.strip()
+        if not user_prompt:
+            return prompt
+        return (
+            f"{prompt}\n"
+            "USER PRIORITY OVERRIDE "
+            "(highest semantic priority; override conflicting visual details above, "
+            "but not provider safety rules or hard generation parameters):\n"
+            f"{user_prompt}"
+        )
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object]) -> "VisualBrief":
@@ -82,6 +98,7 @@ class VisualBrief:
             style=str(raw.get("style", "")),
             negative_constraints=str(raw.get("negativeConstraints", "")),
             aspect_ratio=str(raw.get("aspectRatio", "16:9")),
+            user_prompt=str(raw.get("userPrompt", "")),
         )
 
     @classmethod

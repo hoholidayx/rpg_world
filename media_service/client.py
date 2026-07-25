@@ -31,6 +31,7 @@ from media_service.schemas import (
     MediaLibraryResponse,
     MediaLibraryUpdateRequest,
     MediaJobCreateRequest,
+    MediaJobRetryRequest,
     MediaJobResponse,
     MediaProviderCatalogResponse,
     MediaSourceTurnsResponse,
@@ -303,11 +304,17 @@ class MediaClient:
             MediaJobResponse,
         )
 
-    async def retry_job(self, session_id: str, job_id: str) -> MediaJobResponse:
+    async def retry_job(
+        self,
+        session_id: str,
+        job_id: str,
+        body: MediaJobRetryRequest | None = None,
+    ) -> MediaJobResponse:
         return await self._send_model(
             "POST",
             f"/sessions/{session_id}/jobs/{job_id}/retry",
             MediaJobResponse,
+            body=body,
         )
 
     async def get_gallery(self, session_id: str) -> MediaGalleryResponse:
@@ -456,16 +463,20 @@ class MediaClient:
         params: dict[str, str | int] | None = None,
     ) -> ResponseT:
         try:
-            response = await self._http_client().request(
-                method,
-                self._url(path),
-                json=(
-                    body.model_dump(mode="json", by_alias=True)
-                    if body is not None
-                    else None
-                ),
-                params=params,
-            )
+            client = self._http_client()
+            if body is None:
+                response = await client.request(
+                    method,
+                    self._url(path),
+                    params=params,
+                )
+            else:
+                response = await client.request(
+                    method,
+                    self._url(path),
+                    json=body.model_dump(mode="json", by_alias=True),
+                    params=params,
+                )
             response.raise_for_status()
             return response_model.model_validate(response.json())
         except httpx.ConnectError as exc:

@@ -34,6 +34,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-25：生图快速重抽与用户优先提示词。** `VisualBrief` 新增只由用户填写的 `userPrompt`，Planner 始终留空；非空内容固定作为最终 Provider prompt 的末尾最高语义优先级区块，但不覆盖安全规则与画幅、尺寸等硬参数。Session 图像工作室为成功图片和终态失败任务提供直接重抽/重试与编辑后重抽/重试两种入口；编辑入口复用原 Brief，不再次调用 Planner，并固定继承原 Job 的 Provider、来源与生成参数。
 - **2026-07-24：角色卡与消息模式硬切。** 角色一级叙事字段统一为 `name + description`，性格、说话方式、行为倾向和心理改为带内置 kind 与 `scope:npc_portrayal` 的二级详情；玩家角色 Fixed Layer 排除这些演绎详情，仅在 GM 当前 turn 托管时动态注入。消息模式统一为 `neutral | ic | ooc | gm`，默认 neutral；Workspace mode 配置删除，提示词内置到无配置 `message_mode` RP Module，并在 Hot History 后动态注入以保持 Fixed Layer 前缀稳定。Story Design、Story Pack、DesignProject 与 MCP 契约同步硬切 2.0，v1 直接拒绝且无转换器。
 - **2026-07-24：状态字段 Schema v2 硬切。** Story 与 Session 状态 document 统一为 `schemaVersion=2`，每行只保留 `key / value / runtimeKeyLocked / updateRule / metadata`。字段频率、延迟周期、人工只读和逐字段进度账本全部删除；所有已有字段的 value 由 Agent 在当前 turn 即时判断更新，`updateRule` 只提供额外语义指导，`runtimeKeyLocked` 只保护 key 结构。Play API/WebUI、DesignProject schema/viewer 与 `rpg_mcp` 同步切换，旧 document 和旧行字段直接拒绝。
 - **2026-07-22：Story 直属内容资产与数据库硬切。** Character、Lorebook、Status 从 Workspace 资产库与 Story mount 模型切换为 Story 直接拥有；Session 状态表只复制当前 Story 定义，来源为 `story_copy`。Play API/WebUI 删除旧资产库、挂载和系统模板入口。数据库不兼容升级，migration 压缩为 `0001_initial.sql`、`0002_demo.sql`、`0003_pagination_demo.sql`，旧 ledger 会明确拒绝启动；旧 Story Pack 导入方案不在本轮兼容。
@@ -273,8 +274,8 @@ Play WebUI 的状态表页只保留 `Story 定义` 与 `Session 运行时` 两�
 v1 的交互是“手动触发 + 可检查提示词 + 异步生成”：
 
 1. 从 Session 已提交历史中选择 1–20 个连续 turn；前端提供 1/5/10/20 快捷范围和每个 turn 的紧凑预览。
-2. 后端固化包含 message ID/version/content 的来源快照和 SHA-256 指纹，生成九字段 `VisualBrief`；用户可编辑场景、主体、环境、动作、构图、光线、风格、负面约束和画幅。
-3. 提交时再次校验来源指纹，数据库 Job 进入持久队列；默认单 worker、无自动重试，支持取消和显式重试。服务启动时扫描 `queued`，创建/重试通过事件即时唤醒 worker，队列排空后阻塞等待；重启会把遗留 `running/cancelling` 标记为 `interrupted`。
+2. 后端固化包含 message ID/version/content 的来源快照和 SHA-256 指纹，生成结构化 `VisualBrief`；用户可编辑场景、主体、环境、动作、构图、光线、风格、负面约束和画幅，并可在 `userPrompt` 填写最高优先级画面要求。Planner 始终把该用户专属字段留空；非空内容裁剪首尾空白后固定放在最终 Provider prompt 末尾，覆盖前述冲突的画面语义，但不绕过 Provider 安全规则和画幅、尺寸等硬生成参数。
+3. 提交时再次校验来源指纹，数据库 Job 进入持久队列；默认单 worker、无自动重试，支持取消，以及“原样直接重抽/重试”和“载入完整 Brief 编辑后重抽/重试”。两种重抽都会重新校验来源；编辑入口不再次调用 Planner，并固定继承直接来源 Job 的 Provider、turn 范围、来源指纹和 generation params。服务启动时扫描 `queued`，创建/重试通过事件即时唤醒 worker，队列排空后阻塞等待；重启会把遗留 `running/cancelling` 标记为 `interrupted`。
 4. 成功图片进入 Session Gallery，可设置为 Session 背景。若原 turn 被编辑、截断或删除，Gallery 只标记来源陈旧，不自动删除图片。
 
 当前 `DemoVisualBriefPlanner` 是配置驱动的确定性实现，不调用外部文本模型；`VisualBriefPlanner` 是可替换契约。未来接入文本 LLM 时应通过 `llm_client` 使用通用 chat biz 选择，不对 llama 等 Provider 做业务黑名单；Media service 不直接读取 LLM 配置或创建 Provider，本地 llama runtime 仍只存在于 LLM Service。

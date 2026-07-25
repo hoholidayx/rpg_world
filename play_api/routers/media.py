@@ -34,6 +34,7 @@ from media_service.schemas import (
     MediaLibraryResponse,
     MediaLibraryUpdateRequest,
     MediaJobCreateRequest,
+    MediaJobRetryRequest,
     MediaJobResponse,
     MediaProviderCatalogResponse,
     MediaSourceTurnsResponse,
@@ -322,9 +323,15 @@ async def cancel_media_job(session_id: str, job_id: str) -> MediaJobResponse:
     "/sessions/{session_id}/media/jobs/{job_id}/retry",
     response_model=MediaJobResponse,
 )
-async def retry_media_job(session_id: str, job_id: str) -> MediaJobResponse:
+async def retry_media_job(
+    session_id: str,
+    job_id: str,
+    body: MediaJobRetryRequest | None = None,
+) -> MediaJobResponse:
     await resolve_session_or_404(session_id)
-    return await _media_call(get_media_client().retry_job(session_id, job_id))
+    return await _media_call(
+        get_media_client().retry_job(session_id, job_id, body)
+    )
 
 
 @router.get(
