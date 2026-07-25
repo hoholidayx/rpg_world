@@ -199,7 +199,28 @@ class StoryMemoryApplicationService:
         return self._data.get(memory_id)
 
     def get_context_items(self, session_id: str) -> tuple[StoryMemoryContextItem, ...]:
-        return tuple(_context_item(item) for item in self._data.list(session_id))
+        memories = self._data.list(session_id)
+        evidence_message_ids = tuple(
+            sorted(
+                {
+                    evidence.message_id
+                    for memory in memories
+                    for evidence in memory.evidence
+                }
+            )
+        )
+        messages_by_id = {
+            message.id: message
+            for message in self._data.list_source_messages(
+                session_id,
+                evidence_message_ids,
+            )
+        }
+        return tuple(
+            _context_item(memory)
+            for memory in memories
+            if _story_memory_evidence_valid(memory, messages_by_id)
+        )
 
     def add_detail(
         self,
@@ -653,6 +674,35 @@ def _message_evidence(message: SessionMessage) -> models.MemoryEvidence:
         turn_id=message.turn_id,
         message_version=message.version,
         content_hash=hashlib.sha256(message.content.encode("utf-8")).hexdigest(),
+    )
+
+
+def _story_memory_evidence_valid(
+    memory: models.SessionStoryMemory,
+    messages_by_id: Mapping[int, SessionMessage],
+) -> bool:
+    if not memory.evidence:
+        return True
+    return all(
+        _evidence_matches_message(evidence, messages_by_id.get(evidence.message_id))
+        and memory.source_turn_start <= evidence.turn_id <= memory.source_turn_end
+        for evidence in memory.evidence
+    )
+
+
+def _evidence_matches_message(
+    evidence: models.MemoryEvidence,
+    message: SessionMessage | None,
+) -> bool:
+    return bool(
+        message is not None
+        and message.id == evidence.message_id
+        and message.role in _EVIDENCE_ROLES
+        and message.mode in _EVIDENCE_MODES
+        and message.turn_id == evidence.turn_id
+        and message.version == evidence.message_version
+        and hashlib.sha256(message.content.encode("utf-8")).hexdigest()
+        == evidence.content_hash
     )
 
 

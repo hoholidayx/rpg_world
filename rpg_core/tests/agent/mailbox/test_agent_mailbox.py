@@ -9,10 +9,11 @@ from commons.errors import (
     TURN_METADATA_INVALID_ERROR_CODE,
     MessageModeUnavailableError,
 )
-from rpg_core.agent.protocol import StreamEventKind, TurnCancelStatus
-from rpg_core.agent.turn.runner import AgentReply
 from rpg_core.agent.mailbox import AgentMailbox, AgentMailboxClosedError
+from rpg_core.agent.protocol import StreamEventKind, TurnCancelStatus
 from rpg_core.agent.turn import TurnRequest
+from rpg_core.agent.turn.runner import AgentReply
+from rpg_core.context.models import Message, Role
 from rpg_core.session import InvalidTurnMetadataError
 
 
@@ -50,13 +51,28 @@ class _Turns:
         await asyncio.Event().wait()
 
 
-def _mailbox(turns: _Turns, truncate=lambda _turn_id: {}):  # noqa: ANN001, ANN201
+def _deleted_message(message_id: int) -> Message:
+    return Message(
+        Role.USER,
+        "deleted",
+        uid=message_id,
+        turn_id=1,
+        seq_in_turn=1,
+    )
+
+
+def _mailbox(  # noqa: ANN201
+    turns: _Turns,
+    truncate=lambda _turn_id: {},  # noqa: ANN001
+    delete=_deleted_message,  # noqa: ANN001
+):
     mailbox = AgentMailbox(
         session_id=lambda: "s_mailbox",
         model=lambda: "test-model",
         turn_service=turns,
         command_dispatcher=_Commands(),
         truncate_history=truncate,
+        delete_message=delete,
     )
     mailbox.start()
     return mailbox
@@ -136,6 +152,33 @@ async def test_mailbox_serializes_truncate_after_send() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mailbox_serializes_message_delete_after_send() -> None:
+    turns = _Turns()
+    turns.block_send = True
+
+    def delete(message_id: int) -> Message:
+        turns.order.append(f"delete-{message_id}")
+        return _deleted_message(message_id)
+
+    mailbox = _mailbox(turns, delete=delete)
+    try:
+        send_task = asyncio.create_task(mailbox.send(TurnRequest.create("go")))
+        await turns.send_started.wait()
+        delete_task = asyncio.create_task(mailbox.delete_message(42))
+        await asyncio.sleep(0)
+        assert not delete_task.done()
+
+        turns.release_send.set()
+        await send_task
+
+        assert (await delete_task).uid == 42
+        assert turns.order == ["send-start", "send-end", "delete-42"]
+    finally:
+        turns.release_send.set()
+        await mailbox.close()
+
+
+@pytest.mark.asyncio
 async def test_mailbox_materializes_derivation_after_earlier_item() -> None:
     turns = _Turns()
     turns.block_send = True
@@ -150,6 +193,7 @@ async def test_mailbox_materializes_derivation_after_earlier_item() -> None:
         turn_service=turns,
         command_dispatcher=_Commands(),
         truncate_history=lambda _turn_id: {},
+        delete_message=_deleted_message,
         materialize_derivation=materialize,
     )
     mailbox.start()

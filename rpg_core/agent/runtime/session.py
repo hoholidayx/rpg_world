@@ -251,9 +251,12 @@ class AgentSessionService:
         }
 
     async def delete_message(self, message_id: int) -> Message:
-        await self._wait_idle()
-        deleted = self._lifecycle.session_manager.delete_message(message_id)
-        return deleted
+        if self._mailbox is None:
+            raise RuntimeError("AgentSessionService mailbox is not bound")
+        return await self._mailbox.delete_message(int(message_id))
+
+    def delete_message_now(self, message_id: int) -> Message:
+        return self._lifecycle.session_manager.delete_message(int(message_id))
 
     async def reset_session(self) -> "SessionResetResult":
         """Reset gameplay data, runtime files, and session-scoped resources."""

@@ -35,9 +35,10 @@ from rpg_core.session import InvalidTurnMetadataError
 if TYPE_CHECKING:
     from rpg_core.agent.command.dispatcher import CommandDispatcher
     from rpg_core.agent.command.models import CommandResult
-    from rpg_core.agent.turn.runner import AgentReply
     from rpg_core.agent.turn.models import TurnRequest
+    from rpg_core.agent.turn.runner import AgentReply
     from rpg_core.agent.turn.service import AgentTurnService
+    from rpg_core.context.models import Message
 
 _TAG = "[AgentMailbox]"
 
@@ -57,6 +58,7 @@ class AgentMailbox:
         turn_service: "AgentTurnService",
         command_dispatcher: "CommandDispatcher",
         truncate_history: Callable[[int], dict[str, object]],
+        delete_message: Callable[[int], "Message"],
         materialize_derivation: Callable[[str], object] | None = None,
     ) -> None:
         self._session_id = session_id
@@ -64,6 +66,7 @@ class AgentMailbox:
         self._turn_service = turn_service
         self._command_dispatcher = command_dispatcher
         self._truncate_history = truncate_history
+        self._delete_message = delete_message
         self._materialize_derivation = materialize_derivation
         self._queue: asyncio.Queue[QueueItem] = asyncio.Queue()
         self._consumer_task: asyncio.Task | None = None
@@ -223,6 +226,23 @@ class AgentMailbox:
         )
         return await future
 
+    async def delete_message(self, message_id: int) -> "Message":
+        self._ensure_open()
+        future = self._create_future()
+        await self._queue.put(
+            QueueItem(
+                kind=QueueKind.DELETE_MESSAGE,
+                future=future,
+                message_id=int(message_id),
+            )
+        )
+        logger.debug(
+            _TAG + " message delete enqueued: session_id={}, message_id={}",
+            self._session_id(),
+            message_id,
+        )
+        return await future
+
     async def materialize_derivation(self, job_id: str) -> object:
         """Run target creation after every earlier item for this source session."""
 
@@ -338,6 +358,10 @@ class AgentMailbox:
                         if item.turn_id is None:
                             raise ValueError("turn_id is required")
                         item.future.set_result(self._truncate_history(item.turn_id))
+                    case QueueKind.DELETE_MESSAGE:
+                        if item.message_id is None:
+                            raise ValueError("message_id is required")
+                        item.future.set_result(self._delete_message(item.message_id))
                     case QueueKind.MATERIALIZE_DERIVATION:
                         if not item.derivation_job_id:
                             raise ValueError("derivation_job_id is required")

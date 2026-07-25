@@ -305,6 +305,54 @@ def test_story_memory_evidence_preserves_large_backlog(tmp_path: Path) -> None:
         database.close()
 
 
+def test_story_memory_context_excludes_invalid_evidence_but_keeps_manual_rows(
+    tmp_path: Path,
+) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageDataService(database)
+        story_memory = _story_memory(database)
+        session_id = _create_test_session(database, "s_story_context_evidence")
+        source = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "守卫把铜钥匙交给阿澈。",
+            turn_id=1,
+            seq_in_turn=1,
+        )
+        extracted = story_memory.add_details_and_mark_processed(
+            session_id,
+            [
+                {
+                    "text": "阿澈持有守卫交出的铜钥匙。",
+                    "turn_id": 1,
+                    "evidence_message_ids": [source.id],
+                }
+            ],
+            message_ids=[source.id],
+        )[0]
+        manual = story_memory.add_detail(
+            session_id,
+            "人工固定的世界设定。",
+            turn_id=1,
+        )
+
+        assert {
+            item.id for item in story_memory.get_context_items(session_id)
+        } == {extracted.id, manual.id}
+
+        messages.update(source.id, content="守卫拒绝交出铜钥匙。")
+
+        assert [
+            item.id for item in story_memory.get_context_items(session_id)
+        ] == [manual.id]
+        assert {
+            item.id for item in story_memory.list(session_id)
+        } == {extracted.id, manual.id}
+    finally:
+        database.close()
+
+
 def test_story_memory_exact_upsert_replaces_evidence_instead_of_union(
     tmp_path: Path,
 ) -> None:

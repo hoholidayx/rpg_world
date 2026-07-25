@@ -197,6 +197,7 @@ class RPGGameAgent:
             turn_service=self._turn_service,
             command_dispatcher=self._command_dispatcher,
             truncate_history=self._session_service.truncate_history_from_turn_now,
+            delete_message=self._session_service.delete_message_now,
             materialize_derivation=self._derivation_service.materialize,
         )
         self._session_service.bind_mailbox(self._mailbox)

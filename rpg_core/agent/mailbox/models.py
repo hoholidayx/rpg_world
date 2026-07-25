@@ -17,12 +17,13 @@ class QueueKind(StrEnum):
     SEND_STREAM = "send_stream"
     COMMAND = "command"
     TRUNCATE_HISTORY = "truncate_history"
+    DELETE_MESSAGE = "delete_message"
     MATERIALIZE_DERIVATION = "materialize_derivation"
 
 
 @dataclass
 class QueueItem:
-    """One send, stream, command, truncate, or derivation mailbox item."""
+    """One send, stream, command, history mutation, or derivation mailbox item."""
 
     kind: QueueKind
     future: Future
@@ -30,6 +31,7 @@ class QueueItem:
     command: str | None = None
     event_queue: AsyncQueue | None = None
     turn_id: int | None = None
+    message_id: int | None = None
     derivation_job_id: str | None = None
 
     @property
