@@ -111,7 +111,7 @@ Story Pack v2 每包只包含一个 Story，支持按 section 拆包，采用 me
 RP Module，模式固定为 `neutral | ic | ooc | gm`，不再设计 Workspace mode。
 Design/Pack/Project/MCP 契约均硬切 2.0，v1 输入直接拒绝且无转换器。
 
-`authoringRulesVersion=1.0` 与 Story Pack `contractVersion=2.0` 独立演进。
+`authoringRulesVersion=1.1` 与 Story Pack `contractVersion=2.0` 独立演进。
 日常迭代调用 `story_design_validate(profile="draft")`；准备 checkpoint 或
 构建包时调用 `profile="package"`。`diagnostics` 固定包含
 `ruleId/severity/path/message/suggestion/runtimeEffect`。error 是确定性门禁；

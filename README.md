@@ -252,7 +252,7 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 - Story 定义表和 Session 运行表都在 SQL 行内保存封装后的 `document_json`，对外通过 `StoryStatusTable`、`SessionStatusTable`、`StatusTableDocument` / `StatusTableRow` 等 typed contract 暴露，不把原始 JSON 字符串作为正文数据返回。
 - SQLite 同时记录 Story 归属、Session 副本、nullable 来源关系、排序、`metadata_json` 和 `status_kind`；`status_kind` 当前只允许 `scene | normal`。
 - 状态 document 固定为 `schemaVersion=2`，每个 `StatusTableRow` 只包含 `key`、`value`、`runtimeKeyLocked`、`updateRule` 与 `metadata`。旧 schema、旧频率/周期字段及其它未知属性直接拒绝，不做兼容转换。
-- 所有已有字段的 value 均可由 Agent 在当前 turn 即时更新。空 `updateRule` 使用通用“事实已明确且值实际变化”条件；非空规则作为 Route、隔离更新器和主 Agent 的额外语义条件，不产生定时调度或数据库级写入门禁。`runtimeKeyLocked` 只限制 key 删除/重命名，不限制 value 更新。完整编排见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md#状态字段契约与即时更新)。
+- 所有已有字段的 value 均可由 Agent 在当前 turn 即时更新。value 是字符串，可按表约定表达数值、枚举、列表、简短描述或当前事实状态。表 `description` 集中提供整表共同语义、value 格式和即时更新规则；row `updateRule` 只补充字段专属条件，不预设数值模型，空值使用通用“事实已明确且值实际变化”条件。两者都不产生定时调度或数据库级写入门禁，`runtimeKeyLocked` 只限制 key 删除/重命名，不限制 value 更新。状态表保存需要每轮可见和更新的当前状态；Memory 更适合按时间累积的叙事历史，但当前事实、承诺、联系或事件状态仍可成为字段。完整编排见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md#状态字段契约与即时更新)。
 - Story 状态表通过 nullable `story_character_id` 绑定一个同 Story 角色；一名角色可绑定多张表。角色删除后定义上的绑定 FK 置空，不删除状态表。
 - 创建 Session 时会把当前 Story 定义复制到 `rpg_session_status_tables`，`origin="story_copy"`，并通过 `source_story_status_table_id` 关联来源。metadata 的 `storyStatusSource` 保存来源表、角色 ID 和 `characterName` 快照；角色名只用于在 LLM Context 中分组角色状态表。
 - Story 定义后续修改不影响已有 Session 副本；Story 定义删除后副本保留、来源 FK 置空。Context 发现角色名快照缺失时可通过角色 ID 和仍存在的 Story 来源关系回填；无法解析则 warning 并从 LLM Context 排除。

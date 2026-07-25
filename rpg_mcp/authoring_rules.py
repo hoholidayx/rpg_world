@@ -21,7 +21,7 @@ from rpg_mcp.contracts import (
     digest_json,
 )
 
-AUTHORING_RULES_VERSION = "1.0"
+AUTHORING_RULES_VERSION = "1.1"
 AUTHORING_RULES_SCHEMA_VERSION = "story-authoring-rules/1.0"
 AUTHORING_RULES_RELATIVE_PATH = (
     "schemas/story-authoring-rules-v1.json"
@@ -321,10 +321,19 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
     ),
     ("LorebookSpec", "description"): "供作者浏览的短管理摘要，不代替 content 世界事实。",
     ("LorebookSpec", "content"): "Agent 可使用的完整世界事实、规则、地点或组织资料。",
-    ("StatusTableSpec", "description"): "说明该表追踪什么，不在这里编写字段更新逻辑。",
+    ("StatusTableSpec", "description"): (
+        "说明该表追踪什么，并集中写整表共同语义、value 格式和即时更新规则；"
+        "字段专属条件写入 row.updateRule。"
+    ),
+    ("StatusRowSpec", "value"): (
+        "当前初始值，以字符串表达；可按表约定表示数值、枚举、列表、简短描述或"
+        "当前事实状态。"
+        "运行时可在本 turn 依据已确认事实即时更新。"
+    ),
     ("StatusRowSpec", "updateRule"): (
-        "只写额外的即时语义条件；不得写频率、延迟、后台调度、人工只读或"
-        "数据库权限。留空时使用“事实明确且值实际变化”的通用规则。"
+        "只写该字段专属的额外即时语义条件；整表共同规则写入表 description。"
+        "不得写频率、延迟、后台调度、人工只读或数据库权限。留空时使用"
+        "“事实明确且值实际变化”的通用规则。"
     ),
     ("PlotPoolSpec", "description"): "说明池的主题、用途和候选边界，不写单个事件指令。",
     ("PlotEventSpec", "description"): "管理摘要：事件是什么、为什么存在；不承担触发指令。",
@@ -357,8 +366,15 @@ _FIELD_AVOID: dict[tuple[str, str], str] = {
     ("CharacterSpec", "description"): "不要写性格、说话方式、行为倾向或心理活动。",
     ("CharacterDetailSpec", "content"): "不要在同一 detail 混合客观信息和 NPC 演绎要求。",
     ("CharacterDetailSpec", "tags"): "不要发明 kind:/scope: 保留标签或手工移除演绎 scope。",
+    ("StatusTableSpec", "description"): (
+        "不要逐字段复制相同规则，也不要把表当作无限追加的历史流水。当前事实、"
+        "承诺、联系或事件状态可以成为字段；按时间累积的叙事历史更适合 Memory。"
+    ),
     ("StatusRowSpec", "runtimeKeyLocked"): "不要把它理解为 value 只读。",
-    ("StatusRowSpec", "updateRule"): "不要写每 N 回合、延迟、定时、manual 或 read-only 规则。",
+    ("StatusRowSpec", "updateRule"): (
+        "不要重复表 description 的共同规则，也不要预设 value 是数值或写每 N "
+        "回合、延迟、定时、manual 或 read-only 规则。"
+    ),
     ("PlotEventSpec", "description"): "不要用命令语气要求主 Agent 落实剧情。",
     ("PlotEventSpec", "directive"): "不要替玩家决定行动、同意或情绪，也不要预写未发生后果。",
     ("PlotEventSpec", "suitabilityHint"): "不要把它当确定性 DSL 或重复剧情正文。",
@@ -498,7 +514,9 @@ _EXAMPLE_OVERRIDES: dict[tuple[str, str], Any] = {
     ("StatusTableSpec", "name"): "当前场景",
     ("StatusTableSpec", "statusKind"): "scene",
     ("StatusTableSpec", "characterRef"): None,
-    ("StatusTableSpec", "description"): "追踪当前 Session 的时间、位置与在场人物。",
+    ("StatusTableSpec", "description"): (
+        "追踪当前 Session 的时间、位置与在场人物。"
+    ),
     ("StatusTableSpec", "rows"): [
         {
             "key": "时间",
@@ -623,8 +641,11 @@ _PRINCIPLES: tuple[dict[str, str], ...] = (
         "domain": "status",
         "title": "状态值即时判断",
         "description": (
-            "所有状态 value 都在当前 turn 根据明确事实判断更新；updateRule "
-            "不产生延迟、频率、后台任务或写权限。"
+            "所有状态 value 都在当前 turn 根据明确事实判断更新。整表共同语义、"
+            "value 格式和即时更新规则写入 description；row.updateRule 只补充"
+            "字段专属条件，不预设数值模型。状态表保存需要每轮可见和更新的当前"
+            "状态；Memory 更适合按时间累积的叙事历史，但当前事实仍可成为状态"
+            "字段。"
         ),
         "runtimeEffect": "StatusSubAgent 每 turn 按目标即时处理状态。",
     },
@@ -1321,8 +1342,15 @@ change the import contract.
   details carry `scope:npc_portrayal` and are filtered by player/NPC/GM turn.
 - Scene tables contain `时间`, `位置`, and `在场人物`. Use parseable virtual
   time such as `第 2020 年 7 月 18 日 9 时`.
+- Status table `description` contains table-wide semantics, value formats,
+  and shared immediate-update rules.
 - Status rows contain only `key`, `value`, `runtimeKeyLocked`, `updateRule`,
-  and `metadata`. All values are evaluated for immediate current-turn update.
+  and `metadata`. `value` is a string that may express a number, enum, list,
+  short description, or current fact state. A row `updateRule` contains only
+  field-specific immediate conditions and does not assume a numeric model.
+- Status tables hold current state that needs per-turn visibility and updates.
+  Memory is better suited to time-ordered narrative history, but current
+  facts, commitments, contacts, or event states may still be status rows.
 - `message_mode` is code-owned, uses `neutral | ic | ooc | gm`, and has empty
   Story config. OOC does not advance world facts.
 - Plot event `description`, `suitabilityHint`, and `directive` have separate

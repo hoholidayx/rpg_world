@@ -1,7 +1,7 @@
 # Story design contract
 
-> authoringRulesVersion=1.0 ·
-> catalogDigest=527f14f1bdb07acefe4cc182cea18f3379fb220f4f8b81a8992381f805d4625f
+> authoringRulesVersion=1.1 ·
+> catalogDigest=b3c6a15dd767c9c44e90fd9371f900df9be17582c0f2f46175e460447d8d4b1c
 
 ## Contract and ownership
 
@@ -40,8 +40,15 @@ change the import contract.
   details carry `scope:npc_portrayal` and are filtered by player/NPC/GM turn.
 - Scene tables contain `时间`, `位置`, and `在场人物`. Use parseable virtual
   time such as `第 2020 年 7 月 18 日 9 时`.
+- Status table `description` contains table-wide semantics, value formats,
+  and shared immediate-update rules.
 - Status rows contain only `key`, `value`, `runtimeKeyLocked`, `updateRule`,
-  and `metadata`. All values are evaluated for immediate current-turn update.
+  and `metadata`. `value` is a string that may express a number, enum, list,
+  short description, or current fact state. A row `updateRule` contains only
+  field-specific immediate conditions and does not assume a numeric model.
+- Status tables hold current state that needs per-turn visibility and updates.
+  Memory is better suited to time-ordered narrative history, but current
+  facts, commitments, contacts, or event states may still be status rows.
 - `message_mode` is code-owned, uses `neutral | ic | ooc | gm`, and has empty
   Story config. OOC does not advance world facts.
 - Plot event `description`, `suitabilityHint`, and `directive` have separate

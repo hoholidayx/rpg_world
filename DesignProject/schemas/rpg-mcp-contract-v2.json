@@ -1,6 +1,6 @@
 {
   "authoringRules": {
-    "digest": "527f14f1bdb07acefe4cc182cea18f3379fb220f4f8b81a8992381f805d4625f",
+    "digest": "b3c6a15dd767c9c44e90fd9371f900df9be17582c0f2f46175e460447d8d4b1c",
     "managedAssetRefresh": {
       "changesDesignRevision": false,
       "changesRuntimeIntegration": false,
@@ -20,7 +20,7 @@
       "suggestion",
       "runtimeEffect"
     ],
-    "version": "1.0"
+    "version": "1.1"
   },
   "characterCards": {
     "objectiveDetailTags": [

@@ -629,8 +629,9 @@ class StatusSubAgent(BaseSubAgent):
                 role=Role.SYSTEM,
                 content=self._build_system_context(
                     "你是状态更新路由器。只选择本轮确实涉及的状态目标，不修改状态。"
-                    "字段的值只在事实明确且实际变化时选择；若字段带 update_rule，"
-                    "还必须确认该额外规则已经满足。",
+                    "字段的值只在事实明确且实际变化时选择；表 description 中的共同"
+                    "规则始终适用，若字段带 update_rule，还必须确认该字段专属规则"
+                    "已经满足。",
                     player_character=player_character,
                 ),
             ).to_dict(),

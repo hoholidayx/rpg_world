@@ -249,10 +249,10 @@ select_status_targets({
 普通表的定位方式如下：
 
 1. 代码从 `StatusManager.list_context_tables()` 取得当前 session 可见的 normal 表。
-2. Route catalog 为每张表提供运行时 `table_id`、name、description，以及每个字段的 key、value 和 `update_rule`。
+2. Route catalog 为每张表提供运行时 `table_id`、name、description，以及每个字段的 key、value 和 `update_rule`；description 中的整表共同规则对该表所有字段生效。
 3. LLM 只能返回 catalog 中的运行时 `table_id` 和现有字段 key。
 4. 代码忽略未知/重复表 ID 和未知/重复 key。
-5. 空 `updateRule` 使用通用“事实已明确且值实际变化”条件；非空规则是选择和更新该字段时必须额外考虑的语义条件。
+5. 表 description 中的共同语义、value 格式和即时更新规则始终适用；空 `updateRule` 使用通用“事实已明确且值实际变化”条件，非空规则是选择和更新该字段时必须额外考虑的字段专属语义条件。
 
 这里的 ID 是 `rpg_session_status_tables` 的运行时表 ID，不是 Story 定义 ID 或 `source_story_status_table_id`。Story 来源关系不向 LLM 暴露。
 
@@ -350,17 +350,20 @@ Story 定义和 Session 运行表共用严格的 `schemaVersion=2` document。�
 | 字段 | 语义 |
 |---|---|
 | `key` | 稳定字段名；普通状态工具只能定位已有 key |
-| `value` | 当前值；所有 scene/normal 字段都可由 LLM 在当前 turn 即时更新 |
+| `value` | 当前值，以字符串表达；可按表约定表示数值、枚举、列表、简短描述或当前事实状态 |
 | `runtimeKeyLocked` | 只保护 key 不被运行时删除或重命名，不限制 value 更新 |
-| `updateRule` | 字段级额外语义指导，保存时 trim；空字符串使用通用事实变化条件 |
+| `updateRule` | 字段专属的额外即时语义指导，保存时 trim；整表共同规则放在表 description，空字符串使用通用事实变化条件，不预设 value 是数值 |
 | `metadata` | 普通扩展数据，不承载隐藏更新类型或写权限 |
 
 旧 schema、字段频率、延迟周期和其它未知行属性直接拒绝，不做兼容解析。`updateRule` 不是事件总线、调度器或数据库条件：
 
+- 表 `description` 集中承载共同语义、value 格式和即时更新规则，不在各 row 重复；
 - Router 依据本轮已确认事实判断字段是否相关；
 - 隔离更新器只获得 Router 选中的 key，并把非空规则作为额外更新条件；
 - 主 Agent fallback 可修改任意已有 normal key，但仍须遵循同一规则与“值实际变化”约束；
 - 空规则不等于无约束，仍只允许同步真实、持久、已经确定的变化；
+- 状态表保存需要每轮可见和更新的当前状态；当前事实、承诺、联系或事件状态都可以成为字段；
+- Memory 更适合按时间累积的叙事历史，这不是对上述内容进入状态表的禁止；
 - 没有回复后归纳、周期任务、逐字段进度或后台更新。
 
 ## scene 的特殊语义

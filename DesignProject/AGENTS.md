@@ -42,6 +42,14 @@ the entire turn.
   `description` contains objective identity/history only; personality, speech,
   behavior, and psychology belong in tagged details and automatically carry
   `scope:npc_portrayal`.
+- For status tables, put table-wide semantics, value formats, and shared
+  immediate-update rules in `description`. Put only field-specific conditions
+  in each row `updateRule`; do not assume that `value` is numeric. A `value`
+  is a string that may express a number, enum, list, short description, or
+  current fact state. Status tables hold current state that needs per-turn
+  visibility and updates. Memory is better suited to time-ordered narrative
+  history, but current facts, commitments, contacts, or event states may still
+  be modeled as status rows.
 - `message_mode` is a code-owned, empty-config RP Module with
   `neutral | ic | ooc | gm`; do not model Workspace mode or prompt resources.
 - Story Design, Story Pack, DesignProject, and MCP contracts are 2.0 hard cuts.

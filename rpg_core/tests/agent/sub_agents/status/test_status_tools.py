@@ -350,6 +350,9 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
             if names == {"select_status_targets"}:
                 self.stages.append("route")
                 assert "COMBINED_TABLE_SENTINEL" in user_content
+                assert "表 description 中的共同规则始终适用" in str(
+                    messages[0]["content"]
+                )
                 return {
                     "tool_calls": [{
                         "function": {
@@ -385,6 +388,7 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
             system_content = str(messages[0]["content"])
             user_content = str(messages[-1]["content"])
             assert "只能使用本请求实际提供的工具" in system_content
+            assert "状态表 description 中的整表共同规则始终适用" in system_content
             assert user_content.index("## Recent Conversation") < user_content.index(
                 "## User Action"
             ) < user_content.index("## Selected State Target")

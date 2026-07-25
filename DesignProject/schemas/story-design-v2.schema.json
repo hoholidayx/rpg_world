@@ -1367,7 +1367,7 @@
         },
         "updateRule": {
           "default": "",
-          "description": "只写额外的即时语义条件；不得写频率、延迟、后台调度、人工只读或数据库权限。留空时使用“事实明确且值实际变化”的通用规则。",
+          "description": "只写该字段专属的额外即时语义条件；整表共同规则写入表 description。不得写频率、延迟、后台调度、人工只读或数据库权限。留空时使用“事实明确且值实际变化”的通用规则。",
           "examples": [
             "当当前 Scene 中已确认发生时间推进时，立即更新为新的故事虚拟时间。"
           ],
@@ -1378,7 +1378,7 @@
         },
         "value": {
           "default": "",
-          "description": "当前初始值；运行时可在本 turn 依据已确认事实即时更新。",
+          "description": "当前初始值，以字符串表达；可按表约定表示数值、枚举、列表、简短描述或当前事实状态。运行时可在本 turn 依据已确认事实即时更新。",
           "examples": [
             "第 2020 年 7 月 18 日 9 时"
           ],
@@ -1418,7 +1418,7 @@
         },
         "description": {
           "default": "",
-          "description": "说明该表追踪什么，不在这里编写字段更新逻辑。",
+          "description": "说明该表追踪什么，并集中写整表共同语义、value 格式和即时更新规则；字段专属条件写入 row.updateRule。",
           "examples": [
             "追踪当前 Session 的时间、位置与在场人物。"
           ],
@@ -2002,6 +2002,6 @@
   },
   "title": "Portable Story Design v2",
   "type": "object",
-  "x-authoringRulesDigest": "527f14f1bdb07acefe4cc182cea18f3379fb220f4f8b81a8992381f805d4625f",
-  "x-authoringRulesVersion": "1.0"
+  "x-authoringRulesDigest": "b3c6a15dd767c9c44e90fd9371f900df9be17582c0f2f46175e460447d8d4b1c",
+  "x-authoringRulesVersion": "1.1"
 }

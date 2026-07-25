@@ -124,6 +124,21 @@ def test_rule_catalog_uses_model_specific_semantic_examples() -> None:
     assert fields[("OpenQuestion", "status")] == "open"
     assert fields[("LorebookSpec", "stableId")] == "lore-white-kite-cafe"
     assert fields[("StatusTableSpec", "characterRef")] is None
+    assert "value 格式" in (
+        rules[("StatusTableSpec", "description")]["description"]
+    )
+    assert "字段专属" in (
+        rules[("StatusRowSpec", "updateRule")]["description"]
+    )
+    assert "可按表约定表示数值、枚举、列表、简短描述或当前事实状态" in (
+        rules[("StatusRowSpec", "value")]["description"]
+    )
+    assert "不要预设 value 是数值" in (
+        rules[("StatusRowSpec", "updateRule")]["avoid"]
+    )
+    assert "当前事实、承诺、联系或事件状态可以成为字段" in (
+        rules[("StatusTableSpec", "description")]["avoid"]
+    )
     assert rules[("StoryResources", "characters")]["runtimeEffect"] == (
         rules[("CharacterSpec", "name")]["runtimeEffect"]
     )

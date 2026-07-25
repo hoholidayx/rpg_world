@@ -1,6 +1,6 @@
 {
-  "authoringRulesVersion": "1.0",
-  "catalogDigest": "527f14f1bdb07acefe4cc182cea18f3379fb220f4f8b81a8992381f805d4625f",
+  "authoringRulesVersion": "1.1",
+  "catalogDigest": "b3c6a15dd767c9c44e90fd9371f900df9be17582c0f2f46175e460447d8d4b1c",
   "compatibleContracts": {
     "designProject": "story-design-project/2.0",
     "mcp": "2.0",
@@ -1971,8 +1971,8 @@
       "title": "状态字段 · runtimeKeyLocked"
     },
     {
-      "avoid": "不要写每 N 回合、延迟、定时、manual 或 read-only 规则。",
-      "description": "只写额外的即时语义条件；不得写频率、延迟、后台调度、人工只读或数据库权限。留空时使用“事实明确且值实际变化”的通用规则。",
+      "avoid": "不要重复表 description 的共同规则，也不要预设 value 是数值或写每 N 回合、延迟、定时、manual 或 read-only 规则。",
+      "description": "只写该字段专属的额外即时语义条件；整表共同规则写入表 description。不得写频率、延迟、后台调度、人工只读或数据库权限。留空时使用“事实明确且值实际变化”的通用规则。",
       "domain": "status",
       "examples": [
         "当当前 Scene 中已确认发生时间推进时，立即更新为新的故事虚拟时间。"
@@ -1986,7 +1986,7 @@
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "当前初始值；运行时可在本 turn 依据已确认事实即时更新。",
+      "description": "当前初始值，以字符串表达；可按表约定表示数值、枚举、列表、简短描述或当前事实状态。运行时可在本 turn 依据已确认事实即时更新。",
       "domain": "status",
       "examples": [
         "第 2020 年 7 月 18 日 9 时"
@@ -2013,8 +2013,8 @@
       "title": "状态表 · characterRef"
     },
     {
-      "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "说明该表追踪什么，不在这里编写字段更新逻辑。",
+      "avoid": "不要逐字段复制相同规则，也不要把表当作无限追加的历史流水。当前事实、承诺、联系或事件状态可以成为字段；按时间累积的叙事历史更适合 Memory。",
+      "description": "说明该表追踪什么，并集中写整表共同语义、value 格式和即时更新规则；字段专属条件写入 row.updateRule。",
       "domain": "status",
       "examples": [
         "追踪当前 Session 的时间、位置与在场人物。"
@@ -2687,7 +2687,7 @@
       "title": "来源不自动获得导入授权"
     },
     {
-      "description": "所有状态 value 都在当前 turn 根据明确事实判断更新；updateRule 不产生延迟、频率、后台任务或写权限。",
+      "description": "所有状态 value 都在当前 turn 根据明确事实判断更新。整表共同语义、value 格式和即时更新规则写入 description；row.updateRule 只补充字段专属条件，不预设数值模型。状态表保存需要每轮可见和更新的当前状态；Memory 更适合按时间累积的叙事历史，但当前事实仍可成为状态字段。",
       "domain": "status",
       "ruleId": "principle.status-immediate",
       "runtimeEffect": "StatusSubAgent 每 turn 按目标即时处理状态。",
