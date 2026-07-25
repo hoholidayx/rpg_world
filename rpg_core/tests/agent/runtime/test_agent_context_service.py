@@ -450,6 +450,7 @@ def test_verbose_context_logging_only_logs_main_llm_context_once(monkeypatch) ->
         source="rp_module:narrative_outcome",
         priority=80,
         content="staged outcome runtime",
+        placement="rp_modules",
     )
     runtime = SimpleNamespace(
         get_fixed_sections=lambda: [],

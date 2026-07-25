@@ -15,6 +15,7 @@ from rpg_core.context.models import (
     PersistentMemoryLayer,
     RecalledMemoryLayer,
     RPGContext,
+    RPModuleRuntimePlacement,
     RPModuleRuntimeSection,
     RPModulesLayer,
     StatusTablesLayer,
@@ -244,6 +245,9 @@ class RPGContextBuilder:
             [m for m in self.config.user_extension if m.position == "after"],
             {"user_reply_suffix": "请用中文回复，保持角色设定。"},
         )
+        system_rp_sections, runtime_user_suffixes = self._partition_runtime_sections(
+            list(rp_module_sections or [])
+        )
 
         # ── 8. Assemble structured RPGContext ─────────────────────────
         return RPGContext(
@@ -254,11 +258,12 @@ class RPGContextBuilder:
             story_memory=StoryMemoryLayer(details=story_details),
             recalled_memory=RecalledMemoryLayer(items=recalled_items),
             status_tables=StatusTablesLayer(tables=status_tables),
-            rp_modules=RPModulesLayer(sections=list(rp_module_sections or [])),
+            rp_modules=RPModulesLayer(sections=system_rp_sections),
             user_message=UserMessageLayer(
                 before=user_before,
                 user_input=user_text,
                 after=user_after,
+                runtime_suffixes=runtime_user_suffixes,
             ),
         )
 
@@ -276,3 +281,17 @@ class RPGContextBuilder:
                 continue
             blocks.append(UserExtensionBlock.from_def(mod, default_data))
         return blocks
+
+    @staticmethod
+    def _partition_runtime_sections(
+        sections: list[RPModuleRuntimeSection],
+    ) -> tuple[list[RPModuleRuntimeSection], list[RPModuleRuntimeSection]]:
+        system_sections: list[RPModuleRuntimeSection] = []
+        user_suffixes: list[RPModuleRuntimeSection] = []
+        for section in sections:
+            placement = RPModuleRuntimePlacement(section.placement)
+            if placement is RPModuleRuntimePlacement.RP_MODULES:
+                system_sections.append(section)
+            elif placement is RPModuleRuntimePlacement.USER_SUFFIX:
+                user_suffixes.append(section)
+        return system_sections, user_suffixes

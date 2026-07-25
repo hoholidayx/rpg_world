@@ -10,7 +10,14 @@ import rpg_core.agent.turn.runner as loop_module
 from llm_client.types import LLMResponse
 from rpg_core.agent.turn.runner import run_chat_loop
 from rpg_core.agent.turn.preparation import TurnPreparation
-from rpg_core.context.models import Message, Role
+from rpg_core.context.builder import RPGContextBuilder
+from rpg_core.context.config import RPGContextConfig
+from rpg_core.context.models import (
+    Message,
+    Role,
+    RPModuleRuntimePlacement,
+    RPModuleRuntimeSection,
+)
 
 
 class _ContextService:
@@ -238,6 +245,49 @@ async def test_turn_preparation_persists_scene_snapshot_without_runtime_guidance
     assert context_service.current_user_message.content == (
         "[scene]\n位置: 大厅\n\n（仅供 LLM 的提示）\n[/scene]\ncurrent action"
     )
+
+
+@pytest.mark.asyncio
+async def test_turn_preparation_keeps_plot_suffix_out_of_staged_user_message() -> None:
+    class ContextService:
+        def __init__(self) -> None:
+            self.builder = RPGContextBuilder(RPGContextConfig())
+
+        @staticmethod
+        def compose_scene_user_input(scene_ctx, user_input: str) -> str:  # noqa: ANN001
+            assert scene_ctx is None
+            return user_input
+
+        def build_transformed_context(self, **kwargs) -> list[Message]:  # noqa: ANN003
+            context = self.builder.build(
+                current_user_message=kwargs["current_user_message"],
+                rp_module_sections=[
+                    RPModuleRuntimeSection(
+                        id="engine_plot_directive",
+                        title="剧情指令",
+                        content="1. 事件标题：雨夜来信\n   剧情指令：信使进入门厅。",
+                        placement=RPModuleRuntimePlacement.USER_SUFFIX,
+                    )
+                ],
+            )
+            return context.to_message_objects()
+
+    events: list[str] = []
+    transaction = _Transaction(events)
+    runtime = _runtime(events)
+    runtime.transaction = transaction
+    preparation = TurnPreparation(
+        context_service=ContextService(),  # type: ignore[arg-type]
+        tool_service=_ToolService(events),  # type: ignore[arg-type]
+        memory_recall=_MemoryRecall(events),  # type: ignore[arg-type]
+    )
+
+    prepared = await preparation.build(runtime)  # type: ignore[arg-type]
+
+    assert transaction.staged_contents == ["current action"]
+    assert "engine_plot_directive" not in transaction.staged_contents[0]
+    assert "current action" in prepared.messages[-1].content
+    assert prepared.messages[-1].content.endswith("[/engine_plot_directive]")
 
 
 @pytest.mark.asyncio

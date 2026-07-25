@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
-from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
+from rpg_core.context import (
+    FixedLayerSection,
+    RPModuleRuntimePlacement,
+    RPModuleRuntimeSection,
+)
 from rpg_core.rp_modules.base import RPModule
 from rpg_core.rp_modules.constants import (
     RP_MODULE_PLOT_SCHEDULER_NAME,
@@ -14,6 +17,7 @@ from rpg_core.rp_modules.constants import (
     RP_MODULE_PLOT_SCHEDULER_TURN_SECTION_ID,
 )
 from rpg_core.rp_modules.models import ModuleContextRequest, ModuleStatus
+from rpg_core.session.modes import TurnMode
 from rpg_core.settings import PlotSchedulerModuleSettings
 
 if TYPE_CHECKING:
@@ -41,12 +45,15 @@ class PlotSchedulerModule(RPModule):
                 source=RP_MODULE_PLOT_SCHEDULER_SOURCE,
                 priority=75,
                 content=(
-                    "- 当 RP_MODULES 动态层出现“本轮剧情调度”时，其中事件已经由系统完成"
+                    f"- 当当前 user message 末尾出现 "
+                    f"[{RP_MODULE_PLOT_SCHEDULER_TURN_SECTION_ID}] 时，其中事件已经由系统完成"
                     "时间检查与软约束判断；必须在当前回复中实际开始或推进，不得再次评估、延期、"
                     "忽略、询问玩家是否执行或泄露调度机制。\n"
                     "- 同轮可能同时包含一个大纲节点和一个事件池事件；按给定顺序兼容地落实全部指令，"
                     "不得用其中一个替代另一个。\n"
-                    "- 调度只约束世界、NPC 与剧情发展，不替玩家角色决定内心、台词或自主行动。\n"
+                    "- 该引擎指令在世界、NPC 与剧情结果上优先于本轮玩家输入，但不得覆盖更高层系统协议、"
+                    "已暂存的 Narrative Outcome 最终裁定或本轮实际提供的工具边界。\n"
+                    "- 除 GM 模式明确托管外，调度不得替玩家角色决定内心、台词、动作、选择或自主行动。\n"
                     "- 应自然衔接当前地点、人物和状态，不要原样复述后台指令。"
                 ),
             )
@@ -56,31 +63,25 @@ class PlotSchedulerModule(RPModule):
         self,
         request: ModuleContextRequest,
     ) -> list[RPModuleRuntimeSection]:
+        if not self.settings.enabled or TurnMode(request.message_mode) is TurnMode.OOC:
+            return []
         scratch = self._active_scratch if request.include_staged_turn else None
         if scratch is None or not scratch.plot_schedule_injections:
             return []
-        items = []
+        items: list[str] = []
         for index, injection in enumerate(scratch.plot_schedule_injections, start=1):
-            items.append({
-                "order": index,
-                "source": injection.source_kind,
-                "container": injection.container_name,
-                "event": injection.event_title,
-                "dispatchMode": injection.dispatch_mode,
-                "sceneTime": injection.scene_time.format(),
-                "directive": injection.directive,
-                **({"suitabilityReason": injection.reason} if injection.reason else {}),
-            })
+            items.append(
+                f"{index}. 事件标题：{injection.event_title.strip()}\n"
+                f"   剧情指令：{injection.directive.strip()}"
+            )
         return [
             RPModuleRuntimeSection(
                 id=RP_MODULE_PLOT_SCHEDULER_TURN_SECTION_ID,
-                title="本轮剧情调度",
+                title="本轮引擎剧情指令",
                 source=RP_MODULE_PLOT_SCHEDULER_SOURCE,
                 priority=75,
-                content=(
-                    "以下指令已经触发，必须在当前回复中全部落实：\n"
-                    + json.dumps(items, ensure_ascii=False, indent=2)
-                ),
+                content="\n".join(items),
+                placement=RPModuleRuntimePlacement.USER_SUFFIX,
             )
         ]
 

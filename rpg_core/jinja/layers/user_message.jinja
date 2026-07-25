@@ -21,3 +21,13 @@
 {% endfor %}
 [/user_suffix]
 {% endif %}
+{% if runtime_suffixes %}
+{% for section in runtime_suffixes %}
+[{{ section.id }}]
+{{ section.content.strip() }}
+[/{{ section.id }}]
+{% if not loop.last %}
+
+{% endif %}
+{% endfor %}
+{% endif %}

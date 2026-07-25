@@ -1,8 +1,23 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from commons.scene_time import SceneTime
 from rpg_data import models
-from rpg_core.rp_modules.plot_scheduler import PlotScheduleSelector, PlotScheduleSnapshot
+from rpg_core.context import RPModuleRuntimePlacement
+from rpg_core.context.fixed_layer.rendering import render_fixed_layer_sections
+from rpg_core.rp_modules.constants import (
+    RP_MODULE_PLOT_SCHEDULER_TURN_SECTION_ID,
+)
+from rpg_core.rp_modules.models import ModuleContextRequest
+from rpg_core.rp_modules.plot_scheduler import (
+    PlotScheduleInjection,
+    PlotScheduleSelector,
+    PlotScheduleSnapshot,
+    PlotSchedulerModule,
+)
+from rpg_core.settings import PlotSchedulerModuleSettings
+from rpg_core.utils.tokenizer import TiktokenTokenCounter
 
 
 def _event(
@@ -52,6 +67,206 @@ def _decision(
         dispatch_mode=models.PLOT_DISPATCH_SOFT,
         scene_time=scene_time,
         scene_time_ordinal=scene_time.ordinal_minutes,
+    )
+
+
+def _injection(
+    *,
+    title: str,
+    directive: str,
+    source_kind: str,
+    source_id: int,
+    event_id: int,
+    container_id: int,
+    container_name: str,
+) -> PlotScheduleInjection:
+    return PlotScheduleInjection(
+        source_kind=source_kind,
+        source_id=source_id,
+        event_id=event_id,
+        container_id=container_id,
+        container_name=container_name,
+        event_title=title,
+        directive=directive,
+        dispatch_mode=models.PLOT_DISPATCH_FORCED,
+        scene_time=SceneTime(1, 1, 1, 10),
+        reason="内部适宜性理由",
+    )
+
+
+def test_plot_fixed_contract_is_stable_and_defines_suffix_precedence() -> None:
+    module = PlotSchedulerModule(session_id="s1")
+    before = module.get_fixed_sections()
+    module.bind_turn(
+        SimpleNamespace(
+            plot_schedule_injections=[
+                _injection(
+                    title="雨夜来信",
+                    directive="让信使进入门厅。",
+                    source_kind=models.PLOT_SOURCE_POOL,
+                    source_id=1,
+                    event_id=1,
+                    container_id=10,
+                    container_name="秘密事件池",
+                )
+            ]
+        )
+    )
+    after = module.get_fixed_sections()
+
+    assert render_fixed_layer_sections(before).encode() == (
+        render_fixed_layer_sections(after).encode()
+    )
+    content = before[0].content
+    assert f"[{RP_MODULE_PLOT_SCHEDULER_TURN_SECTION_ID}]" in content
+    assert "优先于本轮玩家输入" in content
+    assert "Narrative Outcome 最终裁定" in content
+    assert "实际提供的工具边界" in content
+    assert "除 GM 模式明确托管外" in content
+    assert "台词、动作、选择" in content
+    assert "按给定顺序兼容地落实全部指令" in content
+
+
+def test_plot_runtime_section_is_concise_ordered_user_suffix() -> None:
+    module = PlotSchedulerModule(session_id="s1")
+    module.bind_turn(
+        SimpleNamespace(
+            plot_schedule_injections=[
+                _injection(
+                    title="雨夜来信",
+                    directive="让信使进入门厅。",
+                    source_kind=models.PLOT_SOURCE_OUTLINE,
+                    source_id=51,
+                    event_id=101,
+                    container_id=20,
+                    container_name="第一章",
+                ),
+                _injection(
+                    title="远方钟声",
+                    directive="三声钟响打断交谈。",
+                    source_kind=models.PLOT_SOURCE_POOL,
+                    source_id=102,
+                    event_id=102,
+                    container_id=30,
+                    container_name="城镇事件池",
+                ),
+            ]
+        )
+    )
+
+    sections = module.get_runtime_sections(
+        ModuleContextRequest(
+            session_id="s1",
+            include_staged_turn=True,
+        )
+    )
+
+    assert len(sections) == 1
+    section = sections[0]
+    assert section.id == RP_MODULE_PLOT_SCHEDULER_TURN_SECTION_ID
+    assert section.placement is RPModuleRuntimePlacement.USER_SUFFIX
+    assert section.content == (
+        "1. 事件标题：雨夜来信\n"
+        "   剧情指令：让信使进入门厅。\n"
+        "2. 事件标题：远方钟声\n"
+        "   剧情指令：三声钟响打断交谈。"
+    )
+    for internal_value in (
+        "outline",
+        "pool",
+        "第一章",
+        "城镇事件池",
+        "forced",
+        "第 1 年",
+        "内部适宜性理由",
+    ):
+        assert internal_value not in section.content
+
+
+def test_plot_runtime_suffix_is_absent_when_not_applicable() -> None:
+    injection = _injection(
+        title="雨夜来信",
+        directive="让信使进入门厅。",
+        source_kind=models.PLOT_SOURCE_POOL,
+        source_id=1,
+        event_id=1,
+        container_id=10,
+        container_name="秘密事件池",
+    )
+    module = PlotSchedulerModule(session_id="s1")
+    module.bind_turn(SimpleNamespace(plot_schedule_injections=[injection]))
+
+    assert module.get_runtime_sections(
+        ModuleContextRequest(session_id="s1", include_staged_turn=False)
+    ) == []
+    assert module.get_runtime_sections(
+        ModuleContextRequest(
+            session_id="s1",
+            include_staged_turn=True,
+            message_mode="ooc",
+        )
+    ) == []
+
+    empty = PlotSchedulerModule(session_id="s1")
+    empty.bind_turn(SimpleNamespace(plot_schedule_injections=[]))
+    assert empty.get_runtime_sections(
+        ModuleContextRequest(session_id="s1", include_staged_turn=True)
+    ) == []
+
+    disabled = PlotSchedulerModule(
+        session_id="s1",
+        settings=PlotSchedulerModuleSettings(enabled=False),
+    )
+    disabled.bind_turn(SimpleNamespace(plot_schedule_injections=[injection]))
+    assert disabled.get_runtime_sections(
+        ModuleContextRequest(session_id="s1", include_staged_turn=True)
+    ) == []
+
+
+def test_context_gate_reserve_covers_two_concise_plot_suffix_items() -> None:
+    events = (
+        _event(1, 10),
+        _event(2, 10),
+    )
+    snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(models.StoryPlotEventPool(10, 1, "事件池"),),
+            events=events,
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(),
+    )
+    module = PlotSchedulerModule(session_id="s1")
+    module.bind_turn(
+        SimpleNamespace(
+            plot_schedule_injections=[
+                _injection(
+                    title=event.title,
+                    directive=event.directive,
+                    source_kind=models.PLOT_SOURCE_POOL,
+                    source_id=event.id,
+                    event_id=event.id,
+                    container_id=10,
+                    container_name="事件池",
+                )
+                for event in events
+            ]
+        )
+    )
+    section = module.get_runtime_sections(
+        ModuleContextRequest(session_id="s1", include_staged_turn=True)
+    )[0]
+    rendered_suffix = (
+        f"[{section.id}]\n{section.content}\n[/{section.id}]"
+    )
+    counter = TiktokenTokenCounter()
+
+    assert counter.count(snapshot.context_gate_reserve_text) >= counter.count(
+        rendered_suffix
     )
 
 

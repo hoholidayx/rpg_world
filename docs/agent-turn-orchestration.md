@@ -103,14 +103,15 @@ TurnRuntimeFactory
   PlotSchedulingPreflightHook（仅 neutral/IC/GM 且模块有效时）
   ├─ Scene 时间无效 ─► warning 并跳过
   ├─ 每轮最多一个到期大纲节点 + 一个池事件
-  ├─ forced ─► 直接暂存 triggered + 动态层注入
+  ├─ forced ─► 直接暂存 triggered + 最终 user runtime suffix 注入
   └─ soft   ─► 独立 LLM 判断；reason 双重限长，triggered / deferred / error 都先写 scratch
        │
        ▼
 TurnPreparation
   ├─ 将“scene 数据快照 prefix + 原始 input”暂存为本 turn user message；运行时规则不入历史
   ├─ MemoryRecallHook（失败只 warning）
-  ├─ 用 scratch 后的 scene/status/outcome/plot injection 构建主 Context
+  ├─ 用 scratch 后的 scene/status/outcome 构建动态 system layers
+  ├─ 将 plot injection 作为 `[engine_plot_directive]` 追加到当前 user message 最后
   └─ 构建 turn-local 工具 registry 与主 Agent schema
        │
        ▼
@@ -413,10 +414,14 @@ Fixed Layer
 → Persistent Memory / Summary
 → Hot History
 → Story Memory / STATUS_TABLES / Recalled Memory / RP_MODULES
-→ 当前 User Message（含 scene prefix）
+→ 当前 User Message（scene prefix + 原始输入 + 普通 suffix + 可选 Plot runtime suffix）
 ```
 
-实际 provider wire messages 与上述结构化顺序一致：Fixed、Persistent Memory、Summary 分别作为 system message，Hot History 的 user/assistant/tool/system role 全部原位保留，之后 Story Memory、`STATUS_TABLES`、Recalled Memory、`RP_MODULES` 分别作为 system message，最后发送当前 User Message。Story Memory 作为低频累积信息放在 Summary 后、状态表前；当前状态表位于每轮召回之前。`message_mode` 的非 neutral 指令和 GM 托管详情也只出现在这个后置 `RP_MODULES` message 中，因此频繁切换 mode 不会改变 Fixed Layer 或截断更早的稳定前缀；历史窗口滑动时共同前缀仍可能缩短。Recall 块同时声明冲突时以当前 scene、普通状态表、玩家角色绑定和更新事实为准，不能仅凭历史召回回滚状态。
+实际 provider wire messages 与上述结构化顺序一致：Fixed、Persistent Memory、Summary 分别作为 system message，Hot History 的 user/assistant/tool/system role 全部原位保留，之后 Story Memory、`STATUS_TABLES`、Recalled Memory、`RP_MODULES` 分别作为 system message，最后发送当前 User Message。Story Memory 作为低频累积信息放在 Summary 后、状态表前；当前状态表位于每轮召回之前。`message_mode` 的非 neutral 指令、GM 托管详情和 Narrative Outcome 运行态只出现在这个后置 `RP_MODULES` message 中，因此频繁切换 mode 不会改变 Fixed Layer 或截断更早的稳定前缀；历史窗口滑动时共同前缀仍可能缩短。Recall 块同时声明冲突时以当前 scene、普通状态表、玩家角色绑定和更新事实为准，不能仅凭历史召回回滚状态。
+
+Plot Scheduler 是例外 placement：实际触发的至多两条事件不进入 `RP_MODULES`，而由 `ContextRenderer` 以 `[engine_plot_directive]` 追加到当前 user message 最后，晚于原始输入和普通 user suffix。载荷只含按序事件标题与 directive。它可覆盖玩家对世界/NPC 结果的冲突要求，但不能覆盖系统契约、已暂存 Outcome、实际工具边界或非 GM turn 的玩家角色主权。这个 suffix 只供当前 LLM 请求使用；事务中已暂存的 user message 不含它，因此历史、Summary、Memory、Dream 和正文 SSE 都不会看到它。
+
+V1 不拦截当前正文，也没有后置验收、自动修订或针对正文遗漏的失败重试；ledger 的 `triggered` 仅表示事件已选择并注入，不表示模型已落实或剧情已完成。
 
 “只能有一条且必须首位 system”不是跨 provider 的行业准则，而是具体 API 或 chat template 的兼容能力。本项目不再为某个模型全局合并 system。局域网原生 llama.cpp/Qwen 部署可以使用 `--jinja` 和 `--chat-template` / `--chat-template-file` 配置服务端模板；模板上线前必须用包含“Hot History 后再次出现 system”的请求验证角色顺序和生成结果。若某个部署不支持，应在该 provider/chat-template 边界修复，不得改变 canonical Context。
 

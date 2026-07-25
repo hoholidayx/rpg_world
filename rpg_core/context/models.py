@@ -277,6 +277,13 @@ class StatusTablesLayer:
         return bool(self.tables)
 
 
+class RPModuleRuntimePlacement(StrEnum):
+    """Provider placement for one turn-local RP module section."""
+
+    RP_MODULES = "rp_modules"
+    USER_SUFFIX = "user_suffix"
+
+
 @dataclass(frozen=True)
 class RPModuleRuntimeSection:
     id: str
@@ -284,6 +291,7 @@ class RPModuleRuntimeSection:
     content: str
     priority: int = 100
     source: str = "rp_module"
+    placement: RPModuleRuntimePlacement = RPModuleRuntimePlacement.RP_MODULES
 
 
 @dataclass(frozen=True)
@@ -319,10 +327,16 @@ class UserMessageLayer:
     before: list[UserExtensionBlock] = field(default_factory=list)
     user_input: str = ""
     after: list[UserExtensionBlock] = field(default_factory=list)
+    runtime_suffixes: list[RPModuleRuntimeSection] = field(default_factory=list)
 
     @property
     def active(self) -> bool:
-        return bool(self.before or self.user_input or self.after)
+        return bool(
+            self.before
+            or self.user_input
+            or self.after
+            or any(section.content.strip() for section in self.runtime_suffixes)
+        )
 
 
 StructuredLayer = (

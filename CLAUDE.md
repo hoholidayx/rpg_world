@@ -572,10 +572,10 @@ Persistent Memory 的 `(session_id, dedupe_key)` 跨 lifecycle 唯一性保持�
 | [N+1] Story Memory | system | 剧情细节 | ★★☆ 累积 |
 | [N+2] Status Tables | system | 普通状态表，不包含 `status_kind="scene"` 的当前场景 | ★★★★ 当前状态 |
 | [N+3] Recalled Memory | system | 动态召回；冲突时服从当前状态和更新事实 | ★★★ 动态注入 |
-| [N+4] RP Modules | system | RP 模块动态运行态；`message_mode` 注入本轮模式/GM 托管指令，Narrative Outcome 注入预裁定结果，Plot Scheduler 注入已触发的本轮剧情指令 | ★★★★ 动态 |
-| [N+5] User Message | user | `[scene]` + 用户输入 + 前后缀 | 总是新的 |
+| [N+4] RP Modules | system | RP 模块动态运行态；`message_mode` 注入本轮模式/GM 托管指令，Narrative Outcome 注入预裁定结果 | ★★★★ 动态 |
+| [N+5] User Message | user | `[scene]` + 用户输入 + 普通前后缀 + 可选的最终 `[engine_plot_directive]` 运行时 suffix | 总是新的 |
 
-`ContextRenderer` 必须保持多消息结构，provider wire 顺序固定为 Fixed → Persistent Memory → Summary → Hot History（所有 role 原位保留）→ Story Memory → Status Tables → Recalled Memory → RP Modules → User Message；各结构化 system 层分别发送，不得为特定模型全局合并。动态 system 层将当前状态放在按 turn 变化的 Recall 前；Recall 块明确自身只是可能过时的历史参考，与 scene、普通状态表、玩家角色绑定或更新事实冲突时必须服从当前/更新状态。“只能有一个首位 system”属于具体 API/chat template 的部署约束，不是通用准则；原生 llama.cpp/Qwen 应通过 Jinja chat template 适配多段、交错 system。prefix cache 匹配实际序列化/tokenized 请求的共同前缀，不以结构化层、消息边界或整条消息 hash 为独立缓存单元；完整 hash 不同仍可能命中较早的部分 token 前缀，实际命中以 provider usage 为准。四种消息模式不得改变 Fixed Layer 字节：模式指令与 GM 托管时的玩家演绎详情都只能放在 Hot History 后的 `RP_MODULES` 动态层。
+`ContextRenderer` 必须保持多消息结构，provider wire 顺序固定为 Fixed → Persistent Memory → Summary → Hot History（所有 role 原位保留）→ Story Memory → Status Tables → Recalled Memory → RP Modules → User Message；各结构化 system 层分别发送，不得为特定模型全局合并。动态 system 层将当前状态放在按 turn 变化的 Recall 前；Recall 块明确自身只是可能过时的历史参考，与 scene、普通状态表、玩家角色绑定或更新事实冲突时必须服从当前/更新状态。Plot 的触发项仍由结构化 Context 承载，但 `ContextRenderer` 将其放到当前 User Message 的最后，晚于普通 user suffix。“只能有一个首位 system”属于具体 API/chat template 的部署约束，不是通用准则；原生 llama.cpp/Qwen 应通过 Jinja chat template 适配多段、交错 system。prefix cache 匹配实际序列化/tokenized 请求的共同前缀，不以结构化层、消息边界或整条消息 hash 为独立缓存单元；完整 hash 不同仍可能命中较早的部分 token 前缀，实际命中以 provider usage 为准。四种消息模式不得改变 Fixed Layer 字节：模式指令与 GM 托管时的玩家演绎详情都只能放在 Hot History 后的 `RP_MODULES` 动态层。
 
 开启 `verbose_logging` 时，`TurnPreparation` 在最终主 messages 和 tool schemas 完成后、首次主 LLM 调用前只输出一次无正文的 `contextHash` / `systemHash` / `toolsHash`、逐消息 `index/role/hash/chars`、role 计数和工具名，后续工具 round 不重复。StatusSubAgent 与 MemorySubAgent 的每个 provider 调用使用相同指纹口径按独立 source 输出上述字段，并记录 provider cache hit/miss/rate；不同阶段/pipeline 使用不同 system/schema，仍应视为不同缓存族。
 
@@ -647,10 +647,10 @@ RP Modules 使用常规上下文分层/分配策略：
 - 静态契约进入 fixed layer：例如 narrative_outcome 的“何时裁定、必须调用工具、不得替玩家选择行动”。
 - `text_output_format` 作为 fixed layer 输出格式约束默认启用，用 `<rp-narration>` 和 `<rp-character name="...">` 约束 assistant 正文中的旁白/角色分离，不进入 `RPModuleRegistry`。
 - `message_mode` 是无配置、提示词由代码内置的可选 RP Module，唯一模式集合为 `neutral | ic | ooc | gm`，空值/default 归一化为 `neutral`。Workspace 不持久化 mode/prompt；`neutral` 不生成动态 section，IC/OOC/GM 只有模块有效时才可选，否则在 scratch、LLM 和 history 前返回 `message_mode_unavailable`。OOC 不推进世界事实；`neutral | ic | gm` 均可进入 Plot、状态、Story Memory 与 Dream 事实链路。
-- 动态运行态只在模块确有临时状态时进入 `RP_MODULES` system layer；`message_mode` 在非 neutral turn 注入模式指令，并仅在 GM 托管时附带玩家角色的 `scope:npc_portrayal` 详情。Narrative Outcome 平时依赖 fixed contract，检测到明确随机意图时注入本轮强制工具指令；StatusSubAgent 已预裁定时省略该 fixed section，仅以简短无序条目注入最终结果和明确的 scene/status 工具边界。Plot Scheduler 只在本 turn 实际触发候选时注入最多两条指令，不把定义或判断过程写入正文。
+- 动态运行态按 `RPModuleRuntimePlacement` 分配。`message_mode` 在非 neutral turn 将模式指令放入 `RP_MODULES` system layer，并仅在 GM 托管时附带玩家角色的 `scope:npc_portrayal` 详情。Narrative Outcome 平时依赖 fixed contract，检测到明确随机意图时同样在 `RP_MODULES` 注入本轮强制工具指令；StatusSubAgent 已预裁定时省略该 fixed section，仅以简短无序条目注入最终结果和明确的 scene/status 工具边界。Plot Scheduler 只在本 turn 实际触发候选时把最多两条指令放入最终 user runtime suffix，不把定义或判断过程写入模型 Context。
 - `verbose_logging=true` 时，主 Agent 记录 RP runtime section 总数，并在 Context Builder 后按结构化分层输出完整当前 Context；会话历史只记录 logical turn 数，不输出历史正文。空 runtime 记录 `count=0`，不输出 sample、权重等内部随机细节。
 - RP 工具只注册到本轮 `ToolRegistry`；当前主 LLM/StatusSubAgent 的 RP schema 最多只有 `rp_story_outcome`。模块命令按最新非 turn 快照动态解析。
-- RP Modules 不进入 user prefix，不写 history；`[scene]` 仍是唯一高优先级 user prefix 运行态。
+- RP Modules 不进入 user prefix，不写 history；`[scene]` 仍是唯一高优先级 user prefix 运行态。Plot 是唯一使用最终 user runtime suffix 的现有模块，该 suffix 只存在于本轮 LLM 请求。
 
 Assistant 回复的 `content` 是唯一真源：带标签全文原样写入主历史、备份历史、Agent service stream 和 Play SSE。不要把旁白/角色分段写入 message metadata，也不要恢复 `metadata.messageDisplay` 空壳。Play WebUI 可以在展示层容错解析这些标签；解析失败、半截标签或非标准 SSE 坏帧必须原文展示，不丢内容。
 
@@ -674,6 +674,9 @@ Plot Scheduler 是 Story 级剧情动态调度模块：
 - Story 可同时挂载多条线性大纲和多个事件池。大纲节点引用稳定 Story 事件并保存固定 `SceneTime`；事件池按 priority 仲裁，池内使用 `random | sequential`。每个 `neutral | ic | gm` turn 最多选一个到期大纲节点和一个池事件，OOC 完全旁路。
 - `forced` 候选到时直接暂存为 triggered；`soft` 候选通过 `agent.plot_scheduler` 独立 biz key 调用 LLM。Judge 只读完整 fixed layer、当前 scratch scene/普通状态表、最近 N 个完整原始可推进世界 turn 和当前输入，不读 Summary、Story Memory、Persistent Memory 或 Recall。Judge `reason` 由 schema 与 parser 双重限长，避免无界元数据突破主 Context 门禁预留。
 - 门禁在 scratch 创建前按当前 Story 最长两条 directive、事件/容器名称与有界判断元数据保守预留。调度实际发生在 Status preflight 之后、Memory recall 之前；因此读取本轮最新 scratch 状态，并让主 Agent 在记忆召回完成后看到已触发指令。
+- 实际触发项不再进入 `RP_MODULES` system message，而是以 `[engine_plot_directive]` 作为当前 user message 的最终运行时 suffix，位于原始 input 与所有普通 user suffix 之后。载荷只保留稳定顺序、事件标题和 directive；source/container/dispatch mode/Scene 时间/Judge reason 等内部信息不得进入主 LLM 请求。待提交 user message 在渲染该 suffix 前已经以 scene snapshot + 原始 input 暂存，因此 suffix 不写历史、Summary、Memory、Dream、正文 SSE 或消息 metadata。
+- Fixed Layer 保留稳定执行契约：suffix 在世界、NPC 与剧情结果上优先于玩家的冲突要求，但不得覆盖更高层系统契约、已暂存 Narrative Outcome 或实际工具边界；非 GM turn 不得据此替玩家角色生成台词、动作、决定或心理活动。同轮两条事件必须按给定顺序兼容推进。
+- V1 不拦截当前 turn 正文，不增加验收器、后置修订或针对正文遗漏的失败重试。`triggered` 只表示候选已选择并注入，不证明模型已语义落实或事件已经完成；未来若增加 Outcome 风格卡片，文案只能表达“事件已触发”。
 - 大纲节点不重复；池事件可配置基于世界内分钟的重复冷却。池 lane identity 固定为 `event_id`，事件移到其它池后仍沿用已触发、延期和冷却状态；`container_id` 只表示当时所属池。大纲 lane 与池 lane 独立，但同一事件不得在同 turn 重复注入。
 - Session 只保存池事件/大纲节点禁用覆盖与决策账本。`deferred | error` 不中断主 turn，并跳过配置数量的完整可推进世界 turn 后重试。决策与消息、Narrative Outcome、scene/status 在同一短事务提交；`/clear` 清账本但保留覆盖，Session 派生只复制分支点前 triggered 和覆盖。
 - Play WebUI 只在 `/plot-scheduling` 独立页管理定义、覆盖和运行态；运行态不轮询、不调用 Judge。决策历史按 `id DESC` + `beforeId` 分页，不能改为 `turn_id` 游标，否则同 turn 的 outline/pool 两条记录可能漏页。内置 catalog 包含 Plot Scheduler；默认模块只在 Story 创建时挂载，不追溯修改既有 Story。

@@ -11,6 +11,7 @@ from rpg_core.context.fixed_layer.rendering import (
     render_fixed_layer_sections,
 )
 from rpg_core.context.rendering import render_jinja_template
+from rpg_core.context.models import RPModuleRuntimePlacement, RPModuleRuntimeSection
 
 
 def test_lorebook_template_renders_body_content():
@@ -45,6 +46,30 @@ def test_character_template_renders_body_content():
     assert "A young wizard." in rendered
     assert "- 外貌: 银白色长发。" in rendered
     assert "[character_card]" not in rendered
+
+
+def test_user_message_template_places_runtime_suffix_last():
+    rendered = render_jinja_template(
+        "layers/user_message.jinja",
+        user_before=["场景前缀"],
+        user_input="玩家输入",
+        user_after=["普通后缀"],
+        runtime_suffixes=[
+            RPModuleRuntimeSection(
+                id="engine_plot_directive",
+                title="剧情指令",
+                content="1. 事件标题：雨夜来信\n   剧情指令：信使进入门厅。",
+                placement=RPModuleRuntimePlacement.USER_SUFFIX,
+            )
+        ],
+    )
+
+    assert rendered.index("[user_prefix]") < rendered.index("玩家输入")
+    assert rendered.index("玩家输入") < rendered.index("[user_suffix]")
+    assert rendered.index("[/user_suffix]") < rendered.index(
+        "[engine_plot_directive]"
+    )
+    assert rendered.endswith("[/engine_plot_directive]")
 
 
 def test_fixed_layer_sections_wrap_rendered_knowledge_sections():

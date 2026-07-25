@@ -57,6 +57,11 @@ class ContextRenderer:
                 user_before=[item for item in before if item],
                 user_input=self._ctx.user_message.user_input,
                 user_after=[item for item in after if item],
+                runtime_suffixes=[
+                    section
+                    for section in self._ctx.user_message.runtime_suffixes
+                    if section.content.strip()
+                ],
             )
         return None
 

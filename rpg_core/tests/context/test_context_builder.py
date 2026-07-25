@@ -17,6 +17,7 @@ from rpg_core.context.models import (
     PersistentMemoryLayer,
     RecalledMemoryLayer,
     RPGContext,
+    RPModuleRuntimePlacement,
     RPModuleRuntimeSection,
     RPModulesLayer,
     Role,
@@ -91,6 +92,10 @@ def _fake_render(template_name: str, **context: object) -> str:
             parts.append(context["user_input"])
         if context["user_after"]:
             parts.append("[user_suffix]" + "\n\n".join(context["user_after"]) + "[/user_suffix]")
+        parts.extend(
+            f"[{section.id}]\n{section.content}\n[/{section.id}]"
+            for section in context["runtime_suffixes"]
+        )
         return "\n\n".join(parts)
     return template_name
 
@@ -241,6 +246,53 @@ def test_context_includes_dynamic_rp_modules_before_user():
         "[combat]\ncombat turn\n[/combat]",
     ]
     assert rendered[-1].content == "hi"
+
+
+def test_runtime_user_suffix_follows_input_and_ordinary_suffix() -> None:
+    builder = RPGContextBuilder(
+        config=RPGContextConfig(
+            user_extension=[
+                ExtensionModuleDef(
+                    name="suffix",
+                    template="modules/user_reply_suffix.jinja",
+                    position="after",
+                )
+            ]
+        )
+    )
+    current = Message(Role.USER, "我推开门")
+    ctx = builder.build(
+        current_user_message=current,
+        rp_module_sections=[
+            RPModuleRuntimeSection(
+                id="outcome",
+                title="裁定",
+                content="outcome result",
+            ),
+            RPModuleRuntimeSection(
+                id="engine_plot_directive",
+                title="剧情指令",
+                content="1. 事件标题：雨夜来信\n   剧情指令：信使进入门厅。",
+                placement=RPModuleRuntimePlacement.USER_SUFFIX,
+            ),
+        ],
+    )
+
+    rendered = ctx.to_message_objects()
+
+    assert current.content == "我推开门"
+    assert [section.id for section in ctx.rp_modules.sections] == ["outcome"]
+    assert [section.id for section in ctx.user_message.runtime_suffixes] == [
+        "engine_plot_directive"
+    ]
+    assert [message.role for message in rendered] == [Role.SYSTEM, Role.USER]
+    assert "engine_plot_directive" not in rendered[0].content
+    user_content = rendered[-1].content
+    assert user_content.index("我推开门") < user_content.index("[user_suffix]")
+    assert user_content.index("[/user_suffix]") < user_content.index(
+        "[engine_plot_directive]"
+    )
+    assert user_content.endswith("[/engine_plot_directive]")
 
 
 def test_context_dynamic_system_layers_follow_cache_optimized_order():
