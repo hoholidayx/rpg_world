@@ -62,6 +62,7 @@ def build_rpg_context(
         StoryMemoryStore(
             session_id,
             StoryMemoryApplicationService(gateway.story_memory),
+            close_worker_connection=gateway.close_thread_connection,
         )
     )
     recalled_store = RecalledMemoryStore()

@@ -1,5 +1,10 @@
 """Concrete fixed-layer contributors."""
 
+from rpg_core.context.fixed_layer.contributors.adjudication import (
+    ADJUDICATION_AUTHORITY_SECTION_ID,
+    ADJUDICATION_AUTHORITY_SOURCE,
+    AdjudicationAuthorityFixedLayerContributor,
+)
 from rpg_core.context.fixed_layer.contributors.character import (
     CharacterFixedLayerContributor,
     build_character_section,
@@ -12,12 +17,14 @@ from rpg_core.context.fixed_layer.contributors.lorebook import (
     render_lorebook_section_body,
 )
 from rpg_core.context.fixed_layer.contributors.player_character import (
+    AdjudicationPlayerCharacterFixedLayerContributor,
     NPC_CONTROL_ROLE,
     PLAYER_CHARACTER_CONTROL_ROLE,
     PLAYER_CHARACTER_SECTION_ID,
     PLAYER_CHARACTER_SOURCE,
     PlayerCharacterFixedLayerContributor,
     annotate_player_character_cards,
+    build_adjudication_player_character_section,
     build_player_character_section,
     player_character_portrayal_details,
 )
@@ -41,6 +48,10 @@ from rpg_core.context.fixed_layer.contributors.turn_execution import (
 )
 
 __all__ = [
+    "ADJUDICATION_AUTHORITY_SECTION_ID",
+    "ADJUDICATION_AUTHORITY_SOURCE",
+    "AdjudicationAuthorityFixedLayerContributor",
+    "AdjudicationPlayerCharacterFixedLayerContributor",
     "CharacterFixedLayerContributor",
     "CoreRPContractContributor",
     "LorebookFixedLayerContributor",
@@ -64,6 +75,7 @@ __all__ = [
     "PLAYER_CHARACTER_SOURCE",
     "PlayerCharacterFixedLayerContributor",
     "annotate_player_character_cards",
+    "build_adjudication_player_character_section",
     "build_player_character_section",
     "player_character_portrayal_details",
     "render_character_section_body",

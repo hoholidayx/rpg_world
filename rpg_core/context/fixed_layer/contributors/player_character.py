@@ -53,6 +53,31 @@ def build_player_character_section(
     )
 
 
+def build_adjudication_player_character_section(
+    player_character: PlayerCharacterContext | None,
+) -> FixedLayerSection | None:
+    """Build a pure identity projection without narration or RP Module rules."""
+
+    if player_character is None or not str(player_character.name).strip():
+        return None
+    player_name = str(player_character.name).strip()
+    return FixedLayerSection(
+        id=PLAYER_CHARACTER_SECTION_ID,
+        title="当前玩家扮演角色（权威绑定）",
+        content=(
+            f"当前玩家扮演角色：{player_name}\n"
+            f"- 当前用户输入中指代玩家的第一人称“我”指向 {player_name}。\n"
+            "- 除当前玩家角色外，当前 Story 的其余角色均为 NPC；"
+            "不得把任何 NPC 当作玩家。\n"
+            "- 本节只确定身份归属，不代表当前输入中的行动或预期结果已经发生。"
+        ),
+        priority=25,
+        source=PLAYER_CHARACTER_SOURCE,
+        source_kind=PLAYER_CHARACTER_SOURCE,
+        item_count=1,
+    )
+
+
 def annotate_player_character_cards(
     characters: list[JsonObject],
     player_character: PlayerCharacterContext | None,
@@ -119,3 +144,20 @@ class PlayerCharacterFixedLayerContributor(FixedLayerContributor):
     def get_fixed_contribution(self) -> FixedLayerContribution:
         section = build_player_character_section(self._player_character)
         return FixedLayerContribution(sections=[section] if section is not None else [])
+
+
+class AdjudicationPlayerCharacterFixedLayerContributor(FixedLayerContributor):
+    """Expose only player identity facts to non-narrative adjudicators."""
+
+    name = PLAYER_CHARACTER_SOURCE
+
+    def __init__(self, player_character: PlayerCharacterContext | None) -> None:
+        self._player_character = player_character
+
+    def get_fixed_contribution(self) -> FixedLayerContribution:
+        section = build_adjudication_player_character_section(
+            self._player_character
+        )
+        return FixedLayerContribution(
+            sections=[section] if section is not None else []
+        )

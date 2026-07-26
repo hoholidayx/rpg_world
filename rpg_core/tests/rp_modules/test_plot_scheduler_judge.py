@@ -4,6 +4,7 @@ import pytest
 
 from llm_client.types import LLMResponse
 from rpg_core.agent.telemetry import TurnStats
+from rpg_core.agent.tools.history import HistoryToolSet
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.plot_scheduler.judge import (
     PlotScheduleJudge,
@@ -88,6 +89,102 @@ async def test_plot_judge_rejects_unbounded_reason() -> None:
         await PlotScheduleJudge(
             provider_factory=lambda: _provider_result(provider)
         ).judge([Message(Role.USER, "行动")], turn_stats=TurnStats())
+
+
+@pytest.mark.asyncio
+async def test_plot_judge_can_read_committed_history_before_deciding() -> None:
+    class QueryService:
+        def __init__(self) -> None:
+            self.searches: list[tuple[object, object]] = []
+
+        async def search(
+            self,
+            *,
+            terms: object,
+            limit: object,
+        ) -> dict[str, object]:
+            self.searches.append((terms, limit))
+            return {
+                "ok": True,
+                "items": [{"turnId": 8, "excerpt": "信使已抵达门厅"}],
+            }
+
+        async def read(self, **_kwargs: object) -> dict[str, object]:
+            raise AssertionError("this scenario only needs history_search")
+
+    class SequenceProvider:
+        def __init__(self) -> None:
+            self.calls: list[
+                tuple[list[dict[str, object]], list[dict[str, object]]]
+            ] = []
+            self.responses = [
+                LLMResponse(
+                    content="",
+                    tool_calls=[{
+                        "id": "plot_history",
+                        "type": "function",
+                        "function": {
+                            "name": "history_search",
+                            "arguments": '{"terms":["信使"],"limit":2}',
+                        },
+                    }],
+                    finish_reason="tool_calls",
+                ),
+                LLMResponse(
+                    content="",
+                    tool_calls=[{
+                        "id": "plot_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "plot_schedule_decision",
+                            "arguments": (
+                                '{"suitable":true,"reason":"已提交历史确认信使在场"}'
+                            ),
+                        },
+                    }],
+                    finish_reason="tool_calls",
+                    model="judge-model",
+                ),
+            ]
+
+        async def chat(self, messages, tools=None):  # noqa: ANN001, ANN201
+            self.calls.append((messages, list(tools or [])))
+            return self.responses.pop(0)
+
+        @staticmethod
+        def get_default_model() -> str:
+            return "judge-model"
+
+    query = QueryService()
+    provider = SequenceProvider()
+    stats = TurnStats()
+
+    decision = await PlotScheduleJudge(
+        provider_factory=lambda: _provider_result(provider),
+        history_tools=HistoryToolSet(query),  # type: ignore[arg-type]
+        max_history_tool_rounds=5,
+    ).judge([Message(Role.USER, "判断候选事件")], turn_stats=stats)
+
+    assert decision.suitable is True
+    assert decision.reason == "已提交历史确认信使在场"
+    assert query.searches == [(["信使"], 2)]
+    assert len(provider.calls) == 2
+    assert {
+        schema["function"]["name"]
+        for schema in provider.calls[0][1]
+    } == {
+        "history_search",
+        "history_read",
+        "plot_schedule_decision",
+    }
+    assert any(
+        message["role"] == "tool" and "信使已抵达门厅" in message["content"]
+        for message in provider.calls[1][0]
+    )
+    assert [record.source for record in stats.calls] == [
+        "plot_scheduler",
+        "plot_scheduler",
+    ]
 
 
 async def _provider_result(provider):  # noqa: ANN001, ANN201

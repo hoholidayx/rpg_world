@@ -13,6 +13,7 @@ from rpg_core.agent.tools.history_query import (
     HistoryQueryService,
 )
 from rpg_core.tooling.base import BaseTool
+from rpg_core.tooling.registry import ToolRegistry
 
 HISTORY_SEARCH_TOOL_NAME = "history_search"
 HISTORY_READ_TOOL_NAME = "history_read"
@@ -20,6 +21,38 @@ SENSITIVE_HISTORY_TOOL_NAMES = frozenset({
     HISTORY_SEARCH_TOOL_NAME,
     HISTORY_READ_TOOL_NAME,
 })
+
+
+class HistoryToolSet:
+    """Narrow reusable access to the two committed-history query tools."""
+
+    def __init__(self, service: HistoryQueryService) -> None:
+        self._tools = (
+            HistorySearchTool(service),
+            HistoryReadTool(service),
+        )
+        registry = ToolRegistry()
+        registry.register_all(list(self._tools))
+        self._registry = registry
+
+    @property
+    def tools(self) -> tuple[BaseTool, ...]:
+        return self._tools
+
+    @property
+    def names(self) -> frozenset[str]:
+        return SENSITIVE_HISTORY_TOOL_NAMES
+
+    def schemas(self) -> list[dict[str, object]]:
+        return self._registry.get_openai_schemas()
+
+    async def execute(self, name: str, arguments_json: str) -> str:
+        if name not in self.names:
+            raise PermissionError(f"{name!r} is not a history query tool")
+        return await self._registry.execute(name, arguments_json)
+
+    def register_into(self, registry: ToolRegistry) -> None:
+        registry.register_all(list(self._tools))
 
 
 class _HistoryTool(BaseTool):

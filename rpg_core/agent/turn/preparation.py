@@ -82,6 +82,7 @@ class TurnPreparation:
             rp_module_runtime=runtime.rp_module_runtime,
             turn_execution=runtime.plan.execution,
             persistent_memory_snapshot=runtime.plan.persistent_memory,
+            story_memory_snapshot=runtime.plan.story_memory,
         )
         tool_registry = self._tool_service.registry_for_turn(
             scratch.scene_tracker,

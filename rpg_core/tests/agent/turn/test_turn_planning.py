@@ -45,8 +45,16 @@ class _Context:
         )
 
     async def load_persistent_memory_snapshot(self) -> tuple:
-        self.calls.append("memory")
+        self.calls.append("persistent_memory")
         return ()
+
+    async def load_story_memory_snapshot(self) -> tuple:
+        self.calls.append("story_memory")
+        return ()
+
+    def build_adjudication_context_snapshot(self, **_kwargs):  # noqa: ANN003, ANN201
+        self.calls.append("adjudication")
+        return SimpleNamespace(messages=())
 
 
 class _Model:
@@ -97,6 +105,8 @@ async def test_neutral_plan_resolves_when_message_mode_module_is_unavailable() -
         "rp_modules",
         "execution",
         "model",
+        "persistent_memory",
+        "story_memory",
         "plot",
-        "memory",
+        "adjudication",
     ]

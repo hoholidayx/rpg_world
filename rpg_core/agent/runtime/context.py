@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from commons.errors import MainContextWindowThresholdExceededError
+from rpg_core.agent.adjudication import AdjudicationContextSnapshot
 from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.turn import TurnExecutionSnapshot, TurnMode, TurnRequest
 from rpg_core.agent.turn.resolver import (
@@ -20,6 +22,8 @@ from rpg_core.agent.turn.resolver import (
 )
 from rpg_core.context.fixed_layer import FixedLayerAssembler
 from rpg_core.context.fixed_layer.contributors import (
+    AdjudicationAuthorityFixedLayerContributor,
+    AdjudicationPlayerCharacterFixedLayerContributor,
     CharacterFixedLayerContributor,
     CoreRPContractContributor,
     LorebookFixedLayerContributor,
@@ -31,7 +35,15 @@ from rpg_core.context.fixed_layer.contributors import (
     player_character_portrayal_details,
 )
 from rpg_core.context.inspector import ContextInspector
-from rpg_core.context.models import FixedLayerData, LayerType, Message, Role, RPGContext
+from rpg_core.context.models import (
+    FixedLayerData,
+    LayerType,
+    Message,
+    PersistentMemoryLayer,
+    Role,
+    RPGContext,
+    StoryMemoryLayer,
+)
 from rpg_core.context.renderer import ContextRenderer
 from rpg_core.rp_modules.models import PlayerPortrayalDetail
 from rpg_core.status.context import render_status_tables_context
@@ -40,7 +52,11 @@ from rpg_core.settings import settings
 
 if TYPE_CHECKING:
     from rpg_core.context.inspector import LayerInfo
-    from rpg_core.context.models import PersistentMemoryFact, RPGContext
+    from rpg_core.context.models import (
+        PersistentMemoryFact,
+        RPGContext,
+        StoryMemoryFact,
+    )
     from rpg_core.agent.runtime.main_llm import MainLLMSelection
     from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
     from rpg_core.rp_modules.application import RPModuleApplicationService
@@ -143,6 +159,7 @@ class AgentContextService:
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
         persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
+        story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
     ) -> list[Message]:
         context = self.build_main_context(
             current_user_message=current_user_message,
@@ -153,6 +170,7 @@ class AgentContextService:
             rp_module_runtime=rp_module_runtime,
             turn_execution=turn_execution,
             persistent_memory_snapshot=persistent_memory_snapshot,
+            story_memory_snapshot=story_memory_snapshot,
         )
         messages = context.to_message_objects()
         self._log_verbose_context(context)
@@ -166,22 +184,10 @@ class AgentContextService:
         history_turns: int,
         status_manager: "StatusManager | None",
         scene_tracker: "SceneTracker | None",
-        rp_module_runtime: "RPModuleTurnRuntime | None",
-        turn_execution: TurnExecutionSnapshot,
+        adjudication_context: AdjudicationContextSnapshot,
     ) -> list[Message]:
-        """Build the scheduler's bounded raw context without memory projections."""
-        fixed_layer = self._assemble_fixed_layer(
-            rp_module_runtime.get_fixed_sections()
-            if rp_module_runtime is not None
-            else None,
-            turn_execution=turn_execution,
-        )
-        fixed_text = ContextRenderer(
-            RPGContext(fixed_layer=fixed_layer)
-        ).render_layer(LayerType.FIXED)
-        messages: list[Message] = []
-        if fixed_text:
-            messages.append(Message(Role.SYSTEM, fixed_text))
+        """Build one soft-Plot request from the shared adjudication prefix."""
+        messages = adjudication_context.to_messages()
         messages.append(Message(Role.SYSTEM, judge_prompt))
 
         state_sections: list[str] = []
@@ -243,6 +249,7 @@ class AgentContextService:
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
         persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
+        story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
     ) -> "RPGContext":
         resources = self._resources()
         fixed_layer = self._assemble_fixed_layer(
@@ -274,6 +281,7 @@ class AgentContextService:
                 turn_execution=turn_execution,
             ),
             persistent_memory_snapshot=persistent_memory_snapshot,
+            story_memory_snapshot=story_memory_snapshot,
         )
         return context
 
@@ -284,6 +292,7 @@ class AgentContextService:
         rp_module_snapshot: "RPModuleSelectionSnapshot | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
         persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
+        story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
     ) -> "RPGContext":
         resources = self._resources()
         scene_ctx = (
@@ -312,6 +321,7 @@ class AgentContextService:
                 user_input=user_input,
                 turn_execution=turn_execution,
                 persistent_memory_snapshot=persistent_memory_snapshot,
+                story_memory_snapshot=story_memory_snapshot,
             )
 
         runtime = service.create_runtime(
@@ -326,6 +336,7 @@ class AgentContextService:
                 rp_module_runtime=runtime,
                 turn_execution=turn_execution,
                 persistent_memory_snapshot=persistent_memory_snapshot,
+                story_memory_snapshot=story_memory_snapshot,
             )
         finally:
             runtime.close()
@@ -337,6 +348,7 @@ class AgentContextService:
         rp_module_snapshot: "RPModuleSelectionSnapshot",
         turn_execution: TurnExecutionSnapshot,
         persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
+        story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
         plot_schedule_snapshot: "PlotScheduleSnapshot | None" = None,
     ) -> None:
         context_limit = selection.effective.context_window
@@ -356,6 +368,7 @@ class AgentContextService:
             rp_module_snapshot=rp_module_snapshot,
             turn_execution=turn_execution,
             persistent_memory_snapshot=persistent_memory_snapshot,
+            story_memory_snapshot=story_memory_snapshot,
         )
         usage = estimate_rendered_context_usage(
             current_context.to_message_objects(),
@@ -424,6 +437,21 @@ class AgentContextService:
             )
             return ()
 
+    async def load_story_memory_snapshot(
+        self,
+    ) -> tuple["StoryMemoryFact", ...]:
+        """Load an immutable evidence-valid SQL projection off the Agent loop."""
+
+        try:
+            return await self._resources().builder.load_story_memory_snapshot()
+        except Exception as exc:
+            logger.warning(
+                _TAG + " story memory load skipped: session_id={}, error={}",
+                self._session_id(),
+                exc,
+            )
+            return ()
+
     async def inspect_info(
         self,
         user_input: str = "",
@@ -487,7 +515,13 @@ class AgentContextService:
         mode: TurnMode | str | None,
         narrative_style_id: int | None,
     ) -> ContextInspector:
-        persistent_memory_snapshot = await self.load_persistent_memory_snapshot()
+        (
+            persistent_memory_snapshot,
+            story_memory_snapshot,
+        ) = await asyncio.gather(
+            self.load_persistent_memory_snapshot(),
+            self.load_story_memory_snapshot(),
+        )
         rp_module_snapshot = self.resolve_rp_module_snapshot()
         from rpg_core.rp_modules.message_mode import ensure_message_mode_available
 
@@ -505,6 +539,7 @@ class AgentContextService:
             rp_module_snapshot=rp_module_snapshot,
             turn_execution=execution,
             persistent_memory_snapshot=persistent_memory_snapshot,
+            story_memory_snapshot=story_memory_snapshot,
         )
         selection = await self._main_llm_selection(self._session_id())
         return ContextInspector(
@@ -513,6 +548,63 @@ class AgentContextService:
             hot_history_rounds=self._resources().builder.config.hot_history_rounds,
             context_limit=selection.effective.context_window,
         )
+
+    def build_adjudication_context_snapshot(
+        self,
+        *,
+        turn_execution: TurnExecutionSnapshot,
+        persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
+        story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
+    ) -> AdjudicationContextSnapshot:
+        """Render the one module-neutral prefix shared by all adjudicators."""
+
+        context = RPGContext(
+            fixed_layer=self._assemble_adjudication_fixed_layer(
+                turn_execution=turn_execution
+            ),
+            persistent_memory=PersistentMemoryLayer(
+                memories=list(persistent_memory_snapshot)
+            ),
+            story_memory=StoryMemoryLayer(
+                details=list(story_memory_snapshot)
+            ),
+        )
+        return AdjudicationContextSnapshot.from_messages(
+            ContextRenderer(context).to_message_objects()
+        )
+
+    def _assemble_adjudication_fixed_layer(
+        self,
+        *,
+        turn_execution: TurnExecutionSnapshot,
+    ) -> FixedLayerData:
+        """Assemble an explicit allowlist; RP Module sections cannot enter."""
+
+        resources = self._resources()
+        config = resources.builder.config
+        return FixedLayerAssembler(
+            world_name=self._world_name,
+            contributors=[
+                AdjudicationAuthorityFixedLayerContributor(),
+                StoryPromptFixedLayerContributor(
+                    self._session_id(),
+                    catalog=self._turn_snapshot_data,
+                    content=turn_execution.rendered_story_prompt,
+                ),
+                LorebookFixedLayerContributor(
+                    resources.lorebook_manager,
+                    enabled=config.enable_lorebook,
+                ),
+                AdjudicationPlayerCharacterFixedLayerContributor(
+                    turn_execution.player_character
+                ),
+                CharacterFixedLayerContributor(
+                    resources.character_manager,
+                    enabled=config.enable_character,
+                    player_character=turn_execution.player_character,
+                ),
+            ],
+        ).assemble()
 
     def _assemble_fixed_layer(
         self,

@@ -419,8 +419,8 @@ async def test_main_llm_runtime_priority_context_window_and_subagent_route_indep
         }
         for call in scripted_llm_manager.status.calls
     ] == [
-        {"rp_story_outcome"},
-        {"select_status_targets"},
+        {"history_search", "history_read", "rp_story_outcome"},
+        {"history_search", "history_read", "select_status_targets"},
     ] * 4
     status_system = scripted_llm_manager.status.calls[0].messages[0]["content"]
     assert "当前玩家扮演角色：Integration Tester" in status_system
@@ -812,8 +812,8 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
         }
         for call in scripted_llm_manager.status.calls[-2:]
     ] == [
-        {"rp_story_outcome"},
-        {"select_status_targets"},
+        {"history_search", "history_read", "rp_story_outcome"},
+        {"history_search", "history_read", "select_status_targets"},
     ]
     assert {"history_search", "history_read"} <= gm_tool_names
     assert {"list_files", "read_file", "write_file", "grep"}.isdisjoint(

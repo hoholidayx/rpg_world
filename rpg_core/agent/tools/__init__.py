@@ -15,6 +15,7 @@ from rpg_core.agent.tools.history import (
     SENSITIVE_HISTORY_TOOL_NAMES,
     HistoryReadTool,
     HistorySearchTool,
+    HistoryToolSet,
 )
 from rpg_core.agent.tools.history_query import (
     HistoryQueryDataPort,
@@ -34,6 +35,7 @@ __all__ = [
     "SENSITIVE_HISTORY_TOOL_NAMES",
     "HistoryReadTool",
     "HistorySearchTool",
+    "HistoryToolSet",
     "HistoryQueryDataPort",
     "HistoryQueryService",
 ]

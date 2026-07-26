@@ -46,7 +46,7 @@ README 只保留架构概览；涉及阶段顺序、状态写入边界或失败�
 | `AgentMailbox` | session 内 FIFO、stream task 与 `requestId` 取消 |
 | `AgentTurnService` | 命令/角色 bypass，适配 `AgentReply` 和 SSE |
 | `TurnPreprocessor` | 在快照、门禁和事务之前处理斜杠命令与玩家角色 guard |
-| `TurnPlanResolver` | 先解析 RP Module 并执行 message-mode 门禁，再固化 mode/style、玩家角色、Story Prompt、主模型与 Plot Schedule 快照 |
+| `TurnPlanResolver` | 先解析 RP Module 并执行 message-mode 门禁，再固化 mode/style、玩家角色、Story Prompt、主模型、Plot Schedule、Story/Persistent Memory 与共享裁定 Context 快照 |
 | `TurnRuntimeFactory` | Context 门禁、provider 解析、transaction/scratch、RP runtime、Status 与 Plot preflight |
 | `StatusPreflightHook` | 为 `StatusSubAgent` 绑定本 turn 的 scratch 工具和逐目标 checkpoint 回调 |
 | `PlotSchedulingPreflightHook` | 在状态更新后按 Scene 时间选择大纲/池候选；强制项直接暂存，软约束项隔离调用判断 LLM |
@@ -78,7 +78,9 @@ TurnPlanResolver
   ├─ TurnExecutionSnapshot
   │    mode / style / player character / rendered Story Prompt / policy
   ├─ MainLLMSelection
-  └─ PlotScheduleSnapshot
+  ├─ PlotScheduleSnapshot
+  ├─ PersistentMemory / StoryMemory immutable snapshots
+  └─ AdjudicationContextSnapshot
        │
        ▼
 TurnRuntimeFactory
@@ -104,7 +106,7 @@ TurnRuntimeFactory
   ├─ Scene 时间无效 ─► warning 并跳过
   ├─ 每轮最多一个到期大纲节点 + 一个池事件
   ├─ forced ─► 直接暂存 triggered + 最终 user runtime suffix 注入
-  └─ soft   ─► 独立 LLM 判断；reason 双重限长，triggered / deferred / error 都先写 scratch
+  └─ soft   ─► 独立 LLM 判断；可查已提交 SQL 历史，reason 双重限长，triggered / deferred / error 都先写 scratch
        │
        ▼
 TurnPreparation
@@ -194,30 +196,36 @@ Outcome → 仅当 NOT_REQUIRED 时 Route → scene/逐普通表 Update
 
 Outcome、Route 和每个 Update 都是独立 LLM 调用，不会在同一个 sub-agent turn 中混合完成。
 
-### 输入与历史窗口
+### 共享裁定 Context、输入与历史窗口
 
-Outcome 和 Route 可以看到：
+Outcome、Route、每个隔离 Update 与每个软 Plot 候选都从同一个不可变 `AdjudicationContextSnapshot` 开始。它使用显式白名单，只包含：
 
-- SubAgent 的世界书、角色卡等系统上下文；
-- 本 turn 固化的玩家角色身份；
-- 当前 scene；
-- 所有可进入 LLM Context 的 normal session 状态表；
-- 最近最多 5 个已存在 turn 的独立历史窗口；
-- 当前原始 user input。
+- 裁定事实与权限边界；
+- 本 turn 已渲染的 Story Prompt；
+- 世界书；
+- 本 turn 固化的玩家角色绑定和角色卡；
+- Evidence 仍有效的 Persistent Memory；
+- Evidence 仍有效的 Story Memory。
+
+它明确不复用主 Fixed Layer，也不读取 RP Module registry/runtime；因此 Summary、Recall、叙事风格、正文格式、核心叙事/状态同步协议、Message Mode，以及当前或未来任何 `rp_module:*` 提示词都不能进入这些裁定。每个阶段只在共享前缀后追加自己的窄契约、当前 scene/状态目标、近期原始历史窗口和当前输入。RP Module 快照仍决定 Outcome/Plot 能力是否存在及其业务配置，但模块提示词本身不参与判断。
+
+Outcome 和 Route 可以看到当前 scene、所有可进入 LLM Context 的 normal session 状态表、最近最多 5 个已存在 turn 的独立历史窗口和当前原始 user input。每个 Update 只看到自己的 scene 或单表目标；软 Plot 看到当前 scratch scene/普通状态表、最近 N 个完整可推进世界 turn、当前输入和本轮已接受的其它调度候选。强制 Plot 在到期后直接暂存，不调用 Judge，因而也不获得裁定 Context 或历史工具。
 
 StatusSubAgent 不使用主 Agent 的 `summary_processed` 历史过滤。它直接从本 turn `base_history` 取最近 turn，跳过 system message，并将单条内容限制在前 500 个字符。这个窗口会随 turn 滚动；当前实现优先保证近期判断语义，没有额外的历史归纳预处理层。
+
+上述近期窗口不替代历史真源查询。Outcome、Route、每个 Update 与每个软 Plot 候选都额外获得 `history_search` / `history_read`，并分别拥有 `agent.adjudication.max_history_tool_rounds`（默认 5）轮独立预算。任一响应中的一个或多个历史调用合计消耗一轮；历史结果和临时 assistant `reasoning_content`/tool transcript 只回传给该阶段的下一次 Provider 请求，不写消息、Summary 或 Memory。若同一响应混用历史与终结工具，历史查询照常执行，但终结工具不执行，模型必须读取结果后重新单独决定。预算耗尽后再允许一次只含终结 schema 的 Provider 调用。
 
 角色绑定但无法解析 `characterName` 的普通表会在 data/context 边界记录 warning 并排除，因此也不会进入 Route catalog。
 
 ### 阶段 A：Outcome 判定
 
-只有当前 RP Module 快照提供 Narrative Outcome，且模块允许自动裁定或检测到明确随机意图时，Outcome 阶段才获得唯一工具：
+只有当前 RP Module 快照提供 Narrative Outcome，且模块允许自动裁定或检测到明确随机意图时，Outcome 阶段才获得唯一终结工具：
 
 ```text
 rp_story_outcome(reason, actor?)
 ```
 
-该阶段不得获得 scene/status 工具，结果使用类型化状态表达：
+除共享的两个只读历史工具外，该阶段不得获得 scene/status 或其它 RP Module 工具，结果使用类型化状态表达：
 
 | 结果 | 含义 | 后续行为 |
 |---|---|---|
@@ -231,7 +239,7 @@ Outcome 一旦 `STAGED`，本轮主 Context 不再注入 Narrative Outcome fixed
 
 ### 阶段 B：状态目标 Route
 
-Route 只在 Outcome 为 `NOT_REQUIRED` 且至少存在一个状态工具时运行。它只有一个不产生写入的结构化工具：
+Route 只在 Outcome 为 `NOT_REQUIRED` 且至少存在一个状态工具时运行。除共享的两个只读历史工具外，它只有一个不产生写入的结构化终结工具：
 
 ```text
 select_status_targets({
@@ -270,8 +278,8 @@ normal table B 被选中      → 1 次 table B update
 
 | 目标 | 可见 Context | 可用工具 | 代码边界 |
 |---|---|---|---|
-| scene | 当前 scene + 近期历史 + input | 本轮动态注册的 scene 工具 | 禁止普通表工具；默认只能改已有 value |
-| 单张 normal 表 | 该表被选中的 rows + 近期历史 + input | `status_table_set_values` | 固定 table ID + key allowlist |
+| scene | 共享裁定前缀 + 当前 scene + 近期历史 + input | `history_search` / `history_read` + 本轮动态注册的 scene 工具 | 禁止普通表工具；默认只能改已有 value |
+| 单张 normal 表 | 共享裁定前缀 + 该表被选中的 rows + 近期历史 + input | `history_search` / `history_read` + `status_table_set_values` | 固定 table ID + key allowlist |
 
 隔离 Update 使用同一份稳定 system contract，不再根据整轮工具全集动态枚举能力。contract 明确“只能使用本请求实际提供的工具”，而每次实际下发的 schema 仍只包含当前 scene 或单张 normal 表，因此提示词与执行能力一致。user message 固定按以下顺序组织：
 
@@ -302,10 +310,10 @@ Provider 缓存匹配的是实际序列化并 tokenized 后的请求共同前缀
 | 调用链路 | Provider message 顺序 | 缓存族边界 |
 |---|---|---|
 | Main Agent | Fixed / Persistent / Summary → Hot History 原始 messages → Story / Status / Recall / RP Modules → Current User | 同一主模型与工具集合；rolling history 和动态层决定后续公共前缀 |
-| StatusSubAgent | 一条阶段 system contract → 一条动态 user（history/action/target） | Outcome、Route、scene Update 与各单表 Update 分开 |
+| StatusSubAgent | 共享裁定 system messages → 阶段 system contract → 动态 user；查询后追加临时 assistant/tool transcript | Outcome、Route、scene Update 与各单表 Update 分开 |
 | MemorySubAgent | 一条 pipeline system contract → 一条动态 user | Recall、Story、Summary、Batch Summary、Overall Summary 分开 |
 
-StatusSubAgent 与 MemorySubAgent 本身没有使用主 Context 的 system 合并逻辑；它们保持稳定 system 在前、动态 user 在后的两消息结构。主 Context 是否合并不会直接改变 SubAgent 请求，低命中更常由不同阶段 schema、动态 user 内容、服务端缓存策略或共享缓存容量造成。
+StatusSubAgent 不使用主 Context 的 system 合并逻辑，而是复用独立的裁定前缀；MemorySubAgent 仍保持自己的 pipeline system + 动态 user 结构。主 Context 是否合并不会直接改变 SubAgent 请求，低命中更常由不同阶段 schema、动态 user 内容、服务端缓存策略或共享缓存容量造成。
 
 DeepSeek 的 context cache 由服务端自动、best-effort 管理。以 `A` 为公共前缀，先请求 `A+B`、再请求 `A+C` 时，第二次仍可能没有命中；服务端识别并持久化公共前缀后，后续 `A+D` 才可能报告命中。因此不做额外预热、不为了缓存合并 Outcome/Route/Update，也不向单目标调用暴露工具全集。规则以 [DeepSeek Context Caching](https://api-docs.deepseek.com/guides/kv_cache/) 为准。
 
@@ -330,6 +338,8 @@ assistant 的 `content + reasoning_content + tool_calls` 与工具结果一起�
 Provider 请求，使模型延续当前工具链推理。最终正文完成后不把 reasoning 或中间
 工具 transcript 写入主历史；它们只进入现有 SSE/telemetry/tool record。下一玩家
 turn 仍由正式剧情历史重建 Context，并开始新的 Provider 推理链。
+
+裁定工具循环遵循相同的 DeepSeek `reasoning_content` 连续性，但其 transcript 仅存在于当前 Outcome、Route、单目标 Update 或单个软 Plot 候选内部；不同阶段不会互相继承查询预算或临时推理。
 
 `verbose_logging` 保留其它工具既有的 arguments 与 200 字符结果预览，但 `history_search` / `history_read` 是敏感工具：同步与流式 runner 都只记录工具名以及 arguments/result 各自的 `<redacted chars=N>`，不得把搜索词、excerpt 或历史正文写入日志。
 
@@ -426,12 +436,12 @@ Fixed Layer
 
 ### SQL 历史查询工具
 
-主 Agent 需要核对已归纳或已移出 Hot History 的原始上下文时，使用固定的两阶段只读链路：
+主 Agent，以及 Outcome、状态 Route、每个状态 Update、每个软 Plot 候选需要核对近期窗口之外的原始事实时，使用同一套两阶段只读链路：
 
 1. `history_search` 接受具体词项，仅在当前 Session 已提交的 SQL 主消息表中搜索 user/assistant 消息，返回去重后的候选 turn、代表消息和短 excerpt。
 2. `history_read` 接受候选 `turn_id`，按数据库中实际存在的 turn 读取 anchor 及有限的前后窗口，不假设 turn ID 连续。
 
-查询包含已标记 `summary_processed` 的消息以及 `neutral | ic | ooc | gm` 四种 mode，因而历史编辑、删除、truncate 或 clear 会立即反映 SQL 真源。它不读取 append-only 冷备、本轮尚未 commit 的 scratch、Summary/Story/Persistent Memory 或 Memory recall 索引，也不把临时 tool transcript 持久化回消息表。旧文件工具仍保留实现和直接测试，但不属于默认 registry。
+查询包含已标记 `summary_processed` 的消息以及 `neutral | ic | ooc | gm` 四种 mode，因而历史编辑、删除、truncate 或 clear 会立即反映 SQL 真源。它只读取正 `turn_id` 的 user/assistant 主历史，不读取 append-only 冷备、本轮尚未 commit 的 scratch、Summary/Story/Persistent Memory 或 Memory recall 索引，也不把临时 tool transcript 持久化回消息表。裁定阶段各自使用独立的有界循环，查询预算不跨阶段共享。旧文件工具仍保留实现和直接测试，但不属于默认 registry。
 
 Plot Scheduler 是例外 placement：实际触发的至多两条事件不进入 `RP_MODULES`，而由 `ContextRenderer` 以 `[engine_plot_directive]` 追加到当前 user message 最后，晚于原始输入和普通 user suffix。载荷只含按序事件标题与 directive。它可覆盖玩家对世界/NPC 结果的冲突要求，但不能覆盖系统契约、已暂存 Outcome、实际工具边界或非 GM turn 的玩家角色主权。这个 suffix 只供当前 LLM 请求使用；事务中已暂存的 user message 不含它，因此历史、Summary、Memory、Dream 和正文 SSE 都不会看到它。
 
@@ -495,7 +505,7 @@ Status preflight 的单目标可恢复失败不会自动终止后续即时目标
 
 ## LLM 调用数量
 
-下表只计算最低调用数；主 Agent 因工具调用产生的后续 round 需另计。
+下表只计算没有历史查询时的最低调用数；主 Agent 因工具调用产生的后续 round 需另计。
 
 | 情况 | 最低调用组成 |
 |---|---|
@@ -510,6 +520,7 @@ Status preflight 的单目标可恢复失败不会自动终止后续即时目标
 
 这里的一个状态目标是 scene 或一张 normal 表；同一表选中多个 key 仍只产生一次 Update 调用。
 包含 Outcome 的行假设本轮实际提供了 outcome schema；模块未提供时直接从 Route 开始计算。
+Outcome、Route、每个状态目标和每个软 Plot 候选都是独立裁定阶段。每个阶段若使用历史工具，会在最低 1 次终结调用之外增加最多 5 次查询调用，即单阶段最多 6 次 Provider 调用；配置必须是正整数，非法值在启动时失败。强制 Plot 不调用 Provider。
 
 ## 历史编辑与回滚边界
 
@@ -524,6 +535,7 @@ Status preflight 的单目标可恢复失败不会自动终止后续即时目标
 
 - 主 Agent 模型按 `config default < story override < session override` 解析，并固化进本 turn plan。
 - StatusSubAgent 的 Outcome、Route 和隔离 Update 当前复用 `agent.status_sub_agent` 的 provider 配置与逻辑。
+- 软 Plot 继续使用 `agent.plot_scheduler` provider；共享裁定 Context 和历史工具不改变 biz 路由。
 - 当前没有按阶段、成本或 provider 健康度动态降级的编排；如需使用低成本或本地模型，应通过现有 biz provider 配置切换整个 StatusSubAgent 链路。
 - 当前没有额外轻量预处理 LLM、归纳式 StatusSubAgent 历史窗口，也没有把 Outcome 延迟到多个 turn 后批量判断。
 - rolling history 可能降低严格前缀 cache 命中率；隔离 Update 通过稳定 system contract 和 `Recent Conversation → User Action → Selected State Target` 扩大同一 Route 内的公共前缀，不增加动态 provider 路由复杂度。

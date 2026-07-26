@@ -19,6 +19,7 @@ from rpg_core.context.models import (
     RPModuleRuntimeSection,
     RPModulesLayer,
     StatusTablesLayer,
+    StoryMemoryFact,
     StoryMemoryLayer,
     SummaryLayer,
     UserExtensionBlock,
@@ -136,6 +137,28 @@ class RPGContextBuilder:
             for item in items
         )
 
+    async def load_story_memory_snapshot(
+        self,
+    ) -> tuple[StoryMemoryFact, ...]:
+        """Load one immutable evidence-valid SQL projection for a turn."""
+
+        if self._story_memory is None or not self.config.enable_story_memory:
+            return ()
+        items = await self._story_memory.load_snapshot()
+        return tuple(
+            StoryMemoryFact(
+                memory_id=item.memory_id,
+                turn_id=item.turn_id,
+                text=item.text,
+                memory_kind=item.memory_kind,
+                epistemic_status=item.epistemic_status,
+                salience=item.salience,
+                source_turn_start=item.source_turn_start,
+                source_turn_end=item.source_turn_end,
+            )
+            for item in items
+        )
+
     def close(self) -> None:
         """Release session-local store registrations and transient context."""
 
@@ -173,8 +196,9 @@ class RPGContextBuilder:
         scene_tracker: SceneTracker | None = None,
         rp_module_sections: list[RPModuleRuntimeSection] | None = None,
         persistent_memory_snapshot: tuple[PersistentMemoryFact, ...] = (),
+        story_memory_snapshot: tuple[StoryMemoryFact, ...] = (),
     ) -> RPGContext:
-        """构建 5 层 RPGContext。
+        """构建结构化 RPGContext。
 
         Args:
             fixed_layer: 预组装好的固定层快照，包含 sections 及角色卡/世界书结构化数据。
@@ -183,6 +207,8 @@ class RPGContextBuilder:
             summarized_message_count: 被 ``summary_processed`` 排除的消息数。
             status_mgr: 状态管理器，为 None 时动态层跳过状态表格模块。
             rp_module_sections: 可选 RP module 运行态；静态契约应放在 fixed_layer.sections。
+            persistent_memory_snapshot: 本次 turn/preview 固化的常驻记忆投影。
+            story_memory_snapshot: 本次 turn/preview 固化的剧情记忆投影。
         """
         resolved_history = list(history_messages or [])
         user_text = (
@@ -218,12 +244,7 @@ class RPGContextBuilder:
         # ── 6. Build Dynamic Layer modules ──────────────────────────
         # Keep the conceptual dynamic-layer order deterministic. ContextRenderer
         # owns the final provider message layout and its cache-prefix boundary.
-        story_details: list[dict] = []
-        if self._story_memory and self.config.enable_story_memory:
-            try:
-                story_details = self._story_memory.get_all()
-            except Exception as exc:
-                logger.debug("[RPGContextBuilder] story memory layer skipped: {}", exc)
+        story_details = list(story_memory_snapshot)
 
         status_tables: list[dict] = []
         if status_mgr and self.config.enable_status_tables:

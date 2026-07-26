@@ -19,6 +19,7 @@ from rpg_core.status.context import render_status_tables_context
 from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
 
 if TYPE_CHECKING:
+    from rpg_core.agent.adjudication import AdjudicationContextSnapshot
     from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
     from rpg_core.agent.runtime.tools import AgentToolService
     from rpg_core.agent.sub_agents.status.agent import StatusSubAgent
@@ -54,6 +55,7 @@ class StatusPreflightHook:
         turn_stats: "TurnStats",
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
         player_character: "TurnPlayerCharacterSnapshot | None" = None,
+        adjudication_context: "AdjudicationContextSnapshot | None" = None,
     ) -> StatusSubAgentResult | None:
         sub_agent = self._status_sub_agent()
         if sub_agent is None:
@@ -109,6 +111,8 @@ class StatusPreflightHook:
                 user_input=user_input,
                 turn_stats=turn_stats,
                 player_character=player_character,
+                adjudication_context=adjudication_context,
+                history_tools=self._tool_service.history_tools,
             )
         if result.updated:
             logger.info(

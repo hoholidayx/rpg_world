@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TypeAlias
 
 from llm_client.keys import AGENT_PLOT_SCHEDULER_BIZ_KEY
 from llm_client.types import LLMProvider, LLMResponse
-from rpg_core.agent.telemetry import CallRecord, TurnStats
+from rpg_core.agent.adjudication import run_adjudication_tool_loop
+from rpg_core.agent.telemetry import TurnStats
+from rpg_core.agent.tools.history import HistoryToolSet
 from rpg_core.context.models import Message
 from rpg_core.rp_modules.plot_scheduler.models import (
     PLOT_SUITABILITY_REASON_MAX_CHARS,
@@ -17,6 +18,7 @@ from rpg_core.rp_modules.plot_scheduler.models import (
     PlotScheduleInjection,
     PlotSuitabilityDecision,
 )
+from rpg_core.settings import settings
 
 PLOT_SUITABILITY_TOOL_NAME = "plot_schedule_decision"
 PLOT_SUITABILITY_SCHEMA: dict[str, object] = {
@@ -51,8 +53,20 @@ class PlotScheduleJudgeResponseError(ValueError):
 
 
 class PlotScheduleJudge:
-    def __init__(self, provider_factory: _ProviderFactory | None = None) -> None:
+    def __init__(
+        self,
+        provider_factory: _ProviderFactory | None = None,
+        *,
+        history_tools: HistoryToolSet | None = None,
+        max_history_tool_rounds: int | None = None,
+    ) -> None:
         self._provider_factory = provider_factory
+        self._history_tools = history_tools
+        self._max_history_tool_rounds = (
+            max_history_tool_rounds
+            if max_history_tool_rounds is not None
+            else settings.adjudication_max_history_tool_rounds
+        )
 
     async def judge(
         self,
@@ -61,22 +75,17 @@ class PlotScheduleJudge:
         turn_stats: TurnStats,
     ) -> PlotSuitabilityDecision:
         provider = await self._provider()
-        started_at = time.monotonic()
-        result = await provider.chat(
-            [message.to_provider_dict() for message in messages],
-            tools=[PLOT_SUITABILITY_SCHEMA],
+        loop_result = await run_adjudication_tool_loop(
+            provider=provider,
+            messages=messages,
+            terminal_schemas=[PLOT_SUITABILITY_SCHEMA],
+            source="plot_scheduler",
+            history_tools=self._history_tools,
+            max_history_tool_rounds=self._max_history_tool_rounds,
+            turn_stats=turn_stats,
         )
-        duration_ms = (time.monotonic() - started_at) * 1000
+        result = loop_result.response
         if isinstance(result, LLMResponse):
-            turn_stats.add_call(
-                CallRecord(
-                    source="plot_scheduler",
-                    model=result.model or provider.get_default_model(),
-                    usage=result.usage,
-                    duration_ms=duration_ms,
-                    reasoning_content=result.reasoning_content,
-                )
-            )
             tool_calls: object = result.tool_calls
         elif isinstance(result, dict):
             tool_calls = result.get("tool_calls")

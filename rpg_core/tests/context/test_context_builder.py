@@ -22,6 +22,7 @@ from rpg_core.context.models import (
     RPModulesLayer,
     Role,
     StatusTablesLayer,
+    StoryMemoryFact,
     StoryMemoryLayer,
     SummaryLayer,
     UserMessageLayer,
@@ -40,8 +41,8 @@ class FakeStoryStore:
     def __init__(self, details):
         self.details = details
 
-    def get_all(self):
-        return list(self.details)
+    async def load_snapshot(self):
+        return tuple(self.details)
 
 
 class FakeSummaryStore:
@@ -64,6 +65,19 @@ class FakeStatusTracker:
     table_key = ("全局状态", "当前场景")
 
 
+def _story_fact(text: str = "story detail") -> StoryMemoryFact:
+    return StoryMemoryFact(
+        memory_id=1,
+        turn_id=1,
+        text=text,
+        memory_kind="event",
+        epistemic_status="confirmed",
+        salience=0.8,
+        source_turn_start=1,
+        source_turn_end=1,
+    )
+
+
 def _fake_render(template_name: str, **context: object) -> str:
     if template_name == "layers/fixed_layer.jinja":
         section_ids = ",".join(section.id for section in context["fixed_sections"])
@@ -73,7 +87,7 @@ def _fake_render(template_name: str, **context: object) -> str:
     if template_name == "modules/overall_summary.jinja":
         return f"summary|{context['text']}"
     if template_name == "modules/story_memory.jinja":
-        return "story|" + ",".join(item.get("text", "") for item in context["story_details"])
+        return "story|" + ",".join(item.text for item in context["story_details"])
     if template_name == "modules/recalled_memory.jinja":
         return "recalled|" + ",".join(context["recalled_items"])
     if template_name == "modules/status_tables.jinja":
@@ -119,10 +133,22 @@ async def test_build_context_layers_and_user_extensions():
         SimpleNamespace(memory_id="m1", revision_number=1, text="p1", memory_kind="event", epistemic_status="confirmed", salience=0.8),
         SimpleNamespace(memory_id="m2", revision_number=2, text="p2", memory_kind="clue", epistemic_status="reported", salience=0.7),
     ]))
-    builder.set_story_memory_store(FakeStoryStore([{"text": "story 1"}]))
+    builder.set_story_memory_store(FakeStoryStore([
+        SimpleNamespace(
+            memory_id=1,
+            turn_id=2,
+            text="story 1",
+            memory_kind="event",
+            epistemic_status="confirmed",
+            salience=0.8,
+            source_turn_start=2,
+            source_turn_end=2,
+        )
+    ]))
     builder.set_recalled_memory_store(FakeRecalledStore(["recall 1"]))
     builder.set_batch_summary_store(FakeSummaryStore(("overall summary", 1)))
     persistent_memory_snapshot = await builder.load_persistent_memory_snapshot()
+    story_memory_snapshot = await builder.load_story_memory_snapshot()
 
     messages = [
         Message(Role.SYSTEM, "system"),
@@ -152,6 +178,7 @@ async def test_build_context_layers_and_user_extensions():
         ),
         scene_tracker=FakeStatusTracker(),
         persistent_memory_snapshot=persistent_memory_snapshot,
+        story_memory_snapshot=story_memory_snapshot,
     )
 
     assert isinstance(ctx, RPGContext)
@@ -160,7 +187,7 @@ async def test_build_context_layers_and_user_extensions():
     assert [item.text for item in ctx.persistent_memory.memories] == ["p1", "p2"]
     assert ctx.summary.text == "overall summary"
     assert [m.content for m in ctx.hot_history.messages] == ["u2", "a2"]
-    assert ctx.story_memory.details == [{"text": "story 1"}]
+    assert [item.text for item in ctx.story_memory.details] == ["story 1"]
     assert ctx.recalled_memory.items == ["recall 1"]
     assert [table["name"] for table in ctx.status_tables.tables] == ["世界状态"]
     assert ctx.user_message.before[0].template == "modules/user_reply_prefix.jinja"
@@ -300,7 +327,7 @@ def test_context_dynamic_system_layers_follow_cache_optimized_order():
         fixed_layer=FixedLayerData(
             sections=[FixedLayerSection(id="core", title="核心", content="fixed")]
         ),
-        story_memory=StoryMemoryLayer(details=[{"text": "story detail"}]),
+        story_memory=StoryMemoryLayer(details=[_story_fact()]),
         status_tables=StatusTablesLayer(
             tables=[{"name": "状态", "headers": ["k"], "rows": [["v"]]}]
         ),
@@ -349,7 +376,7 @@ def test_context_preserves_canonical_layers_and_history_message_order():
             Message(Role.ASSISTANT, "a1"),
             Message(Role.SYSTEM, "legacy system"),
         ]),
-        story_memory=StoryMemoryLayer(details=[{"text": "story detail"}]),
+        story_memory=StoryMemoryLayer(details=[_story_fact()]),
         status_tables=StatusTablesLayer(
             tables=[{"name": "状态", "headers": ["k"], "rows": [["v"]]}]
         ),

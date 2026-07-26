@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from rpg_core.agent.turn.models import TurnExecutionPlan, TurnRequest
@@ -37,15 +38,30 @@ class TurnPlanResolver:
             request,
             require_player_character=True,
         )
+        (
+            main_llm,
+            persistent_memory,
+            story_memory,
+        ) = await asyncio.gather(
+            self._model_runtime.resolve(self._lifecycle.session_id),
+            self._context_service.load_persistent_memory_snapshot(),
+            self._context_service.load_story_memory_snapshot(),
+        )
         return TurnExecutionPlan(
             execution=execution,
-            main_llm=await self._model_runtime.resolve(self._lifecycle.session_id),
+            main_llm=main_llm,
             rp_modules=rp_modules,
             plot_schedule=self._plot_schedule_resolver.resolve(
                 self._lifecycle.session_id,
                 rp_modules,
             ),
-            persistent_memory=(
-                await self._context_service.load_persistent_memory_snapshot()
+            persistent_memory=persistent_memory,
+            story_memory=story_memory,
+            adjudication_context=(
+                self._context_service.build_adjudication_context_snapshot(
+                    turn_execution=execution,
+                    persistent_memory_snapshot=persistent_memory,
+                    story_memory_snapshot=story_memory,
+                )
             ),
         )

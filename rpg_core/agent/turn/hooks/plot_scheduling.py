@@ -23,9 +23,9 @@ from rpg_core.rp_modules.plot_scheduler.scheduler import PlotScheduleSelector
 if TYPE_CHECKING:
     from rpg_core.agent.runtime.context import AgentContextService
     from rpg_core.agent.telemetry import TurnStats
+    from rpg_core.agent.tools.history import HistoryToolSet
     from rpg_core.agent.turn.models import TurnExecutionPlan
     from rpg_core.agent.turn.transaction import TurnScratch
-    from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
     from rpg_core.session import SessionManager
 
 _TAG = "[PlotSchedulingPreflight]"
@@ -39,13 +39,14 @@ class PlotSchedulingPreflightHook:
         *,
         context_service: "AgentContextService",
         session_manager: "SessionManager",
+        history_tools: "HistoryToolSet | None" = None,
         selector: PlotScheduleSelector | None = None,
         judge: PlotScheduleJudge | None = None,
     ) -> None:
         self._context_service = context_service
         self._session_manager = session_manager
         self._selector = selector or PlotScheduleSelector()
-        self._judge = judge or PlotScheduleJudge()
+        self._judge = judge or PlotScheduleJudge(history_tools=history_tools)
 
     async def run(
         self,
@@ -53,8 +54,11 @@ class PlotSchedulingPreflightHook:
         plan: "TurnExecutionPlan",
         turn_scratch: "TurnScratch",
         turn_stats: "TurnStats",
-        rp_module_runtime: "RPModuleTurnRuntime | None",
+        rp_module_runtime: object | None = None,
     ) -> None:
+        # Kept as a compatibility-only argument. Generic RP Module fixed/runtime
+        # content is intentionally never read by Plot adjudication.
+        del rp_module_runtime
         snapshot = plan.plot_schedule
         if (
             not snapshot.enabled
@@ -92,7 +96,6 @@ class PlotSchedulingPreflightHook:
                 plan=plan,
                 turn_scratch=turn_scratch,
                 turn_stats=turn_stats,
-                rp_module_runtime=rp_module_runtime,
                 candidate=candidate,
                 scene_time=scene_time,
             )
@@ -103,7 +106,6 @@ class PlotSchedulingPreflightHook:
         plan: "TurnExecutionPlan",
         turn_scratch: "TurnScratch",
         turn_stats: "TurnStats",
-        rp_module_runtime: "RPModuleTurnRuntime | None",
         candidate: PlotScheduleCandidate,
         scene_time,
     ) -> None:
@@ -123,8 +125,7 @@ class PlotSchedulingPreflightHook:
                 history_turns=plan.plot_schedule.judge_history_turns,
                 status_manager=turn_scratch.status_manager,
                 scene_tracker=turn_scratch.scene_tracker,
-                rp_module_runtime=rp_module_runtime,
-                turn_execution=plan.execution,
+                adjudication_context=plan.adjudication_context,
             )
             judgment = await self._judge.judge(messages, turn_stats=turn_stats)
         except Exception as exc:

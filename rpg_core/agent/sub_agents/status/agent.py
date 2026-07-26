@@ -1,10 +1,10 @@
 """StatusSubAgent — 统一状态表预更新子 Agent.
 
-继承 ``BaseSubAgent``，通过 ``SubAgentContext`` 获取世界书 + 角色卡上下文，
-确保场景状态变更判断不会 OOC。
+生产 turn 使用共享、模块中立的裁定快照；直接/bootstrap 调用仍可通过
+``SubAgentContext`` 获取窄世界书与角色卡上下文。
 
-编排层（``RPGGameAgent.send``）在构建 5 层 RPG context *之前* 调用，
-用精简上下文（历史 + 状态描述 + 用户输入）预处理状态表变更，
+编排层（``RPGGameAgent.send``）在构建结构化主 Context *之前* 调用，
+用共享事实前缀 + 历史 + 状态描述 + 用户输入预处理状态表变更，
 避免主 LLM chat loop 的场景工具 round-trip 开销。
 
 The production entrypoint is :meth:`StatusSubAgent.run_preflight`, which runs
@@ -21,10 +21,14 @@ from typing import TYPE_CHECKING, Callable, Iterator, TypeAlias
 
 from loguru import logger
 
+from llm_client.types import LLMResponse, LLMUsage
 from rpg_data.model.status import (
     STATUS_ROW_UPDATE_RULE_KEY,
 )
-from llm_client.types import LLMResponse, LLMUsage
+from rpg_core.agent.adjudication import (
+    AdjudicationContextSnapshot,
+    run_adjudication_tool_loop,
+)
 from rpg_core.agent.telemetry import CallRecord, TurnStats
 from rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_core.agent.sub_agents.status.models import (
@@ -48,24 +52,26 @@ from rpg_core.agent.sub_agents.status.prompts import (
     STATUS_ROUTER_SCHEMA,
     STATUS_ROUTER_TOOL_NAME,
 )
-from rpg_core.tooling.base import BaseTool
-from rpg_core.tooling.registry import ToolRegistry
+from rpg_core.agent.tools.history import HistoryToolSet
 from rpg_core.agent.tools.state import StateToolSet
-from rpg_core.context.models import Message, Role
 from rpg_core.context.fingerprint import (
     build_request_fingerprint,
     request_fingerprint_log_values,
 )
+from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SCENE_TOOL_NAMES
 from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
 from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
+from rpg_core.tooling.base import BaseTool
+from rpg_core.tooling.registry import ToolRegistry
 
 if TYPE_CHECKING:
-
     from rpg_core.agent.sub_agents.context import SubAgentContext
     from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
+
+
 # ── constants ──────────────────────────────────────────────────────────
 
 _TAG = "[StatusSubAgent]"
@@ -202,12 +208,22 @@ class StatusSubAgent(BaseSubAgent):
         context_tables: list[dict[str, object]],
         user_input: str,
         max_history_rounds: int | None = None,
+        max_history_tool_rounds: int | None = None,
         turn_stats: TurnStats | None = None,
         player_character: "TurnPlayerCharacterSnapshot | None" = None,
+        adjudication_context: AdjudicationContextSnapshot | None = None,
+        history_tools: HistoryToolSet | None = None,
     ) -> StatusSubAgentResult:
         """Run the fixed outcome -> route -> selected-update pipeline."""
         if max_history_rounds is None:
             max_history_rounds = settings.status_history_rounds
+        if max_history_tool_rounds is None:
+            max_history_tool_rounds = (
+                settings.adjudication_max_history_tool_rounds
+            )
+        adjudication_context = (
+            adjudication_context or AdjudicationContextSnapshot()
+        )
         if self._busy:
             logger.debug(_TAG + " preflight skipped: reason=reentrancy_guard")
             return StatusSubAgentResult()
@@ -238,6 +254,9 @@ class StatusSubAgent(BaseSubAgent):
                 result=result,
                 turn_stats=turn_stats,
                 player_character=player_character,
+                adjudication_context=adjudication_context,
+                history_tools=history_tools,
+                max_history_tool_rounds=max_history_tool_rounds,
             )
             result.outcome_decision = outcome
             if outcome is not OutcomeDecision.NOT_REQUIRED:
@@ -267,6 +286,9 @@ class StatusSubAgent(BaseSubAgent):
                 max_history_rounds=max_history_rounds,
                 turn_stats=turn_stats,
                 player_character=player_character,
+                adjudication_context=adjudication_context,
+                history_tools=history_tools,
+                max_history_tool_rounds=max_history_tool_rounds,
             )
             result.route = route
             result.call_stats.extend(route.call_stats)
@@ -287,6 +309,9 @@ class StatusSubAgent(BaseSubAgent):
                 result=result,
                 turn_stats=turn_stats,
                 player_character=player_character,
+                adjudication_context=adjudication_context,
+                history_tools=history_tools,
+                max_history_tool_rounds=max_history_tool_rounds,
             )
             return result
         except _StatusPrewriteRollbackError as exc:
@@ -499,6 +524,9 @@ class StatusSubAgent(BaseSubAgent):
         result: StatusSubAgentResult,
         turn_stats: TurnStats | None,
         player_character: "TurnPlayerCharacterSnapshot | None",
+        adjudication_context: AdjudicationContextSnapshot,
+        history_tools: HistoryToolSet | None,
+        max_history_tool_rounds: int,
     ) -> OutcomeDecision:
         outcome_schema = self._schemas_for_names({NARRATIVE_OUTCOME_TOOL_NAME})
         if not outcome_schema:
@@ -514,31 +542,27 @@ class StatusSubAgent(BaseSubAgent):
             user_input[:200],
         )
         recent = self._format_history_window(history, max_history_rounds)
-        messages = [
-            Message(
-                role=Role.SYSTEM,
-                content=self._build_system_context(
-                    OUTCOME_ONLY_SYSTEM_PROMPT,
-                    player_character=player_character,
-                ),
-            ).to_dict(),
-            Message(
-                role=Role.USER,
-                content=(
-                    f"## Current State\n\n{state_context}\n\n"
-                    f"## Recent Conversation\n\n{recent}\n\n"
-                    f"## User action\n{user_input}\n\n"
-                    "若存在两个或以上会实质改变剧情的合理结果，调用一次 "
-                    "rp_story_outcome；否则不要调用工具。"
-                ),
-            ).to_dict(),
-        ]
-        llm_result, call_record = await self._chat_with_stats(
+        messages = self._adjudication_stage_messages(
+            adjudication_context=adjudication_context,
+            pipeline_prompt=OUTCOME_ONLY_SYSTEM_PROMPT,
+            user_content=(
+                f"## Current State\n\n{state_context}\n\n"
+                f"## Recent Conversation\n\n{recent}\n\n"
+                f"## User action\n{user_input}\n\n"
+                "若存在两个或以上会实质改变剧情的合理结果，调用一次 "
+                "rp_story_outcome；否则不要调用工具。"
+            ),
+            player_character=player_character,
+        )
+        llm_result, call_records = await self._run_adjudication_stage(
             messages,
             outcome_schema,
             source="status_outcome_preflight",
+            history_tools=history_tools,
+            max_history_tool_rounds=max_history_tool_rounds,
+            turn_stats=turn_stats,
         )
-        self._append_call_record(result.call_stats, turn_stats, call_record)
+        result.call_stats.extend(call_records)
         calls = [_normalize_tool_call(call) for call in self._tool_calls(llm_result)]
         if not calls:
             self._log_verbose(
@@ -598,6 +622,9 @@ class StatusSubAgent(BaseSubAgent):
         max_history_rounds: int,
         turn_stats: TurnStats | None,
         player_character: "TurnPlayerCharacterSnapshot | None",
+        adjudication_context: AdjudicationContextSnapshot,
+        history_tools: HistoryToolSet | None,
+        max_history_tool_rounds: int,
     ) -> StatusRouteResult:
         route = StatusRouteResult()
         catalog, policy_index = self._status_catalog(context_tables)
@@ -624,34 +651,32 @@ class StatusSubAgent(BaseSubAgent):
             if scene_writable
             else "本轮没有 scene 写入工具，scene 必须为 false；"
         )
-        messages = [
-            Message(
-                role=Role.SYSTEM,
-                content=self._build_system_context(
-                    "你是状态更新路由器。只选择本轮确实涉及的状态目标，不修改状态。"
-                    "字段的值只在事实明确且实际变化时选择；表 description 中的共同"
-                    "规则始终适用，若字段带 update_rule，还必须确认该字段专属规则"
-                    "已经满足。",
-                    player_character=player_character,
-                ),
-            ).to_dict(),
-            Message(
-                role=Role.USER,
-                content=(
-                    f"## Status Catalog\n{json.dumps(catalog, ensure_ascii=False)}\n\n"
-                    f"## Current State\n{state_context}\n\n"
-                    f"## Recent Conversation\n{recent}\n\n"
-                    f"## User action\n{user_input}\n\n"
-                    f"{scene_constraint}有目标时调用 select_status_targets；完全无关时不要调用。"
-                ),
-            ).to_dict(),
-        ]
-        llm_result, call_record = await self._chat_with_stats(
+        messages = self._adjudication_stage_messages(
+            adjudication_context=adjudication_context,
+            pipeline_prompt=(
+                "你是状态更新路由器。只选择本轮确实涉及的状态目标，不修改状态。"
+                "字段的值只在事实明确且实际变化时选择；表 description 中的共同"
+                "规则始终适用，若字段带 update_rule，还必须确认该字段专属规则"
+                "已经满足。"
+            ),
+            user_content=(
+                f"## Status Catalog\n{json.dumps(catalog, ensure_ascii=False)}\n\n"
+                f"## Current State\n{state_context}\n\n"
+                f"## Recent Conversation\n{recent}\n\n"
+                f"## User action\n{user_input}\n\n"
+                f"{scene_constraint}有目标时调用 select_status_targets；完全无关时不要调用。"
+            ),
+            player_character=player_character,
+        )
+        llm_result, call_records = await self._run_adjudication_stage(
             messages,
             [route_schema],
             source="status_router",
+            history_tools=history_tools,
+            max_history_tool_rounds=max_history_tool_rounds,
+            turn_stats=turn_stats,
         )
-        self._append_call_record(route.call_stats, turn_stats, call_record)
+        route.call_stats.extend(call_records)
         calls = [_normalize_tool_call(call) for call in self._tool_calls(llm_result)]
         if not calls:
             self._log_verbose(
@@ -729,6 +754,9 @@ class StatusSubAgent(BaseSubAgent):
         result: StatusSubAgentResult,
         turn_stats: TurnStats | None,
         player_character: "TurnPlayerCharacterSnapshot | None",
+        adjudication_context: AdjudicationContextSnapshot,
+        history_tools: HistoryToolSet | None,
+        max_history_tool_rounds: int,
     ) -> None:
         tables_by_id = {int(table.get("id", 0)): table for table in context_tables}
         recent = self._format_history_window(history, max_history_rounds)
@@ -810,30 +838,26 @@ class StatusSubAgent(BaseSubAgent):
                 ) from exc
             record_start = len(result.records)
             try:
-                messages = [
-                    Message(
-                        role=Role.SYSTEM,
-                        content=self._build_system_context(
-                            ROUTED_STATE_UPDATE_SYSTEM_PROMPT,
-                            player_character=player_character,
-                        ),
-                    ).to_dict(),
-                    Message(
-                        role=Role.USER,
-                        content=(
-                            f"## Recent Conversation\n{recent}\n\n"
-                            f"## User Action\n{user_input}\n\n"
-                            f"## Selected State Target\n{batch.selected_context}\n\n"
-                            "只更新这里列出的、已经确定且实际变化的值；没有变化不要调用工具。"
-                        ),
-                    ).to_dict(),
-                ]
-                llm_result, call_record = await self._chat_with_stats(
+                messages = self._adjudication_stage_messages(
+                    adjudication_context=adjudication_context,
+                    pipeline_prompt=ROUTED_STATE_UPDATE_SYSTEM_PROMPT,
+                    user_content=(
+                        f"## Recent Conversation\n{recent}\n\n"
+                        f"## User Action\n{user_input}\n\n"
+                        f"## Selected State Target\n{batch.selected_context}\n\n"
+                        "只更新这里列出的、已经确定且实际变化的值；没有变化不要调用工具。"
+                    ),
+                    player_character=player_character,
+                )
+                llm_result, call_records = await self._run_adjudication_stage(
                     messages,
                     schemas,
                     source=batch.source,
+                    history_tools=history_tools,
+                    max_history_tool_rounds=max_history_tool_rounds,
+                    turn_stats=turn_stats,
                 )
-                self._append_call_record(result.call_stats, turn_stats, call_record)
+                result.call_stats.extend(call_records)
                 batch_failed = False
                 normalized_calls = [
                     _normalize_tool_call(call) for call in self._tool_calls(llm_result)
@@ -1032,6 +1056,75 @@ class StatusSubAgent(BaseSubAgent):
                 changed=False,
                 status=StatusSubAgentRecordStatus.ERROR,
             )
+
+    def _adjudication_stage_messages(
+        self,
+        *,
+        adjudication_context: AdjudicationContextSnapshot,
+        pipeline_prompt: str,
+        user_content: str,
+        player_character: "TurnPlayerCharacterSnapshot | None",
+    ) -> list[Message]:
+        if adjudication_context.active:
+            messages = adjudication_context.to_messages()
+            messages.append(Message(Role.SYSTEM, pipeline_prompt))
+        else:
+            # Direct unit/bootstrap-style callers may omit a turn plan. Keep
+            # their narrow lore/character projection without affecting the
+            # production turn path, which always supplies the shared snapshot.
+            messages = [
+                Message(
+                    Role.SYSTEM,
+                    self._build_system_context(
+                        pipeline_prompt,
+                        player_character=player_character,
+                    ),
+                )
+            ]
+        messages.append(Message(Role.USER, user_content))
+        return messages
+
+    async def _run_adjudication_stage(
+        self,
+        messages: list[Message],
+        schemas: list[dict[str, object]],
+        *,
+        source: str,
+        history_tools: HistoryToolSet | None,
+        max_history_tool_rounds: int,
+        turn_stats: TurnStats | None,
+    ) -> tuple[_LLMChatResult, tuple[CallRecord, ...]]:
+        schema_names = [
+            str(schema.get("function", {}).get("name", ""))
+            for schema in schemas
+            if isinstance(schema.get("function"), dict)
+        ]
+        self._log_verbose(
+            "LLM call started: source={} messages={} tools={}",
+            source,
+            len(messages),
+            schema_names,
+        )
+        loop_result = await run_adjudication_tool_loop(
+            provider=await self._get_provider(),
+            messages=messages,
+            terminal_schemas=schemas,
+            source=source,
+            history_tools=history_tools,
+            max_history_tool_rounds=max_history_tool_rounds,
+            turn_stats=turn_stats,
+        )
+        for record in loop_result.call_records:
+            self._log_cache_usage(source, record.usage)
+        self._log_verbose(
+            "LLM call completed: source={} provider_calls={} history_rounds={} "
+            "tool_calls={}",
+            source,
+            len(loop_result.call_records),
+            loop_result.history_rounds,
+            self._tool_names_for_log(loop_result.response),
+        )
+        return loop_result.response, loop_result.call_records
 
     async def _chat_with_stats(
         self,

@@ -95,6 +95,7 @@ def _runtime(events: list[str]) -> SimpleNamespace:
             request=SimpleNamespace(text="current action"),
             execution=execution,
             persistent_memory=(),
+            story_memory=(),
         ),
         scratch=SimpleNamespace(scene_tracker=None, status_manager=object()),
         transaction=_Transaction(events),

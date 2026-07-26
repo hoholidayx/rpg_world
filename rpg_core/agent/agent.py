@@ -139,6 +139,7 @@ class RPGGameAgent:
         plot_scheduling_preflight = PlotSchedulingPreflightHook(
             context_service=self._context_service,
             session_manager=self._lifecycle.session_manager,
+            history_tools=self._tool_service.history_tools,
         )
         preparation = TurnPreparation(
             context_service=self._context_service,

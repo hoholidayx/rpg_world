@@ -53,6 +53,7 @@ class TurnRuntimeFactory:
             rp_module_snapshot=plan.rp_modules,
             turn_execution=plan.execution,
             persistent_memory_snapshot=plan.persistent_memory,
+            story_memory_snapshot=plan.story_memory,
             plot_schedule_snapshot=plan.plot_schedule,
         )
         provider = await self._model_runtime.provider_for(
@@ -89,6 +90,7 @@ class TurnRuntimeFactory:
                     turn_stats=stats,
                     rp_module_runtime=runtime.rp_module_runtime,
                     player_character=plan.execution.player_character,
+                    adjudication_context=plan.adjudication_context,
                 )
             runtime.preflight_outcome = self._status_preflight.outcome_state(
                 scratch,
@@ -99,7 +101,6 @@ class TurnRuntimeFactory:
                     plan=plan,
                     turn_scratch=scratch,
                     turn_stats=stats,
-                    rp_module_runtime=runtime.rp_module_runtime,
                 )
             return runtime
         except BaseException:

@@ -79,6 +79,8 @@ class _SubAgent:
 
 
 class _Tools:
+    history_tools = None
+
     @staticmethod
     def narrative_outcome_tools(_input, _runtime):  # noqa: ANN001, ANN205
         return []

@@ -14,10 +14,15 @@ from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshot
 from rpg_core.rp_modules.models import PlayerPortrayalDetail
 
 if TYPE_CHECKING:
+    from rpg_core.agent.adjudication import AdjudicationContextSnapshot
     from rpg_core.agent.telemetry import TurnStats
     from rpg_core.agent.turn.runner import ToolCallRecord
     from rpg_core.tooling.registry import ToolRegistry
-    from rpg_core.context.models import Message, PersistentMemoryFact
+    from rpg_core.context.models import (
+        Message,
+        PersistentMemoryFact,
+        StoryMemoryFact,
+    )
     from rpg_core.agent.runtime.main_llm import MainLLMSelection
     from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
 
@@ -108,10 +113,20 @@ class TurnExecutionPlan:
         default_factory=lambda: PlotScheduleSnapshot.disabled("")
     )
     persistent_memory: tuple["PersistentMemoryFact", ...] = ()
+    story_memory: tuple["StoryMemoryFact", ...] = ()
+    adjudication_context: "AdjudicationContextSnapshot" = field(
+        default_factory=lambda: _empty_adjudication_context()
+    )
 
     @property
     def request(self) -> TurnRequest:
         return self.execution.request
+
+
+def _empty_adjudication_context() -> "AdjudicationContextSnapshot":
+    from rpg_core.agent.adjudication import AdjudicationContextSnapshot
+
+    return AdjudicationContextSnapshot()
 
 
 @dataclass(frozen=True)

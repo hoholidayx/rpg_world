@@ -224,6 +224,20 @@ class PersistentMemoryFact:
 
 
 @dataclass(frozen=True)
+class StoryMemoryFact:
+    """One evidence-valid Story Memory fact frozen for a turn or preview."""
+
+    memory_id: int
+    turn_id: int
+    text: str
+    memory_kind: str
+    epistemic_status: str
+    salience: float
+    source_turn_start: int
+    source_turn_end: int
+
+
+@dataclass(frozen=True)
 class PersistentMemoryLayer:
     memories: list[PersistentMemoryFact] = field(default_factory=list)
 
@@ -252,7 +266,7 @@ class HotHistoryLayer:
 
 @dataclass(frozen=True)
 class StoryMemoryLayer:
-    details: list[JsonObject] = field(default_factory=list)
+    details: list[StoryMemoryFact] = field(default_factory=list)
 
     @property
     def active(self) -> bool:

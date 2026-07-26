@@ -20,6 +20,7 @@ from rpg_core.agent.sub_agents import (
     StatusSubAgentRecordStatus,
     SubAgentContext,
 )
+from rpg_core.agent.tools.history import HistoryToolSet
 from rpg_core.tooling.base import BaseTool
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
@@ -411,7 +412,11 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
     monkeypatch.setattr(
         status_module,
         "settings",
-        SimpleNamespace(verbose_logging=True, status_history_rounds=5),
+        SimpleNamespace(
+            verbose_logging=True,
+            status_history_rounds=5,
+            adjudication_max_history_tool_rounds=5,
+        ),
     )
     monkeypatch.setattr(status_module.logger, "info", info)
 
@@ -458,6 +463,125 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
     assert any("stage completed: stage=router" in message for message in log_formats)
     assert any("stage completed: stage=state_updates" in message for message in log_formats)
     assert any("preflight completed" in message for message in log_formats)
+
+
+@pytest.mark.asyncio
+async def test_each_status_stage_gets_an_independent_history_lookup_budget() -> None:
+    manager = FakeRuntimeStatusManager()
+    scratch, runtime = _scratch_runtime(manager)
+
+    class QueryService:
+        def __init__(self) -> None:
+            self.searches: list[tuple[object, object]] = []
+
+        async def search(
+            self,
+            *,
+            terms: object,
+            limit: object,
+        ) -> dict[str, object]:
+            self.searches.append((terms, limit))
+            return {
+                "ok": True,
+                "items": [{"turnId": 3, "excerpt": "已提交事实"}],
+            }
+
+        async def read(self, **_kwargs: object) -> dict[str, object]:
+            raise AssertionError("this scenario only needs history_search")
+
+    class Provider:
+        def __init__(self) -> None:
+            self.initial_terminal_names: list[frozenset[str]] = []
+            self.terminal_only_names: list[frozenset[str]] = []
+
+        async def chat(self, messages, *, tools):  # noqa: ANN001, ANN201
+            del messages
+            names = frozenset(
+                schema["function"]["name"]
+                for schema in tools
+            )
+            history_names = {"history_search", "history_read"}
+            terminal_names = frozenset(names - history_names)
+            if "history_search" in names:
+                assert "history_read" in names
+                assert len(terminal_names) == 1
+                self.initial_terminal_names.append(terminal_names)
+                terminal_name = next(iter(terminal_names))
+                return {
+                    "tool_calls": [{
+                        "id": f"history_{terminal_name}",
+                        "type": "function",
+                        "function": {
+                            "name": "history_search",
+                            "arguments": (
+                                f'{{"terms":["{terminal_name}"],"limit":1}}'
+                            ),
+                        },
+                    }],
+                    "finish_reason": "tool_calls",
+                }
+
+            self.terminal_only_names.append(names)
+            if names == {"select_status_targets"}:
+                return {
+                    "tool_calls": [{
+                        "id": "route_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "select_status_targets",
+                            "arguments": json.dumps(
+                                {
+                                    "scene": True,
+                                    "tables": [{
+                                        "table_id": 1,
+                                        "keys": ["生命"],
+                                        "reason": "检查当前值",
+                                    }],
+                                },
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }],
+                    "finish_reason": "tool_calls",
+                }
+            return {"tool_calls": [], "finish_reason": "stop"}
+
+        @staticmethod
+        def get_default_model() -> str:
+            return "status-test"
+
+    query = QueryService()
+    provider = Provider()
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([
+        _OutcomeTool(),
+        _SceneAttrTool(),
+        StatusTableSetValuesTool(runtime),
+    ])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent._get_provider = lambda: _async_value(provider)  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="当前状态",
+        scene_context="当前位置：森林",
+        context_tables=runtime.list_context_tables(),
+        user_input="核对当前事实",
+        history_tools=HistoryToolSet(query),  # type: ignore[arg-type]
+        max_history_tool_rounds=1,
+    )
+
+    expected = [
+        frozenset({NARRATIVE_OUTCOME_TOOL_NAME}),
+        frozenset({"select_status_targets"}),
+        frozenset({"scene_attr"}),
+        frozenset({"status_table_set_values"}),
+    ]
+    assert result.failed is False
+    assert provider.initial_terminal_names == expected
+    assert provider.terminal_only_names == expected
+    assert len(query.searches) == 4
 
 
 @pytest.mark.asyncio

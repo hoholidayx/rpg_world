@@ -10,8 +10,7 @@ from loguru import logger
 from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.tools.file_tools import WriteFileTool
 from rpg_core.agent.tools.history import (
-    HistoryReadTool,
-    HistorySearchTool,
+    HistoryToolSet,
 )
 from rpg_core.agent.tools.history_query import HistoryQueryService
 from rpg_core.agent.tools.state import StateToolSet, resolve_state_tool_set
@@ -44,7 +43,7 @@ class AgentToolService:
         extra_tools: list[BaseTool] | None = None,
     ) -> None:
         self._resources = resources
-        self._history_query = history_query
+        self._history_tools = HistoryToolSet(history_query)
         self._extra_tools = list(extra_tools or [])
         self._base_registry: ToolRegistry | None = None
 
@@ -52,14 +51,15 @@ class AgentToolService:
     def base_registry(self) -> ToolRegistry | None:
         return self._base_registry
 
+    @property
+    def history_tools(self) -> HistoryToolSet:
+        """Committed-history tools shared by main and adjudication loops."""
+
+        return self._history_tools
+
     def refresh_base_registry(self) -> None:
         registry = ToolRegistry()
-        registry.register_all(
-            [
-                HistorySearchTool(self._history_query),
-                HistoryReadTool(self._history_query),
-            ]
-        )
+        self._history_tools.register_into(registry)
         scene_tracker = self._resources().scene_tracker
         if scene_tracker is not None:
             registry.register_all(scene_tracker.get_tools())

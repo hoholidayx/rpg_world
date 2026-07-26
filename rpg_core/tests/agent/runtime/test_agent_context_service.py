@@ -7,6 +7,7 @@ import pytest
 
 from commons.errors import MainContextWindowThresholdExceededError
 import rpg_core.agent.runtime.context as context_module
+from rpg_core.agent.adjudication import AdjudicationContextSnapshot
 from rpg_core.agent.runtime.context import AgentContextService
 from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.turn import (
@@ -23,9 +24,11 @@ from rpg_core.context.models import (
     HotHistoryLayer,
     LayerType,
     Message,
+    PersistentMemoryFact,
     RPModulesLayer,
     Role,
     RPGContext,
+    StoryMemoryFact,
     UserMessageLayer,
 )
 from rpg_core.session import SessionManager
@@ -55,9 +58,14 @@ class _Builder:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
         self.persistent_memory_loads = 0
+        self.story_memory_loads = 0
 
     async def load_persistent_memory_snapshot(self):  # noqa: ANN201
         self.persistent_memory_loads += 1
+        return ()
+
+    async def load_story_memory_snapshot(self):  # noqa: ANN201
+        self.story_memory_loads += 1
         return ()
 
     def build(
@@ -126,20 +134,32 @@ class _RoleReader:
         return []
 
 
-def _resources(builder: _Builder, scene=None, characters=None) -> AgentContextResources:  # noqa: ANN001
+def _resources(
+    builder: _Builder,
+    scene=None,
+    characters=None,
+    lorebook=None,
+) -> AgentContextResources:  # noqa: ANN001
     return AgentContextResources(
         builder=builder,
         character_manager=characters,
-        lorebook_manager=None,
+        lorebook_manager=lorebook,
         status_manager=None,
         scene_tracker=scene,
         memory_manager=None,
     )
 
 
-def _service(builder: _Builder, *, session=None, scene=None, characters=None):  # noqa: ANN001, ANN201
+def _service(
+    builder: _Builder,
+    *,
+    session=None,
+    scene=None,
+    characters=None,
+    lorebook=None,
+):  # noqa: ANN001, ANN201
     session = session or SessionManager(history_enabled=False)
-    resources = _resources(builder, scene, characters)
+    resources = _resources(builder, scene, characters, lorebook)
     return AgentContextService(
         world_name="World",
         session_id=lambda: "s1",
@@ -183,6 +203,12 @@ class _Characters:
             {"id": 1, "name": "Bob"},
             {"id": 2, "name": "Alice"},
         ]
+
+
+class _Lorebook:
+    @staticmethod
+    def list_enabled_entries() -> list[dict[str, object]]:
+        return [{"name": "北境", "content": "北境仍处于永夜。"}]
 
 
 def test_context_preview_composes_scene_before_input_without_mutating_history() -> None:
@@ -275,6 +301,80 @@ def test_fixed_layer_bytes_are_identical_across_all_message_modes() -> None:
     assert len(set(rendered)) == 1
 
 
+def test_adjudication_snapshot_uses_explicit_allowlist_and_both_memories() -> None:
+    service = _service(
+        _Builder(),
+        characters=_Characters(),
+        lorebook=_Lorebook(),
+    )
+    execution = _execution(
+        mode=TurnMode.GM,
+        player_character=TurnPlayerCharacterSnapshot(
+            character_id=2,
+            story_id=1,
+            name="Alice",
+        ),
+        rendered_story_prompt="Story Prompt 真源。",
+        narrative_style_name="不应注入",
+        narrative_style_prompt="叙事风格秘密。",
+    )
+    persistent = PersistentMemoryFact(
+        memory_id="pm-1",
+        revision_number=2,
+        text="常驻记忆事实。",
+        memory_kind="world_fact",
+        epistemic_status="confirmed",
+        salience=0.9,
+    )
+    story = StoryMemoryFact(
+        memory_id=4,
+        turn_id=3,
+        text="剧情记忆事实。",
+        memory_kind="event",
+        epistemic_status="confirmed",
+        salience=0.8,
+        source_turn_start=3,
+        source_turn_end=3,
+    )
+
+    fixed = service._assemble_adjudication_fixed_layer(
+        turn_execution=execution
+    )
+    snapshot = service.build_adjudication_context_snapshot(
+        turn_execution=execution,
+        persistent_memory_snapshot=(persistent,),
+        story_memory_snapshot=(story,),
+    )
+    content = "\n".join(message.content for message in snapshot.messages)
+
+    assert [section.id for section in fixed.sections] == [
+        "adjudication_authority",
+        "story_prompt",
+        "lorebook",
+        "player_character",
+        "character_card",
+    ]
+    assert not any(
+        section.source.startswith("rp_module")
+        for section in fixed.sections
+    )
+    assert "Story Prompt 真源。" in content
+    assert "北境仍处于永夜。" in content
+    assert "当前玩家扮演角色：Alice" in content
+    assert "Bob" in content and "Alice" in content
+    assert "常驻记忆事实。" in content
+    assert "剧情记忆事实。" in content
+    assert "叙事风格秘密。" not in content
+    assert "RP 正文必须由 XML" not in content
+    assert "先在内部确定本轮叙事后果" not in content
+    assert "[message_mode]" not in content
+    assert "GM 托管" not in content
+    assert "neutral/IC" not in content
+    assert "召回记忆" not in content
+    assert "Summary" not in content
+    assert "rp_module:" not in content
+
+
 def test_context_gate_excludes_new_input_and_rejects_at_threshold(monkeypatch) -> None:
     builder = _Builder()
     service = _service(builder)
@@ -361,20 +461,9 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_world_turns() -
         persist=False,
     )
     service = _service(_Builder(), session=session)
-    service._assemble_fixed_layer = MagicMock(  # type: ignore[method-assign]
-        return_value=FixedLayerData(
-            sections=[
-                FixedLayerSection(
-                    id="fixed-marker",
-                    title="固定层",
-                    source="test",
-                    priority=1,
-                    content="完整 fixed marker",
-                )
-            ]
-        )
+    adjudication_context = AdjudicationContextSnapshot.from_messages(
+        [Message(Role.SYSTEM, "shared adjudication marker")]
     )
-    runtime = SimpleNamespace(get_fixed_sections=lambda: ["rp fixed marker"])
     scene = SimpleNamespace(get_context=lambda: "[scene]\n位置: 大厅\n[/scene]")
     status = SimpleNamespace(
         list_context_tables=lambda: [
@@ -398,20 +487,17 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_world_turns() -
             }
         ]
     )
-    execution = _execution(mode=TurnMode.GM)
-
     messages = service.build_plot_judge_messages(
         judge_prompt="judge marker",
         current_user_input="current marker",
         history_turns=2,
         status_manager=status,
         scene_tracker=scene,
-        rp_module_runtime=runtime,
-        turn_execution=execution,
+        adjudication_context=adjudication_context,
     )
 
     contents = [message.content for message in messages]
-    assert "完整 fixed marker" in contents[0]
+    assert contents[0] == "shared adjudication marker"
     assert contents[1] == "judge marker"
     assert "位置: 大厅" in contents[2]
     assert "生命" in contents[2]
@@ -423,10 +509,7 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_world_turns() -
         "current marker",
     ]
     assert all("ooc" not in content and "ic user" not in content for content in contents)
-    service._assemble_fixed_layer.assert_called_once_with(
-        ["rp fixed marker"],
-        turn_execution=execution,
-    )
+    assert all("rp fixed marker" not in content for content in contents)
 
 
 def test_verbose_context_logging_only_logs_main_llm_context_once(monkeypatch) -> None:
