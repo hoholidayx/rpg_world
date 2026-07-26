@@ -39,14 +39,16 @@ class FakeAgent:
     async def send(self, *args: str) -> dict[str, object]:
         self.calls.append(("send", tuple(args)))
         text = args[-1]
+        command_text = text.lstrip()
         reply = f"[mock] reply to: {text}"
         result: dict[str, object] = {"reply": reply, "stats": {}}
-        if text.startswith("/session_switch "):
-            result["active_session"] = text.split(maxsplit=1)[1]
+        if command_text.startswith("/session_switch "):
+            result["active_session"] = command_text.split(maxsplit=1)[1]
         return result
 
     async def send_stream(self, text: str) -> AsyncIterator[AgentStreamEvent]:
         """模拟流式输出：一条 text 事件 + 一条 done 事件。"""
+        command_text = text.lstrip()
         yield AgentStreamEvent(
             kind=StreamEventKind.TEXT,
             content=f"[mock] reply to: {text}",
@@ -55,8 +57,8 @@ class FakeAgent:
             kind=StreamEventKind.DONE,
             content=f"[mock] reply to: {text}",
             active_session=(
-                text.split(maxsplit=1)[1]
-                if text.startswith("/session_switch ")
+                command_text.split(maxsplit=1)[1]
+                if command_text.startswith("/session_switch ")
                 else None
             ),
         )
@@ -139,6 +141,14 @@ class FakeAgent:
     async def stop(self, session_id: str, *, request_id: str | None = None) -> dict[str, object]:
         self.calls.append(("stop", (session_id, request_id or "")))
         return {"status": "cancelled", "session_id": session_id, "request_id": request_id}
+
+    async def delete_session(self, session_id: str) -> dict[str, object]:
+        self.calls.append(("delete_session", (session_id,)))
+        return {
+            "status": "deleted",
+            "session_id": session_id,
+            "runtime_cleanup": "deleted",
+        }
 
     async def ensure_session(
         self,

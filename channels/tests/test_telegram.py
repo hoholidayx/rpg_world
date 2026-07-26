@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from telegram import BotCommand, InlineKeyboardMarkup
-from telegram.error import BadRequest
+from telegram.error import BadRequest, RetryAfter, TimedOut
 
+from agent_service.client import AgentClientError
 from channels.telegram.adapter import TelegramAdapter
 from channels.telegram.render import (
     chunk_rendered_text,
@@ -126,6 +128,27 @@ class TestTelegramAdapter:
         adapter._session_flow.pin_session("12345", "my_tel")
         assert adapter.get_session_id("12345") == "my_tel"
 
+    async def test_terminal_locator_only_pins_when_source_is_still_current(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        from channels.telegram.turn_flow import ActiveTelegramTurn, TelegramTurnPhase
+
+        active = ActiveTelegramTurn(
+            chat_id="123",
+            session_id="tg_default",
+            request_id="tg_request",
+            phase=TelegramTurnPhase.FINALIZING,
+            streaming=True,
+        )
+
+        adapter._sync_active_session(active, "session_b")
+        assert adapter.get_session_id("123") == "session_b"
+
+        adapter._session_flow.pin_session("123", "session_c")
+        adapter._sync_active_session(active, "session_d")
+        assert adapter.get_session_id("123") == "session_c"
+
     async def test_default_streaming_flag(self):
         a = TelegramAdapter(token="fake:token", session_id="tg_default", workspace="data/tg")
         assert a._streaming is True  # 默认流式
@@ -138,6 +161,7 @@ class TestTelegramAdapter:
         assert a._stream_edit_interval == 0.8
         assert a._stream_edit_min_chars == 24
         assert a._request_timeout == 5.0
+        assert a._shutdown_grace == 15.0
 
     async def test_proxy_is_stored(self):
         a = TelegramAdapter(token="fake:token", proxy="http://127.0.0.1:7890", session_id="tg_default", workspace="data/tg")
@@ -158,6 +182,97 @@ class TestTelegramAdapter:
         assert agent.calls[-1][0] == "stream"
         assert agent.calls[-1][1][:2] == ("tg_default", "hello")
         assert str(agent.calls[-1][1][2]).startswith("tg_")
+
+    async def test_deleted_pinned_session_blocks_message_and_shows_picker(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        agent.get_session_overview = AsyncMock(
+            side_effect=AgentClientError("not found", status_code=404),
+        )
+        agent.list_sessions = AsyncMock(return_value={
+            "sessions": [{"session_id": "session_b", "title": "可用会话"}],
+        })
+        adapter.bind_agent_client(agent)
+        adapter._session_flow.pin_session("123", "deleted_session")
+
+        await adapter._on_message(_message_update(123, "不会进入 Agent"), object())
+
+        assert not any(call[0] in {"send", "stream"} for call in agent.calls)
+        assert adapter.get_session_id("123") == "deleted_session"
+        sent = adapter._app.bot.send_message.await_args.kwargs
+        assert "当前会话已删除或暂不可用" in sent["text"]
+        assert isinstance(sent["reply_markup"], InlineKeyboardMarkup)
+        assert any(
+            button.text == "新建并进入"
+            for row in sent["reply_markup"].inline_keyboard
+            for button in row
+        )
+
+    async def test_deleted_session_list_failure_keeps_create_recovery(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        agent.get_session_overview = AsyncMock(
+            side_effect=AgentClientError("not found", status_code=404),
+        )
+        agent.list_sessions = AsyncMock(
+            side_effect=AgentClientError("offline", status_code=503),
+        )
+        adapter.bind_agent_client(agent)
+        adapter._session_flow.pin_session("123", "deleted_session")
+
+        await adapter._on_message(_message_update(123, "不会进入 Agent"), object())
+
+        assert not any(call[0] in {"send", "stream"} for call in agent.calls)
+        sent = adapter._app.bot.send_message.await_args.kwargs
+        assert "当前会话已删除或暂不可用" in sent["text"]
+        assert "会话列表暂不可用" in sent["text"]
+        assert [
+            button.text
+            for row in sent["reply_markup"].inline_keyboard
+            for button in row
+        ] == ["新建并进入"]
+
+    async def test_stream_terminal_active_session_pins_leading_space_switch(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        adapter.bind_agent_client(agent)
+
+        await adapter._on_message(
+            _message_update(123, " /session_switch session_b"),
+            object(),
+        )
+        await _drain_tasks(adapter._app)
+
+        assert adapter.get_session_id("123") == "session_b"
+
+    async def test_buffered_terminal_active_session_pins_leading_space_switch(
+        self,
+        mock_app: MagicMock,
+    ):
+        adapter = TelegramAdapter(
+            token="fake:token",
+            streaming=False,
+            workspace="data/tg_workspace",
+            workspace_id="tg_workspace",
+            story_id=1,
+            session_id="tg_default",
+        )
+        adapter._app = mock_app
+        adapter.bind_agent_client(FakeAgent())
+
+        await adapter._on_message(
+            _message_update(123, " /session_switch session_b"),
+            object(),
+        )
+        await _drain_tasks(mock_app)
+
+        assert adapter.get_session_id("123") == "session_b"
 
     async def test_on_message_handler_exception_sends_friendly_reply(self, adapter: TelegramAdapter):
         adapter.bind_agent_client(FakeAgent())
@@ -596,6 +711,41 @@ class TestTelegramAdapter:
         assert "当前故事：Telegram Story" in adapter.send_text.call_args.args[1]
         assert isinstance(adapter.send_text.call_args.kwargs["reply_markup"], InlineKeyboardMarkup)
 
+    async def test_start_with_deleted_session_shows_recovery_picker(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        agent.get_session_overview = AsyncMock(
+            side_effect=AgentClientError("not found", status_code=404),
+        )
+        agent.list_sessions = AsyncMock(return_value={"sessions": []})
+        adapter.bind_agent_client(agent)
+
+        await adapter._on_command(_message_update(123, "/start"), object())
+
+        sent = adapter._app.bot.send_message.await_args.kwargs
+        assert "当前会话已删除或暂不可用" in sent["text"]
+        assert sent["reply_markup"].inline_keyboard[-1][0].text == "新建并进入"
+
+    async def test_destructive_command_with_deleted_session_is_blocked(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        agent.get_session_overview = AsyncMock(
+            side_effect=AgentClientError("not found", status_code=404),
+        )
+        agent.list_sessions = AsyncMock(return_value={"sessions": []})
+        agent.execute_command = AsyncMock()
+        adapter.bind_agent_client(agent)
+
+        await adapter._on_command(_message_update(123, "/clear"), object())
+
+        agent.execute_command.assert_not_awaited()
+        sent = adapter._app.bot.send_message.await_args.kwargs
+        assert "当前会话已删除或暂不可用" in sent["text"]
+
     async def test_invalid_role_opens_picker_without_sending_turn(self, adapter: TelegramAdapter):
         agent = FakeAgent()
         agent.get_session_overview = AsyncMock(return_value={
@@ -641,6 +791,40 @@ class TestTelegramAdapter:
         agent.bind_player_character.assert_awaited_once_with("tg_default", 1)
         sent_texts = [call.kwargs["text"] for call in adapter._app.bot.send_message.await_args_list]
         assert sent_texts == ["已选择玩家角色：Alice。", "门缓缓打开。\nAlice：走吧。"]
+
+    async def test_role_callback_with_deleted_session_shows_recovery_picker(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        overview = {
+            "workspace_id": "tg_workspace",
+            "workspace_title": "Workspace",
+            "story_id": 1,
+            "story_title": "Story",
+            "session_id": "tg_default",
+            "session_title": "Telegram",
+            "player_character_status": "invalid",
+            "player_character": None,
+            "role_options": [{"character_id": 1, "name": "Alice"}],
+        }
+        markup = adapter._play_flow.build_role_picker("123", overview)
+        assert markup is not None
+        callback_data = markup.inline_keyboard[0][0].callback_data
+        agent = FakeAgent()
+        agent.get_session_overview = AsyncMock(
+            side_effect=AgentClientError("not found", status_code=404),
+        )
+        agent.list_sessions = AsyncMock(return_value={"sessions": []})
+        agent.bind_player_character = AsyncMock()
+        adapter.bind_agent_client(agent)
+
+        update = _callback_update(123, callback_data)
+        await adapter._on_callback_query(update, object())
+
+        agent.bind_player_character.assert_not_awaited()
+        update.callback_query.answer.assert_awaited_once_with()
+        sent = adapter._app.bot.send_message.await_args.kwargs
+        assert "当前会话已删除或暂不可用" in sent["text"]
 
     async def test_help_merges_local_and_current_agent_commands(self, adapter: TelegramAdapter):
         agent = FakeAgent()
@@ -700,6 +884,146 @@ class TestTelegramAdapter:
 
         assert adapter.get_session_id("123") == "my_tel"
         adapter.send_text.assert_awaited_once_with("123", "[已切换到会话: my_tel]")
+
+    async def test_session_switch_recovers_from_deleted_source_after_target_validation(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        agent.get_session_overview = AsyncMock(return_value={
+            "workspace_id": "tg_workspace",
+            "story_id": 1,
+            "session_id": "session_b",
+        })
+
+        async def execute_command(session_id: str, command: str):
+            if session_id == "deleted_session":
+                raise AgentClientError("not found", status_code=404)
+            assert session_id == "session_b"
+            assert command == "/session_switch session_b"
+            return {
+                "reply": "[已切换到会话: session_b]",
+                "handled": True,
+                "active_session": "session_b",
+            }
+
+        agent.execute_command = AsyncMock(side_effect=execute_command)
+        adapter.bind_agent_client(agent)
+        adapter._session_flow.pin_session("123", "deleted_session")
+        adapter.send_text = AsyncMock()
+
+        await adapter._on_command(
+            _message_update(123, "/session_switch session_b"),
+            object(),
+        )
+
+        agent.get_session_overview.assert_awaited_once_with("session_b")
+        assert [call.args[0] for call in agent.execute_command.await_args_list] == [
+            "deleted_session",
+            "session_b",
+        ]
+        assert adapter.get_session_id("123") == "session_b"
+        adapter.send_text.assert_awaited_once_with(
+            "123",
+            "[已切换到会话: session_b]",
+        )
+
+    async def test_stale_session_switch_callback_survives_answer_timeout(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        agent.get_session_overview = AsyncMock(return_value={
+            "workspace_id": "tg_workspace",
+            "story_id": 1,
+            "session_id": "session_b",
+        })
+
+        async def execute_command(session_id: str, command: str):
+            if session_id == "deleted_session":
+                raise AgentClientError("not found", status_code=404)
+            assert session_id == "session_b"
+            assert command == "/session_switch session_b"
+            return {
+                "reply": "[已切换到会话: session_b]",
+                "handled": True,
+                "active_session": "session_b",
+            }
+
+        agent.execute_command = AsyncMock(side_effect=execute_command)
+        adapter.bind_agent_client(agent)
+        adapter._session_flow.pin_session("123", "deleted_session")
+        markup = adapter._session_flow.build_session_picker(
+            "123",
+            [{"session_id": "session_b", "title": "可用会话"}],
+            "deleted_session",
+        )
+        update = _callback_update(
+            123,
+            markup.inline_keyboard[0][0].callback_data,
+        )
+        update.callback_query.answer = AsyncMock(
+            side_effect=TimedOut("timeout"),
+        )
+        adapter.send_text = AsyncMock()
+
+        await adapter._on_callback_query(update, object())
+
+        agent.get_session_overview.assert_awaited_once_with("session_b")
+        assert adapter.get_session_id("123") == "session_b"
+        adapter.send_text.assert_awaited_once_with(
+            "123",
+            "[已切换到会话: session_b]",
+        )
+
+    async def test_session_switch_rejects_target_outside_configured_story(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        agent.get_session_overview = AsyncMock(return_value={
+            "workspace_id": "other_workspace",
+            "story_id": 99,
+            "session_id": "foreign_session",
+        })
+        agent.execute_command = AsyncMock()
+        adapter.bind_agent_client(agent)
+
+        with pytest.raises(RuntimeError, match="workspace/story"):
+            await adapter._switch_chat_session("123", "foreign_session")
+
+        agent.execute_command.assert_not_awaited()
+        assert adapter.get_session_id("123") == "tg_default"
+
+    async def test_created_session_is_deleted_when_confirmed_switch_fails(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        agent.create_session = AsyncMock(
+            return_value={"session_id": "generated_1", "title": "新会话"},
+        )
+        agent.get_session_overview = AsyncMock(return_value={
+            "workspace_id": "tg_workspace",
+            "story_id": 1,
+            "session_id": "generated_1",
+        })
+        agent.execute_command = AsyncMock(return_value={
+            "reply": "未返回 locator",
+            "handled": True,
+        })
+        agent.delete_session = AsyncMock(return_value={
+            "status": "deleted",
+            "session_id": "generated_1",
+            "runtime_cleanup": "deleted",
+        })
+        adapter.bind_agent_client(agent)
+
+        with pytest.raises(RuntimeError, match="未返回 locator"):
+            await adapter._create_chat_session("123", "新会话")
+
+        agent.delete_session.assert_awaited_once_with("generated_1")
+        assert adapter.get_session_id("123") == "tg_default"
 
     async def test_on_command_session_switch_does_not_parse_reply_text_fallback(
         self,
@@ -880,7 +1204,7 @@ class TestTelegramAdapter:
             "stop",
         ]
 
-    async def test_non_streaming_menu_does_not_advertise_stop(self, mock_app: MagicMock):
+    async def test_buffered_menu_still_advertises_stop(self, mock_app: MagicMock):
         adapter = TelegramAdapter(
             token="fake:token",
             streaming=False,
@@ -894,7 +1218,7 @@ class TestTelegramAdapter:
         await adapter._configure_bot_commands()
 
         commands = adapter._app.bot.set_my_commands.call_args.args[0]
-        assert all(command.command != "stop" for command in commands)
+        assert any(command.command == "stop" for command in commands)
 
     async def test_send_text(self, adapter: TelegramAdapter):
         """send_text 应调 bot.send_message 发送完整文本。"""
@@ -914,6 +1238,100 @@ class TestTelegramAdapter:
         await adapter.send_text("123", "hello world")
 
         adapter._app.bot.send_message.assert_called_once()
+
+    async def test_terminal_send_bad_request_falls_back_to_plain_text(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        adapter._app.bot.send_message = AsyncMock(
+            side_effect=[
+                BadRequest("can not parse entities"),
+                MagicMock(message_id=43),
+            ],
+        )
+
+        message_id = await adapter.send_html(
+            "123",
+            "<b>Hello &amp; goodbye</b>",
+            terminal=True,
+        )
+
+        assert message_id == 43
+        first, second = adapter._app.bot.send_message.await_args_list
+        assert first.kwargs["parse_mode"] == "HTML"
+        assert second.kwargs["text"] == "Hello & goodbye"
+        assert "parse_mode" not in second.kwargs
+
+    async def test_terminal_edit_bad_request_falls_back_to_plain_text(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        adapter._app.bot.edit_message_text = AsyncMock(
+            side_effect=[
+                BadRequest("can not parse entities"),
+                True,
+            ],
+        )
+
+        edited = await adapter.edit_html(
+            "123",
+            42,
+            "<b>Hello</b>",
+            terminal=True,
+        )
+
+        assert edited is True
+        first, second = adapter._app.bot.edit_message_text.await_args_list
+        assert first.kwargs["parse_mode"] == "HTML"
+        assert second.kwargs["text"] == "Hello"
+        assert "parse_mode" not in second.kwargs
+
+    async def test_terminal_send_retries_retry_after_with_bound(
+        self,
+        adapter: TelegramAdapter,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv("PTB_TIMEDELTA", "1")
+        adapter._app.bot.send_message = AsyncMock(
+            side_effect=[
+                RetryAfter(timedelta(0)),
+                RetryAfter(timedelta(0)),
+                MagicMock(message_id=44),
+            ],
+        )
+
+        message_id = await adapter.send_html("123", "done", terminal=True)
+
+        assert message_id == 44
+        assert adapter._app.bot.send_message.await_count == 3
+
+    async def test_terminal_send_stops_after_retry_after_limit(
+        self,
+        adapter: TelegramAdapter,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv("PTB_TIMEDELTA", "1")
+        adapter._app.bot.send_message = AsyncMock(
+            side_effect=RetryAfter(timedelta(0)),
+        )
+
+        message_id = await adapter.send_html("123", "done", terminal=True)
+
+        assert message_id is None
+        assert adapter._app.bot.send_message.await_count == 3
+
+    async def test_terminal_send_does_not_retry_timeout(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        adapter._app.bot.send_message = AsyncMock(
+            side_effect=TimedOut("timeout"),
+        )
+
+        message_id = await adapter.send_html("123", "done", terminal=True)
+
+        assert message_id is None
+        adapter._app.bot.send_message.assert_awaited_once()
 
     async def test_send_text_escapes_markdown(self, adapter: TelegramAdapter):
         adapter._app.bot.send_message = AsyncMock()

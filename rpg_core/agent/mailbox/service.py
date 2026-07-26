@@ -72,6 +72,7 @@ class AgentMailbox:
         self._consumer_task: asyncio.Task | None = None
         self._active_stream_task: asyncio.Task | None = None
         self._active_stream_request_id: str | None = None
+        self._active_stream_committed = False
         self._queued_stream_request_ids: set[str] = set()
         self._cancelled_request_ids: set[str] = set()
         self._closed = False
@@ -126,6 +127,7 @@ class AgentMailbox:
             self._queue.task_done()
         self._active_stream_task = None
         self._active_stream_request_id = None
+        self._active_stream_committed = False
         self._queued_stream_request_ids.clear()
         self._cancelled_request_ids.clear()
         self._consumer_task = None
@@ -273,6 +275,7 @@ class AgentMailbox:
         if active_task is not None and active_task.done():
             self._active_stream_task = None
             self._active_stream_request_id = None
+            self._active_stream_committed = False
             active_task = None
             active_request_id = None
 
@@ -310,6 +313,18 @@ class AgentMailbox:
                 status=TurnCancelStatus.STALE,
                 session_id=self._session_id(),
                 request_id=request_id,
+            )
+        if self._active_stream_committed:
+            logger.info(
+                _TAG
+                + " stream cancel ignored after commit: session_id={}, request_id={}",
+                self._session_id(),
+                active_request_id,
+            )
+            return TurnCancelResult(
+                status=TurnCancelStatus.NOT_RUNNING,
+                session_id=self._session_id(),
+                request_id=active_request_id or request_id,
             )
         active_task.cancel()
         logger.info(
@@ -409,11 +424,20 @@ class AgentMailbox:
         if item.turn_request is None:
             raise ValueError("turn_request is required for send_stream")
 
+        def mark_committed(_turn_id: int) -> None:
+            if self._active_stream_request_id == request_id:
+                self._active_stream_committed = True
+
+        self._active_stream_request_id = request_id
+        self._active_stream_committed = False
         task = asyncio.create_task(
-            self._turn_service.execute_stream(item.turn_request, item.event_queue)
+            self._turn_service.execute_stream(
+                item.turn_request,
+                item.event_queue,
+                on_committed=mark_committed,
+            )
         )
         self._active_stream_task = task
-        self._active_stream_request_id = request_id
         logger.debug(
             _TAG + " stream task started: session_id={}, request_id={}",
             self._session_id(),
@@ -438,6 +462,7 @@ class AgentMailbox:
             if self._active_stream_task is task:
                 self._active_stream_task = None
                 self._active_stream_request_id = None
+                self._active_stream_committed = False
         if not item.future.done():
             item.future.set_result(None)
 

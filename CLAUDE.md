@@ -374,7 +374,7 @@ Telegram 是轻量入口、推送通知、快速回复和兜底交互；新增�
 | 启动方式 | `uv run python -m run_telegram`（通过 `agent_client` 访问 Agent 服务） |
 | 长轮询 | `python-telegram-bot` `Application` + `updater.start_polling()` |
 | 流式输出 | `TelegramTurnFlow` 通过 Application 托管任务发送占位、增量编辑和最终分块，支持间隔和最小字符数节流 |
-| 非流式输出 | 同样通过托管任务发送占位和完整回复 |
+| 非流式输出 | 仍使用带 request ID 的 SSE transport，内部缓冲并在 DONE 后一次性展示 |
 | 渲染 | Telegram 展示层投影 `<rp-narration>` / `<rp-character>`，再转 Markdown HTML；原始 assistant content 不变 |
 | 命令 | 轻量 Bot 菜单、本地动态 `/help`、后端斜杠命令和 Telegram 命令规范化 |
 | 入口 | `/start` 展示故事、会话短 ID、玩家角色及角色/会话/开始游玩按钮；invalid 角色先进入按钮选择 |
@@ -382,8 +382,8 @@ Telegram 是轻量入口、推送通知、快速回复和兜底交互；新增�
 | 创建 | `/session_create <title>` 或“新建并进入”标题流程创建 session，成功执行 `/session_switch` 后固定切换 |
 | 二段状态 | `TelegramSessionFlow` 用进程内 pending 状态收集新会话标题，支持 `/cancel` 和超时 |
 | 并发 | 同一 chat 或同一 session 只允许一个 Telegram 生成；新输入立即拒绝，不进入 AgentMailbox 排队 |
-| 停止 | streaming bot 提供 `/stop` 和“停止生成”按钮，按 active session/request ID 调用 Agent service `/chat/stop`，仅 `cancelled` 结束本地任务 |
-| 网络参数 | `proxy`、请求超时、流式编辑节流参数来自 `channels/settings.yaml` 的 bot 配置 |
+| 停止 | 所有 bot 提供 `/stop` 和“停止生成”按钮，按 active session/request ID 调用 Agent service `/chat/stop`；只有确认 `cancelled` 才展示 stopped，注册确认超时则关闭本地 transport 并展示 unknown |
+| 网络参数 | `proxy`、请求超时、流式编辑节流和 shutdown grace 来自 `channels/settings.yaml` 的 bot 配置 |
 
 后续涉及 Telegram 的修改应优先补 `channels/tests/test_telegram.py`，尤其是：
 会话菜单、命令规范化、stream 编辑节流、请求失败/超时、Markdown 渲染、长文本分块。

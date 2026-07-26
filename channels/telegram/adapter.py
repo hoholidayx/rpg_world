@@ -2,7 +2,7 @@
 
 支持两种模式：
 - **流式（streaming=True）**：通过 ``TelegramTurnFlow`` 逐段编辑消息实现实时输出
-- **非流式（streaming=False）**：一次性通过 ``send_text`` 发送完整回复
+- **缓冲（streaming=False）**：仍使用可取消 SSE，仅在终态一次性展示完整回复
 
 用法::
 
@@ -16,14 +16,23 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import re
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    BotCommand,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from telegram.error import BadRequest, RetryAfter, TelegramError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
+from agent_service.client import AgentClientError
 from channels.base import ChannelAdapter
 from channels.telegram.action_registry import TelegramActionRegistry
 from channels.telegram.play_flow import (
@@ -38,7 +47,12 @@ from channels.telegram.render import (
     project_rp_text,
     render_markdown_to_telegram_html,
 )
-from channels.telegram.session_flow import TelegramSessionFlow, short_session_id
+from channels.telegram.session_flow import (
+    SESSION_ACTION_CREATE,
+    SESSION_ACTION_SWITCH,
+    TelegramSessionFlow,
+    short_session_id,
+)
 from channels.telegram.turn_flow import (
     ActiveTelegramTurn,
     TelegramTurnBusyReason,
@@ -58,7 +72,19 @@ _CHAT_BUSY_TEXT = "当前消息仍在生成，请等待完成后再发送。"
 _SESSION_BUSY_TEXT = "当前会话正在处理另一条消息，请稍后再试。"
 _COMMAND_BUSY_TEXT = "当前会话正在生成，请完成后再执行命令。"
 _GENERIC_FAILURE_TEXT = "处理消息失败，请稍后重试。"
+_SESSION_UNAVAILABLE_TEXT = "当前会话已删除或暂不可用。请选择其它会话，或新建并进入会话。"
+_SESSION_LIST_UNAVAILABLE_TEXT = (
+    "会话列表暂不可用。你仍可点击“新建并进入”创建会话，或稍后发送 /sessions 重试。"
+)
 _TURN_ACTION_STOP = "turn_stop"
+_TERMINAL_RETRY_ATTEMPTS = 2
+_TERMINAL_RETRY_MAX_WAIT_SECONDS = 10.0
+_SESSION_RECOVERY_ACTIONS = frozenset({
+    _TURN_ACTION_STOP,
+    PLAY_ACTION_OPEN_SESSIONS,
+    SESSION_ACTION_CREATE,
+    SESSION_ACTION_SWITCH,
+})
 _LOCAL_COMMANDS = {
     "start": "打开游玩入口",
     "help": "查看全部可用命令",
@@ -70,6 +96,43 @@ _LOCAL_COMMANDS = {
     "stop": "停止当前生成",
     "cancel": "取消正在输入的新会话标题",
 }
+
+
+class _TelegramHTMLTextExtractor(HTMLParser):
+    """Best-effort plain-text projection for Telegram HTML fallback."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+    def handle_starttag(
+        self,
+        tag: str,
+        _attrs: list[tuple[str, str | None]],
+    ) -> None:
+        if tag.lower() == "br":
+            self.parts.append("\n")
+
+
+def _telegram_html_to_plain_text(text: str) -> str:
+    parser = _TelegramHTMLTextExtractor()
+    try:
+        parser.feed(str(text))
+        parser.close()
+        return "".join(parser.parts)
+    except Exception:
+        return html.unescape(re.sub(r"<[^>]*>", "", str(text)))
+
+
+class _TelegramSessionUnavailableError(RuntimeError):
+    """The current or requested catalog session cannot be used."""
+
+
+class _TelegramSessionTargetError(RuntimeError):
+    """A switch target is outside this bot's configured workspace/story."""
 
 
 def _preview_text(text: str, limit: int = 120) -> str:
@@ -117,7 +180,7 @@ class TelegramAdapter(ChannelAdapter):
         Telegram Bot Token。
     streaming:
         ``True`` 启用流式输出（逐段编辑消息），
-        ``False`` 为一次性发送完整回复。
+        ``False`` 缓冲同一 SSE 请求并在 DONE 后一次性展示完整回复。
     agent_client:
         Shared Agent service client.
     """
@@ -132,6 +195,7 @@ class TelegramAdapter(ChannelAdapter):
         stream_edit_interval_ms: int = 800,
         stream_edit_min_chars: int = 24,
         request_timeout_ms: int = 5000,
+        shutdown_grace_ms: int = 15_000,
         agent_client: AgentClient | None = None,
         workspace: str | None = None,
         workspace_id: str | None = None,
@@ -148,6 +212,7 @@ class TelegramAdapter(ChannelAdapter):
         self._stream_edit_interval = max(0, stream_edit_interval_ms) / 1000.0
         self._stream_edit_min_chars = max(1, stream_edit_min_chars)
         self._request_timeout = max(0, request_timeout_ms) / 1000.0
+        self._shutdown_grace = max(1, int(shutdown_grace_ms)) / 1000.0
         self._workspace_override = (workspace or "").strip() or None
         self._workspace_id = (workspace_id or "").strip()
         self._story_id = int(story_id or 0)
@@ -165,6 +230,8 @@ class TelegramAdapter(ChannelAdapter):
             stream_edit_min_chars=self._stream_edit_min_chars,
             stop_markup_factory=self._build_stop_markup,
             terminal_cleanup=self._cleanup_turn_action,
+            active_session_callback=self._sync_active_session,
+            shutdown_grace_seconds=self._shutdown_grace,
         )
         if agent_client:
             self.bind_agent_client(agent_client)
@@ -187,13 +254,16 @@ class TelegramAdapter(ChannelAdapter):
     async def start(self) -> None:
         """启动 Telegram 长轮询。"""
         logger.info(
-            "telegram: preparing adapter bot={} (streaming={}, proxy={}, interval_ms={}, min_chars={}, request_timeout_ms={})",
+            "telegram: preparing adapter bot={} "
+            "(streaming={}, proxy={}, interval_ms={}, min_chars={}, "
+            "request_timeout_ms={}, shutdown_grace_ms={})",
             self._bot_name,
             self._streaming,
             self._proxy or "<disabled>",
             int(self._stream_edit_interval * 1000),
             self._stream_edit_min_chars,
             int(self._request_timeout * 1000),
+            int(self._shutdown_grace * 1000),
         )
         if not self._is_valid_token(self._token):
             raise ValueError("telegram: bot_token is empty")
@@ -295,6 +365,81 @@ class TelegramAdapter(ChannelAdapter):
             logger.exception("telegram: {} unexpected failure bot={} chat_id={}", action, self._bot_name, chat_id)
             return None
 
+    async def _terminal_request(
+        self,
+        chat_id: str,
+        action: str,
+        request_factory,
+    ):
+        """Run a terminal Telegram write with bounded RetryAfter handling."""
+        total_wait = 0.0
+        for attempt in range(_TERMINAL_RETRY_ATTEMPTS + 1):
+            try:
+                awaitable = request_factory()
+                if self._request_timeout <= 0:
+                    return await awaitable
+                return await asyncio.wait_for(
+                    awaitable,
+                    timeout=self._request_timeout,
+                )
+            except RetryAfter as exc:
+                raw_delay = exc.retry_after
+                delay = (
+                    float(raw_delay.total_seconds())
+                    if hasattr(raw_delay, "total_seconds")
+                    else float(raw_delay)
+                )
+                delay = max(0.0, delay)
+                can_retry = (
+                    attempt < _TERMINAL_RETRY_ATTEMPTS
+                    and total_wait + delay <= _TERMINAL_RETRY_MAX_WAIT_SECONDS
+                )
+                logger.warning(
+                    "telegram: terminal {} rate limited bot={} chat_id={} "
+                    "retry_after={}s attempt={} retry={}",
+                    action,
+                    self._bot_name,
+                    chat_id,
+                    delay,
+                    attempt + 1,
+                    can_retry,
+                )
+                if not can_retry:
+                    return None
+                total_wait += delay
+                await asyncio.sleep(delay)
+            except BadRequest:
+                raise
+            except (TimeoutError, TimedOut) as exc:
+                logger.warning(
+                    "telegram: terminal {} timed out bot={} chat_id={} "
+                    "timeout_ms={} error_type={}",
+                    action,
+                    self._bot_name,
+                    chat_id,
+                    int(self._request_timeout * 1000),
+                    type(exc).__name__,
+                )
+                return None
+            except (TelegramError, OSError) as exc:
+                logger.warning(
+                    "telegram: terminal {} failed bot={} chat_id={} error_type={}",
+                    action,
+                    self._bot_name,
+                    chat_id,
+                    type(exc).__name__,
+                )
+                return None
+            except Exception:
+                logger.exception(
+                    "telegram: terminal {} unexpected failure bot={} chat_id={}",
+                    action,
+                    self._bot_name,
+                    chat_id,
+                )
+                return None
+        return None
+
     def get_session_id(self, chat_id: str) -> str:
         """优先返回 Telegram chat 绑定的显式 session，否则使用默认映射。"""
         if not self._default_session_id:
@@ -335,6 +480,7 @@ class TelegramAdapter(ChannelAdapter):
         text: str,
         *,
         reply_markup: InlineKeyboardMarkup | None = None,
+        terminal: bool = False,
     ) -> int | None:
         """Send one already-rendered Telegram HTML message."""
         if not self._app:
@@ -347,28 +493,110 @@ class TelegramAdapter(ChannelAdapter):
         }
         if reply_markup is not None:
             send_kwargs["reply_markup"] = reply_markup
-        message = await self._request_with_timeout(
-            chat_id,
-            "send_message",
-            self._app.bot.send_message(**send_kwargs),
-        )
+        if terminal:
+            try:
+                message = await self._terminal_request(
+                    chat_id,
+                    "send_message",
+                    lambda: self._app.bot.send_message(**send_kwargs),
+                )
+            except BadRequest as exc:
+                logger.warning(
+                    "telegram: terminal send_message markup rejected; "
+                    "retrying plain text bot={} chat_id={} error_type={}",
+                    self._bot_name,
+                    chat_id,
+                    type(exc).__name__,
+                )
+                fallback_kwargs = dict(send_kwargs)
+                fallback_kwargs["text"] = _telegram_html_to_plain_text(text)
+                fallback_kwargs.pop("parse_mode", None)
+                try:
+                    message = await self._terminal_request(
+                        chat_id,
+                        "send_message_plain_fallback",
+                        lambda: self._app.bot.send_message(**fallback_kwargs),
+                    )
+                except BadRequest as fallback_exc:
+                    logger.warning(
+                        "telegram: terminal send_message plain fallback rejected "
+                        "bot={} chat_id={} error_type={}",
+                        self._bot_name,
+                        chat_id,
+                        type(fallback_exc).__name__,
+                    )
+                    return None
+        else:
+            message = await self._request_with_timeout(
+                chat_id,
+                "send_message",
+                self._app.bot.send_message(**send_kwargs),
+            )
         message_id = getattr(message, "message_id", None)
         return int(message_id) if message_id is not None else None
 
-    async def edit_html(self, chat_id: str, message_id: int, text: str) -> bool:
+    async def edit_html(
+        self,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        *,
+        terminal: bool = False,
+    ) -> bool:
         """Edit one Telegram message with already-rendered HTML."""
         if not self._app:
             return False
-        result = await self._request_with_timeout(
-            chat_id,
-            "edit_message_text",
-            self._app.bot.edit_message_text(
-                chat_id=int(chat_id),
-                message_id=int(message_id),
-                text=text,
-                parse_mode=_TELEGRAM_PARSE_MODE,
-            ),
-        )
+        edit_kwargs: dict[str, object] = {
+            "chat_id": int(chat_id),
+            "message_id": int(message_id),
+            "text": text,
+            "parse_mode": _TELEGRAM_PARSE_MODE,
+        }
+        if terminal:
+            try:
+                result = await self._terminal_request(
+                    chat_id,
+                    "edit_message_text",
+                    lambda: self._app.bot.edit_message_text(**edit_kwargs),
+                )
+            except BadRequest as exc:
+                if "Message is not modified" in str(exc):
+                    return True
+                logger.warning(
+                    "telegram: terminal edit_message_text markup rejected; "
+                    "retrying plain text bot={} chat_id={} error_type={}",
+                    self._bot_name,
+                    chat_id,
+                    type(exc).__name__,
+                )
+                fallback_kwargs = dict(edit_kwargs)
+                fallback_kwargs["text"] = _telegram_html_to_plain_text(text)
+                fallback_kwargs.pop("parse_mode", None)
+                try:
+                    result = await self._terminal_request(
+                        chat_id,
+                        "edit_message_text_plain_fallback",
+                        lambda: self._app.bot.edit_message_text(**fallback_kwargs),
+                    )
+                except BadRequest as fallback_exc:
+                    if "Message is not modified" in str(fallback_exc):
+                        return True
+                    logger.warning(
+                        "telegram: terminal edit_message_text plain fallback rejected "
+                        "bot={} chat_id={} error_type={}",
+                        self._bot_name,
+                        chat_id,
+                        type(fallback_exc).__name__,
+                    )
+                    return False
+        else:
+            result = await self._request_with_timeout(
+                chat_id,
+                "edit_message_text",
+                self._app.bot.edit_message_text(
+                    **edit_kwargs,
+                ),
+            )
         return result is not None
 
     async def delete_message(self, chat_id: str, message_id: int) -> bool:
@@ -401,8 +629,6 @@ class TelegramAdapter(ChannelAdapter):
         return result is not None
 
     def _build_stop_markup(self, active: ActiveTelegramTurn) -> InlineKeyboardMarkup | None:
-        if not self._streaming:
-            return None
         action = self._action_registry.create(
             kind=_TURN_ACTION_STOP,
             chat_id=active.chat_id,
@@ -446,8 +672,7 @@ class TelegramAdapter(ChannelAdapter):
         ]
         if "compact" in agent_command_names:
             menu_names.append("compact")
-        if self._streaming:
-            menu_names.append("stop")
+        menu_names.append("stop")
         commands = [
             BotCommand(
                 command=name,
@@ -466,20 +691,50 @@ class TelegramAdapter(ChannelAdapter):
         except Exception:
             logger.exception("telegram: failed to configure bot commands")
 
-    async def _send_session_picker(self, chat_id: str) -> None:
+    async def _send_session_picker(
+        self,
+        chat_id: str,
+        *,
+        session_unavailable: bool = False,
+    ) -> None:
         """发送会话选择菜单。"""
         if not self._app or not self._agent_client:
             await self.send_text(chat_id, "会话菜单暂不可用。")
             return
+        app = self._app
         current = self.get_session_id(chat_id)
-        payload = await self._agent_client.list_sessions(self._workspace_id, self._story_id)
-        sessions = payload.get("sessions", [])
-        text = self._session_flow.render_session_picker_text(sessions, current)
+        list_failed = False
+        try:
+            payload = await self._agent_client.list_sessions(
+                self._workspace_id,
+                self._story_id,
+            )
+            sessions = payload.get("sessions", [])
+            if not isinstance(sessions, list):
+                raise TypeError("Agent service returned a non-list sessions payload")
+        except Exception:
+            logger.exception(
+                "telegram: session picker lookup failed "
+                "bot={} chat_id={} workspace_id={} story_id={}",
+                self._bot_name,
+                chat_id,
+                self._workspace_id,
+                self._story_id,
+            )
+            sessions = []
+            list_failed = True
+        text = (
+            _SESSION_LIST_UNAVAILABLE_TEXT
+            if list_failed
+            else self._session_flow.render_session_picker_text(sessions, current)
+        )
+        if session_unavailable:
+            text = f"{_SESSION_UNAVAILABLE_TEXT}\n\n{text}"
 
         await self._request_with_timeout(
             chat_id,
             "send_message",
-            self._app.bot.send_message(
+            app.bot.send_message(
                 chat_id=int(chat_id),
                 text=render_markdown_to_telegram_html(text),
                 parse_mode=_TELEGRAM_PARSE_MODE,
@@ -502,7 +757,19 @@ class TelegramAdapter(ChannelAdapter):
         session_id = str(result.get("session_id") or "")
         if not session_id:
             raise RuntimeError("Agent service did not return session_id")
-        return await self._switch_chat_session(chat_id, session_id)
+        try:
+            return await self._switch_chat_session(chat_id, session_id)
+        except BaseException:
+            try:
+                await self._agent_client.delete_session(session_id)
+            except Exception:
+                logger.exception(
+                    "telegram: failed to clean up session after switch failure "
+                    "chat_id={} session_id={}",
+                    chat_id,
+                    session_id,
+                )
+            raise
 
     async def _prompt_session_create(self, chat_id: str) -> None:
         self._session_flow.start_session_create_flow(chat_id)
@@ -564,7 +831,19 @@ class TelegramAdapter(ChannelAdapter):
 
         try:
             overview = await self._get_session_overview(chat_id)
-        except Exception:
+        except Exception as exc:
+            if self._is_session_unavailable_error(exc):
+                logger.info(
+                    "telegram: blocking message for unavailable session "
+                    "chat_id={} session_id={}",
+                    chat_id,
+                    session_id,
+                )
+                await self._send_session_picker(
+                    chat_id,
+                    session_unavailable=True,
+                )
+                return
             logger.exception(
                 "telegram: player role lookup failed chat_id={} session_id={}",
                 chat_id,
@@ -645,16 +924,11 @@ class TelegramAdapter(ChannelAdapter):
             await self.send_text(chat_id, _COMMAND_BUSY_TEXT)
             return
 
+        command_parts = command.split(maxsplit=1)
+        command_name = command_parts[0] if command_parts else ""
+
         if command == "/start":
             await self._on_start(update, _context)
-            return
-
-        if command == "/help":
-            await self._send_help(chat_id)
-            return
-
-        if command == "/role_bind":
-            await self._send_role_picker(chat_id)
             return
 
         if await self._session_flow.handle_command(
@@ -665,12 +939,11 @@ class TelegramAdapter(ChannelAdapter):
         ):
             return
 
-        if command.startswith("/session_create"):
-            parts = command.split(maxsplit=1)
-            if len(parts) == 1 or not parts[1].strip():
+        if command_name == "/session_create":
+            if len(command_parts) == 1 or not command_parts[1].strip():
                 await self._prompt_session_create(chat_id)
                 return
-            title = parts[1].strip()
+            title = command_parts[1].strip()
             try:
                 active_session = await self._create_chat_session(chat_id, title)
                 await self.send_text(
@@ -685,6 +958,66 @@ class TelegramAdapter(ChannelAdapter):
                     _preview_text(command),
                 )
                 await self.send_text(chat_id, "会话创建失败，请稍后重试。")
+            return
+
+        if command_name == "/session_switch":
+            if len(command_parts) == 1 or not command_parts[1].strip():
+                await self._send_session_picker(chat_id)
+                return
+            target_session_id = command_parts[1].split(maxsplit=1)[0]
+            try:
+                active_session = await self._switch_chat_session(
+                    chat_id,
+                    target_session_id,
+                )
+            except Exception:
+                logger.exception(
+                    "telegram: session_switch failed "
+                    "chat_id={} user_id={} target_session_id={}",
+                    chat_id,
+                    user_id,
+                    target_session_id,
+                )
+                try:
+                    await self._get_session_overview(chat_id)
+                except Exception as current_exc:
+                    if self._is_session_unavailable_error(current_exc):
+                        await self._send_session_picker(
+                            chat_id,
+                            session_unavailable=True,
+                        )
+                        return
+                await self.send_text(chat_id, "会话切换失败，请重新选择。")
+                await self._send_session_picker(chat_id)
+                return
+            await self.send_text(chat_id, f"[已切换到会话: {active_session}]")
+            return
+
+        try:
+            await self._get_session_overview(chat_id)
+        except Exception as exc:
+            if self._is_session_unavailable_error(exc):
+                await self._send_session_picker(
+                    chat_id,
+                    session_unavailable=True,
+                )
+                return
+            logger.exception(
+                "telegram: command session lookup failed "
+                "chat_id={} user_id={} command={}",
+                chat_id,
+                user_id,
+                _preview_text(command),
+            )
+            await self.send_text(chat_id, "当前会话状态读取失败，请稍后重试。")
+            return
+
+        if command == "/help":
+            await self._send_help(chat_id)
+            return
+
+        if command == "/role_bind":
+            await self._send_role_picker(chat_id)
             return
 
         if not self._agent_client:
@@ -726,7 +1059,12 @@ class TelegramAdapter(ChannelAdapter):
             return
 
         if active_session:
-            self._session_flow.pin_session(chat_id, active_session)
+            self._session_flow.pin_session_if_current(
+                chat_id,
+                active_session,
+                expected_current_session_id=session_id,
+                default_session_id=self._default_session_id,
+            )
 
         if reply:
             if command.startswith("/role_bind "):
@@ -743,7 +1081,12 @@ class TelegramAdapter(ChannelAdapter):
         try:
             current_session_id = self.get_session_id(chat_id)
         except Exception:
-            await query.answer(_CALLBACK_INVALID_TEXT, show_alert=True)
+            await self._answer_callback_query(
+                query,
+                chat_id,
+                _CALLBACK_INVALID_TEXT,
+                show_alert=True,
+            )
             return
         resolution = self._action_registry.resolve(
             str(query.data or ""),
@@ -751,20 +1094,58 @@ class TelegramAdapter(ChannelAdapter):
             current_session_id=current_session_id,
         )
         if not resolution.resolved or resolution.action is None:
-            await query.answer(_CALLBACK_INVALID_TEXT, show_alert=True)
+            await self._answer_callback_query(
+                query,
+                chat_id,
+                _CALLBACK_INVALID_TEXT,
+                show_alert=True,
+            )
             return
         resolved_action = resolution.action
         if (
             resolved_action.kind != _TURN_ACTION_STOP
             and self._turn_flow.busy_reason(chat_id, current_session_id) is not None
         ):
-            await query.answer(_CALLBACK_BUSY_TEXT)
+            await self._answer_callback_query(
+                query,
+                chat_id,
+                _CALLBACK_BUSY_TEXT,
+            )
             return
+        if resolved_action.kind not in _SESSION_RECOVERY_ACTIONS:
+            try:
+                await self._get_session_overview(chat_id)
+            except Exception as exc:
+                if self._is_session_unavailable_error(exc):
+                    await self._answer_callback_query(query, chat_id)
+                    await self._send_session_picker(
+                        chat_id,
+                        session_unavailable=True,
+                    )
+                    return
+                logger.exception(
+                    "telegram: callback session lookup failed "
+                    "chat_id={} kind={}",
+                    chat_id,
+                    resolved_action.kind,
+                )
+                await self._answer_callback_query(
+                    query,
+                    chat_id,
+                    _CALLBACK_INVALID_TEXT,
+                    show_alert=True,
+                )
+                return
         action = self._action_registry.claim(resolution.token)
         if action is None:
-            await query.answer(_CALLBACK_INVALID_TEXT, show_alert=True)
+            await self._answer_callback_query(
+                query,
+                chat_id,
+                _CALLBACK_INVALID_TEXT,
+                show_alert=True,
+            )
             return
-        await query.answer()
+        await self._answer_callback_query(query, chat_id)
         try:
             if action.kind == _TURN_ACTION_STOP:
                 await self._stop_current_turn(chat_id)
@@ -805,18 +1186,88 @@ class TelegramAdapter(ChannelAdapter):
         if not handled:
             await self.send_text(chat_id, _CALLBACK_INVALID_TEXT)
 
+    async def _answer_callback_query(
+        self,
+        query: CallbackQuery,
+        chat_id: str,
+        text: str | None = None,
+        *,
+        show_alert: bool = False,
+    ) -> bool:
+        """Acknowledge a callback without aborting an already-resolved action."""
+        try:
+            if show_alert:
+                await query.answer(text, show_alert=True)
+            elif text is not None:
+                await query.answer(text)
+            else:
+                await query.answer()
+            return True
+        except (TelegramError, OSError) as exc:
+            logger.warning(
+                "telegram: callback answer failed "
+                "bot={} chat_id={} error_type={}",
+                self._bot_name,
+                chat_id,
+                type(exc).__name__,
+            )
+        except Exception:
+            logger.exception(
+                "telegram: callback answer unexpected failure "
+                "bot={} chat_id={}",
+                self._bot_name,
+                chat_id,
+            )
+        return False
+
     async def _switch_chat_session(self, chat_id: str, session_id: str) -> str:
         if not self._agent_client:
             raise RuntimeError("Agent client is not bound")
-        result = await self._agent_client.execute_command(
-            self.get_session_id(chat_id),
-            f"/session_switch {session_id}",
-        )
+        target_session_id = str(session_id).strip()
+        await self._validate_switch_target(target_session_id)
+        source_session_id = self.get_session_id(chat_id)
+        try:
+            result = await self._agent_client.execute_command(
+                source_session_id,
+                f"/session_switch {target_session_id}",
+            )
+        except AgentClientError as exc:
+            if (
+                source_session_id == target_session_id
+                or not self._is_session_unavailable_error(exc)
+            ):
+                raise
+            # The source may have been deleted by another channel. The target
+            # was independently validated above, so ask its own mailbox to
+            # confirm the typed locator rather than silently falling back.
+            result = await self._agent_client.execute_command(
+                target_session_id,
+                f"/session_switch {target_session_id}",
+            )
         active_session = str(result.get("active_session") or "")
-        if not bool(result.get("handled", True)) or active_session != session_id:
+        if (
+            not bool(result.get("handled", True))
+            or active_session != target_session_id
+        ):
             raise RuntimeError(str(result.get("reply") or "会话切换失败"))
         self._session_flow.pin_session(chat_id, active_session)
         return active_session
+
+    async def _validate_switch_target(
+        self,
+        session_id: str,
+    ) -> AgentSessionOverviewPayload:
+        if not self._agent_client:
+            raise RuntimeError("Agent client is not bound")
+        if not session_id:
+            raise _TelegramSessionTargetError("目标会话 ID 不能为空")
+        overview = await self._agent_client.get_session_overview(session_id)
+        self._require_overview_locator(
+            overview,
+            expected_session_id=session_id,
+            error_type=_TelegramSessionTargetError,
+        )
+        return overview
 
     async def _get_session_overview(
         self,
@@ -824,7 +1275,64 @@ class TelegramAdapter(ChannelAdapter):
     ) -> AgentSessionOverviewPayload:
         if not self._agent_client:
             raise RuntimeError("Agent client is not bound")
-        return await self._agent_client.get_session_overview(self.get_session_id(chat_id))
+        session_id = self.get_session_id(chat_id)
+        overview = await self._agent_client.get_session_overview(session_id)
+        self._require_overview_locator(
+            overview,
+            expected_session_id=session_id,
+            error_type=_TelegramSessionUnavailableError,
+        )
+        return overview
+
+    def _require_overview_locator(
+        self,
+        overview: AgentSessionOverviewPayload,
+        *,
+        expected_session_id: str,
+        error_type: type[RuntimeError],
+    ) -> None:
+        returned_session_id = str(overview.get("session_id") or "")
+        returned_workspace_id = str(overview.get("workspace_id") or "")
+        try:
+            returned_story_id = int(overview.get("story_id") or 0)
+        except (TypeError, ValueError):
+            returned_story_id = 0
+        if (
+            returned_session_id != expected_session_id
+            or returned_workspace_id != self._workspace_id
+            or returned_story_id != self._story_id
+        ):
+            raise error_type(
+                "会话定位与当前 Telegram Bot 的 workspace/story 不一致"
+            )
+
+    def _sync_active_session(
+        self,
+        active: ActiveTelegramTurn,
+        session_id: str,
+    ) -> None:
+        pinned = self._session_flow.pin_session_if_current(
+            active.chat_id,
+            session_id,
+            expected_current_session_id=active.session_id,
+            default_session_id=self._default_session_id,
+        )
+        if not pinned:
+            logger.warning(
+                "telegram: ignored stale active-session locator "
+                "chat_id={} source_session_id={} target_session_id={}",
+                active.chat_id,
+                active.session_id,
+                session_id,
+            )
+
+    @staticmethod
+    def _is_session_unavailable_error(exc: BaseException) -> bool:
+        if isinstance(exc, _TelegramSessionUnavailableError):
+            return True
+        if not isinstance(exc, AgentClientError):
+            return False
+        return exc.status_code in {404, 409}
 
     async def _send_entry_card(self, chat_id: str) -> None:
         overview = await self._get_session_overview(chat_id)
@@ -860,9 +1368,6 @@ class TelegramAdapter(ChannelAdapter):
             await self.send_text(chat_id, first_message, project_rp=True)
 
     async def _stop_current_turn(self, chat_id: str) -> None:
-        if not self._streaming:
-            await self.send_text(chat_id, "当前 Bot 未启用流式停止。")
-            return
         status = await self._turn_flow.request_stop(chat_id)
         if status == TurnCancelStatus.CANCELLED.value:
             return
@@ -883,8 +1388,7 @@ class TelegramAdapter(ChannelAdapter):
             "session_create",
             "cancel",
         ]
-        if self._streaming:
-            local_names.append("stop")
+        local_names.append("stop")
         commands: dict[str, str] = {
             name: _LOCAL_COMMANDS[name]
             for name in local_names
@@ -916,7 +1420,13 @@ class TelegramAdapter(ChannelAdapter):
         logger.info("telegram: received /start chat_id={}", chat_id)
         try:
             await self._send_entry_card(chat_id)
-        except Exception:
+        except Exception as exc:
+            if self._is_session_unavailable_error(exc):
+                await self._send_session_picker(
+                    chat_id,
+                    session_unavailable=True,
+                )
+                return
             logger.exception("telegram: start entry failed chat_id={}", chat_id)
             await self.send_text(chat_id, "游玩入口暂不可用，请稍后重试。")
 

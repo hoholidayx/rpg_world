@@ -72,6 +72,8 @@ class AgentTurnService:
         self,
         request: TurnRequest,
         event_queue: asyncio.Queue,
+        *,
+        on_committed: Callable[[int], None] | None = None,
     ) -> int | None:
         bypass = await self._resolve_bypass(request)
         if bypass is not None:
@@ -91,6 +93,7 @@ class AgentTurnService:
                 emit_event=event_queue.put,
                 emit_error=emit_error,
                 emit_end=emit_end,
+                on_committed=on_committed,
             )
             return result.committed_turn_id if result is not None else None
         except PlayerCharacterRequiredError as exc:

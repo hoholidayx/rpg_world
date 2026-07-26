@@ -114,6 +114,7 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     assert created_adapters[0]["story_id"] == 1
     assert created_adapters[0]["session_id"] == "resolved_main_workspace"
     assert created_adapters[0]["streaming"] is True
+    assert created_adapters[0]["shutdown_grace_ms"] == 15000
     assert created_adapters[1]["bot_name"] == "prod"
     assert created_adapters[1]["token"] == "token-prod"
     assert created_adapters[1]["workspace"] == "data/prod_workspace"

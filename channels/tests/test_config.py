@@ -158,6 +158,7 @@ def test_dict_deep_merge_keeps_base_values(monkeypatch, tmp_path):
     assert bot.token == "base-token"
     assert bot.workspace_id == "override_workspace"
     assert bot.story_id == 2
+    assert bot.shutdown_grace_ms == 15_000
 
 
 def test_telegram_bots_merge_by_mapping_key_and_append_new(monkeypatch, tmp_path):
@@ -230,7 +231,105 @@ def test_enabled_telegram_bots_reject_token_reuse_across_workspace_story(monkeyp
     monkeypatch.setattr(channels_config, "_SETTINGS_PATH", cfg)
     monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
 
-    with pytest.raises(ValueError, match="token reused across workspace/story"):
+    with pytest.raises(ValueError, match="token reused by enabled bots"):
+        channels_config.ChannelsSettings()
+
+
+def test_enabled_telegram_bots_reject_token_reuse_with_same_locator_without_leaking_token(
+    monkeypatch,
+    tmp_path,
+):
+    shared_token = "123456789:highly-sensitive-shared-token"
+    cfg = tmp_path / "settings.yaml"
+    _write_channels(
+        cfg,
+        profile_override=f"""
+    channels:
+      telegram:
+        bots:
+          main:
+            enabled: true
+            bot_token: {shared_token}
+            workspace_id: shared_workspace
+            story_id: 1
+          alt:
+            enabled: true
+            bot_token: {shared_token}
+            workspace_id: shared_workspace
+            story_id: 1
+""",
+    )
+    monkeypatch.setattr(channels_config, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
+
+    with pytest.raises(ValueError, match="token reused by enabled bots") as exc_info:
+        channels_config.ChannelsSettings()
+
+    assert shared_token not in str(exc_info.value)
+
+
+def test_disabled_telegram_bot_does_not_reserve_token(monkeypatch, tmp_path):
+    settings = _load(
+        tmp_path,
+        monkeypatch,
+        profile_override="""
+    channels:
+      telegram:
+        bots:
+          main:
+            enabled: false
+            bot_token: shared-token
+          alt:
+            enabled: true
+            bot_token: shared-token
+            workspace_id: base_workspace
+            story_id: 1
+""",
+    )
+
+    assert [bot.name for bot in settings.telegram_bots if bot.enabled] == ["alt"]
+
+
+def test_telegram_shutdown_grace_ms_can_be_overridden(monkeypatch, tmp_path):
+    settings = _load(
+        tmp_path,
+        monkeypatch,
+        profile_override="""
+    channels:
+      telegram:
+        bots:
+          main:
+            shutdown_grace_ms: 30000
+""",
+    )
+
+    assert settings.telegram_bots[0].shutdown_grace_ms == 30_000
+
+
+@pytest.mark.parametrize(
+    "configured_value",
+    ["0", "-1", "120001", "true", "1.5", "not-an-int"],
+)
+def test_telegram_shutdown_grace_ms_must_be_a_bounded_positive_integer(
+    configured_value,
+    monkeypatch,
+    tmp_path,
+):
+    cfg = tmp_path / "settings.yaml"
+    _write_channels(
+        cfg,
+        profile_override=f"""
+    channels:
+      telegram:
+        bots:
+          main:
+            shutdown_grace_ms: {configured_value}
+""",
+    )
+    monkeypatch.setattr(channels_config, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
+
+    with pytest.raises(ValueError, match=r"shutdown_grace_ms must be"):
         channels_config.ChannelsSettings()
 
 

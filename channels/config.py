@@ -16,6 +16,8 @@ from rpg_core.session import SessionManager
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 _TELEGRAM_BOT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9_]+$")
+_TELEGRAM_SHUTDOWN_GRACE_MS_DEFAULT = 15_000
+_TELEGRAM_SHUTDOWN_GRACE_MS_MAX = 120_000
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,7 @@ class TelegramBotSettings:
     stream_edit_interval_ms: int = 800
     stream_edit_min_chars: int = 24
     request_timeout_ms: int = 5000
+    shutdown_grace_ms: int = _TELEGRAM_SHUTDOWN_GRACE_MS_DEFAULT
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,22 @@ class ChannelsSettings(ProfiledYamlSettings):
 
     def _int(self, cfg: dict, label: str, key: str, default: int) -> int:
         return forgiving_int(cfg.get(key, default), default)
+
+    @staticmethod
+    def _bounded_positive_int(
+        cfg: dict,
+        *,
+        label: str,
+        key: str,
+        default: int,
+        maximum: int,
+    ) -> int:
+        value = cfg.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{label}.{key} must be an integer between 1 and {maximum}")
+        if value <= 0 or value > maximum:
+            raise ValueError(f"{label}.{key} must be between 1 and {maximum}")
+        return value
 
     # ── Telegram channel config ─────────────────────────────────────────
 
@@ -194,6 +213,13 @@ class ChannelsSettings(ProfiledYamlSettings):
             stream_edit_interval_ms=self._int(bot, "channels.telegram.bots", "stream_edit_interval_ms", 800),
             stream_edit_min_chars=self._int(bot, "channels.telegram.bots", "stream_edit_min_chars", 24),
             request_timeout_ms=self._int(bot, "channels.telegram.bots", "request_timeout_ms", 5000),
+            shutdown_grace_ms=self._bounded_positive_int(
+                bot,
+                label=f"channels.telegram.bots.{name}",
+                key="shutdown_grace_ms",
+                default=_TELEGRAM_SHUTDOWN_GRACE_MS_DEFAULT,
+                maximum=_TELEGRAM_SHUTDOWN_GRACE_MS_MAX,
+            ),
         )
 
     def _validate_settings(self) -> None:
@@ -203,7 +229,7 @@ class ChannelsSettings(ProfiledYamlSettings):
             raise ValueError("telegram bot config invalid: bots must be a mapping")
 
         seen_names: set[str] = set()
-        token_to_story: dict[str, tuple[str, str, int]] = {}
+        token_to_bot_name: dict[str, str] = {}
         for name, raw_bot in bots.items():
             if not isinstance(raw_bot, dict):
                 raise ValueError("telegram bot config invalid: bot entry must be a mapping")
@@ -222,16 +248,12 @@ class ChannelsSettings(ProfiledYamlSettings):
                 raise ValueError(f"telegram bot config invalid: bot={name} missing workspace_id")
             if bot.story_id <= 0:
                 raise ValueError(f"telegram bot config invalid: bot={name} missing story_id")
-            if bot.token in token_to_story:
-                other_name, other_workspace_id, other_story_id = token_to_story[bot.token]
-                if other_workspace_id != bot.workspace_id or other_story_id != bot.story_id:
-                    raise ValueError(
-                        "telegram bot config invalid: token reused across workspace/story "
-                        f"bot={name} conflicts_with={other_name} "
-                        f"workspace_id={bot.workspace_id} story_id={bot.story_id} "
-                        f"other_workspace_id={other_workspace_id} other_story_id={other_story_id}"
-                    )
-            token_to_story[bot.token] = (name, bot.workspace_id, bot.story_id)
+            if bot.token in token_to_bot_name:
+                raise ValueError(
+                    "telegram bot config invalid: token reused by enabled bots "
+                    f"bot={name} conflicts_with={token_to_bot_name[bot.token]}"
+                )
+            token_to_bot_name[bot.token] = name
 
         cli = self.cli_channel
         if not cli.workspace_id.strip():

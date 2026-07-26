@@ -352,6 +352,7 @@ async def test_stream_orchestrator_buffers_done_until_commit() -> None:
         emit_event=lambda event: _append(emitted, event),
         emit_error=_unexpected_error,
         emit_end=lambda: _append(emitted, "end"),
+        on_committed=lambda turn_id: emitted.append(f"committed:{turn_id}"),
     )
 
     assert result is not None
@@ -360,6 +361,9 @@ async def test_stream_orchestrator_buffers_done_until_commit() -> None:
         StreamEventKind.DONE,
     ]
     assert emitted[-1] == "end"
+    assert emitted[1] == "committed:1"
+    assert isinstance(emitted[2], AgentStreamEvent)
+    assert emitted[2].kind is StreamEventKind.DONE
     assert session.history[-1].content == "完整"
     assert post_commit.calls == 1
 

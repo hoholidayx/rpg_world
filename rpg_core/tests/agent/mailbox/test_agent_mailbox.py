@@ -10,7 +10,8 @@ from commons.errors import (
     MessageModeUnavailableError,
 )
 from rpg_core.agent.mailbox import AgentMailbox, AgentMailboxClosedError
-from rpg_core.agent.protocol import StreamEventKind, TurnCancelStatus
+from rpg_core.agent.mailbox.models import _StreamSentinel
+from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind, TurnCancelStatus
 from rpg_core.agent.turn import TurnRequest
 from rpg_core.agent.turn.runner import AgentReply
 from rpg_core.context.models import Message, Role
@@ -29,6 +30,10 @@ class _Turns:
         self.release_send = asyncio.Event()
         self.block_send = False
         self.stream_error: BaseException | None = None
+        self.block_after_commit = False
+        self.stream_committed = asyncio.Event()
+        self.release_post_commit = asyncio.Event()
+        self.post_commit_completed = False
         self.order: list[str] = []
         self.committed_turn_id: int | None = None
 
@@ -43,11 +48,32 @@ class _Turns:
             committed_turn_id=self.committed_turn_id,
         )
 
-    async def execute_stream(self, request: TurnRequest, event_queue) -> None:  # noqa: ANN001
-        del request, event_queue
+    async def execute_stream(  # noqa: ANN001
+        self,
+        request: TurnRequest,
+        event_queue,
+        *,
+        on_committed=None,
+    ) -> None:
+        del request
         self.stream_started.set()
         if self.stream_error is not None:
             raise self.stream_error
+        if self.block_after_commit:
+            if on_committed is not None:
+                on_committed(7)
+            await event_queue.put(
+                AgentStreamEvent(
+                    kind=StreamEventKind.DONE,
+                    content="committed",
+                    committed_turn_id=7,
+                )
+            )
+            await event_queue.put(_StreamSentinel())
+            self.stream_committed.set()
+            await self.release_post_commit.wait()
+            self.post_commit_completed = True
+            return
         await asyncio.Event().wait()
 
 
@@ -251,6 +277,31 @@ async def test_mailbox_rejects_stale_cancel_without_stopping_active_turn() -> No
         await mailbox.cancel_current_turn("req-new")
         await collect_task
     finally:
+        await mailbox.close()
+
+
+@pytest.mark.asyncio
+async def test_mailbox_does_not_cancel_stream_after_commit() -> None:
+    turns = _Turns()
+    turns.block_after_commit = True
+    mailbox = _mailbox(turns)
+    collect_task = asyncio.create_task(
+        _collect(mailbox, TurnRequest.create("go", request_id="req-committed"))
+    )
+    try:
+        await turns.stream_committed.wait()
+        events = await collect_task
+        assert events[-1].kind is StreamEventKind.DONE
+
+        result = await mailbox.cancel_current_turn("req-committed")
+
+        assert result.status is TurnCancelStatus.NOT_RUNNING
+        assert not turns.post_commit_completed
+        turns.release_post_commit.set()
+        await mailbox.wait_idle()
+        assert turns.post_commit_completed
+    finally:
+        turns.release_post_commit.set()
         await mailbox.close()
 
 

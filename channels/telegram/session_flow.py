@@ -59,6 +59,23 @@ class TelegramSessionFlow:
         """把当前 chat 固定到指定会话。"""
         self._session_overrides[chat_id] = session_id
 
+    def pin_session_if_current(
+        self,
+        chat_id: str,
+        session_id: str,
+        *,
+        expected_current_session_id: str,
+        default_session_id: str,
+    ) -> bool:
+        """仅当 chat 仍指向发起请求的会话时应用后端确认的 locator。"""
+        if (
+            self.get_session_id(chat_id, default_session_id)
+            != str(expected_current_session_id)
+        ):
+            return False
+        self.pin_session(chat_id, session_id)
+        return True
+
     def clear_pinned_session(self, chat_id: str) -> None:
         """清除当前 chat 的显式会话绑定。"""
         self._session_overrides.pop(chat_id, None)

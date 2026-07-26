@@ -77,6 +77,7 @@ async def _start_enabled_bots(
                 stream_edit_interval_ms=bot.stream_edit_interval_ms,
                 stream_edit_min_chars=bot.stream_edit_min_chars,
                 request_timeout_ms=bot.request_timeout_ms,
+                shutdown_grace_ms=bot.shutdown_grace_ms,
                 workspace=str(session["workspace"]),
                 workspace_id=bot.workspace_id,
                 story_id=bot.story_id,

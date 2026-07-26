@@ -32,6 +32,7 @@ StreamRunner = Callable[..., AsyncIterator[AgentStreamEvent]]
 EventEmitter = Callable[[AgentStreamEvent], Awaitable[None]]
 ErrorEmitter = Callable[[BaseException], Awaitable[None]]
 EndEmitter = Callable[[], Awaitable[None]]
+CommitCallback = Callable[[int], None]
 
 
 class TurnOrchestrator:
@@ -120,6 +121,7 @@ class TurnOrchestrator:
         emit_event: EventEmitter,
         emit_error: ErrorEmitter,
         emit_end: EndEmitter,
+        on_committed: CommitCallback | None = None,
     ) -> TurnResult | None:
         runtime: TurnRuntime | None = None
         try:
@@ -166,6 +168,16 @@ class TurnOrchestrator:
                 logger.opt(exception=exc).error(_TAG + " stream commit failed")
                 await emit_error(exc)
                 return None
+            if on_committed is not None:
+                try:
+                    on_committed(committed_turn_id)
+                except Exception as exc:
+                    logger.opt(exception=exc).error(
+                        _TAG
+                        + " stream commit callback failed after persistence: session_id={}, turn_id={}",
+                        self._session_id(),
+                        committed_turn_id,
+                    )
 
             final_event.duration_ms = runtime.stats.total_duration_ms
             final_event.usage = aggregate_usage_records(runtime.stats.calls)

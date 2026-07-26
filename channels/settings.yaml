@@ -34,7 +34,7 @@ base:
           player_character_id: 0
           # 单 bot 访问控制；["*"] 表示不限制。
           allow_from: ["*"]
-          # 是否使用流式增量编辑回复。
+          # 是否增量展示回复；false 仍使用可取消 SSE，仅在 DONE 后一次性展示。
           streaming: true
           # Telegram HTTP 代理；留空表示不启用代理。
           proxy: http://127.0.0.1:7890
@@ -44,6 +44,8 @@ base:
           stream_edit_min_chars: 64
           # 单次 Telegram API 请求超时，单位毫秒。
           request_timeout_ms: 5000
+          # 收到退出信号后等待当前 turn 收尾的最长时间，范围 1–120000 毫秒。
+          shutdown_grace_ms: 15000
     # ── CLI 渠道配置 ───────────────────────────────────────────────
     cli:
       # CLI 绑定的 rpg_data workspace/story。
