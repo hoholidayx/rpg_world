@@ -36,6 +36,8 @@ base:
           allow_from: ["*"]
           # 是否增量展示回复；false 仍使用可取消 SSE，仅在 DONE 后一次性展示。
           streaming: true
+          # 是否开放只读资料菜单。已知 Telegram 访问控制问题修复前仅在可信环境开启。
+          reference_menu_enabled: false
           # Telegram HTTP 代理；留空表示不启用代理。
           proxy: http://127.0.0.1:7890
           # 流式编辑消息的最小间隔，单位毫秒。

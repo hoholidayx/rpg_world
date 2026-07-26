@@ -25,6 +25,7 @@ from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.session_composer import SessionComposerDataService
+from rpg_data.services.session_reference import SessionReferenceDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_data.services.story_pack import StoryPackDataService
 from rpg_data.services.status import StatusDataService
@@ -64,6 +65,7 @@ class DataServiceGateway:
         self._rp_modules: RPModuleDataService | None = None
         self._sessions: SessionDataService | None = None
         self._session_composer: SessionComposerDataService | None = None
+        self._session_reference: SessionReferenceDataService | None = None
         self._backup: BackupService | None = None
         self._story_memory: StoryMemoryDataService | None = None
         self._story_packs: StoryPackDataService | None = None
@@ -221,6 +223,18 @@ class DataServiceGateway:
         return self._session_composer
 
     @property
+    def session_reference(self) -> SessionReferenceDataService:
+        database = self.database
+        if self._session_reference is None:
+            logger.debug(
+                "creating Session reference data service db_path=%s",
+                self._database_path,
+            )
+            self._session_reference = SessionReferenceDataService(database)
+        self._ensure_bound()
+        return self._session_reference
+
+    @property
     def backup(self) -> BackupService:
         database = self.database
         if self._backup is None:
@@ -303,6 +317,7 @@ class DataServiceGateway:
         self._rp_modules = None
         self._sessions = None
         self._session_composer = None
+        self._session_reference = None
         self._backup = None
         self._story_memory = None
         self._story_packs = None

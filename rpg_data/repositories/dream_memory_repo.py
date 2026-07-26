@@ -10,6 +10,7 @@ from peewee import Database, SQL
 
 from rpg_data.model import memory as models
 from rpg_data.model.session import SessionMessage
+from rpg_data.model.session_reference import SessionReferenceLocator
 from rpg_data.repositories._utils import to_session_message
 from rpg_data.repositories.records import (
     SessionDreamProposalItemEvidenceRecord,
@@ -56,6 +57,48 @@ class DreamMemoryRepository:
         rows = (
             SessionMessageRecord.select()
             .where(where_clause)
+            .order_by(
+                SessionMessageRecord.turn_id,
+                SessionMessageRecord.seq_in_turn,
+                SessionMessageRecord.id,
+            )
+        )
+        return tuple(to_session_message(row) for row in rows)
+
+    def require_reference_scope(
+        self,
+        locator: SessionReferenceLocator,
+    ) -> None:
+        """Require complete Session ownership without applying lifecycle policy."""
+
+        if not (
+            SessionRecord.select(SessionRecord.id)
+            .where(_reference_session_clause(locator))
+            .exists()
+        ):
+            raise FileNotFoundError(
+                "Session reference scope not found: "
+                f"{locator.workspace_id}/{locator.story_id}/{locator.session_id}"
+            )
+
+    def list_reference_messages(
+        self,
+        locator: SessionReferenceLocator,
+        *,
+        message_ids: Sequence[int],
+    ) -> tuple[SessionMessage, ...]:
+        """Load only referenced messages through the complete Session join."""
+
+        if not message_ids:
+            return ()
+        rows = (
+            SessionMessageRecord.select()
+            .join(SessionRecord)
+            .where(
+                _reference_session_clause(locator)
+                & (SessionMessageRecord.session == str(locator.session_id))
+                & (SessionMessageRecord.id.in_(message_ids))
+            )
             .order_by(
                 SessionMessageRecord.turn_id,
                 SessionMessageRecord.seq_in_turn,
@@ -316,6 +359,55 @@ class DreamMemoryRepository:
         )
         return self._memory_bundles(rows)
 
+    def list_current_memories(
+        self,
+        session_id: str,
+        *,
+        lifecycle: str | None = None,
+    ) -> tuple[models.PersistentMemoryBundle, ...]:
+        """Load only each matching ledger row's current revision and Evidence."""
+
+        where_clause = SessionPersistentMemoryRecord.session == str(session_id)
+        if lifecycle is not None:
+            where_clause &= SessionPersistentMemoryRecord.lifecycle == lifecycle
+        rows = tuple(
+            SessionPersistentMemoryRecord.select()
+            .where(where_clause)
+            .order_by(
+                SessionPersistentMemoryRecord.created_at,
+                SessionPersistentMemoryRecord.id,
+            )
+        )
+        return self._current_memory_bundles(rows)
+
+    def list_current_reference_memories(
+        self,
+        locator: SessionReferenceLocator,
+        *,
+        lifecycle: str | None = None,
+    ) -> tuple[models.PersistentMemoryBundle, ...]:
+        """Load current revisions through the complete Session ownership join."""
+
+        where_clause = (
+            _reference_session_clause(locator)
+            & (
+                SessionPersistentMemoryRecord.session
+                == str(locator.session_id)
+            )
+        )
+        if lifecycle is not None:
+            where_clause &= SessionPersistentMemoryRecord.lifecycle == lifecycle
+        rows = tuple(
+            SessionPersistentMemoryRecord.select()
+            .join(SessionRecord)
+            .where(where_clause)
+            .order_by(
+                SessionPersistentMemoryRecord.created_at,
+                SessionPersistentMemoryRecord.id,
+            )
+        )
+        return self._current_memory_bundles(rows)
+
     def get_memory(self, memory_id: str) -> models.PersistentMemoryBundle | None:
         row = (
             SessionPersistentMemoryRecord.select()
@@ -325,6 +417,66 @@ class DreamMemoryRepository:
         if row is None:
             return None
         return self._memory_bundles((row,))[0]
+
+    def get_memory_for_session(
+        self,
+        session_id: str,
+        memory_id: str,
+    ) -> models.PersistentMemoryBundle | None:
+        row = (
+            SessionPersistentMemoryRecord.select()
+            .where(
+                (SessionPersistentMemoryRecord.id == str(memory_id))
+                & (SessionPersistentMemoryRecord.session == str(session_id))
+            )
+            .first()
+        )
+        if row is None:
+            return None
+        return self._memory_bundles((row,))[0]
+
+    def get_current_memory_for_session(
+        self,
+        session_id: str,
+        memory_id: str,
+    ) -> models.PersistentMemoryBundle | None:
+        """Load one scoped memory with only its current revision and Evidence."""
+
+        row = (
+            SessionPersistentMemoryRecord.select()
+            .where(
+                (SessionPersistentMemoryRecord.id == str(memory_id))
+                & (SessionPersistentMemoryRecord.session == str(session_id))
+            )
+            .first()
+        )
+        if row is None:
+            return None
+        return self._current_memory_bundles((row,))[0]
+
+    def get_current_reference_memory(
+        self,
+        locator: SessionReferenceLocator,
+        memory_id: str,
+    ) -> models.PersistentMemoryBundle | None:
+        """Load one current revision through the complete Session join."""
+
+        row = (
+            SessionPersistentMemoryRecord.select()
+            .join(SessionRecord)
+            .where(
+                _reference_session_clause(locator)
+                & (
+                    SessionPersistentMemoryRecord.session
+                    == str(locator.session_id)
+                )
+                & (SessionPersistentMemoryRecord.id == str(memory_id))
+            )
+            .first()
+        )
+        if row is None:
+            return None
+        return self._current_memory_bundles((row,))[0]
 
     def get_memory_by_dedupe_key(
         self,
@@ -671,6 +823,66 @@ class DreamMemoryRepository:
             )
         return tuple(bundles)
 
+    def _current_memory_bundles(
+        self,
+        memory_rows: Sequence[SessionPersistentMemoryRecord],
+    ) -> tuple[models.PersistentMemoryBundle, ...]:
+        if not memory_rows:
+            return ()
+        memory_ids = tuple(str(row.id) for row in memory_rows)
+        revision_rows: list[SessionPersistentMemoryRevisionRecord] = []
+        for chunk in _chunks(memory_ids):
+            revision_rows.extend(
+                SessionPersistentMemoryRevisionRecord.select()
+                .join(SessionPersistentMemoryRecord)
+                .where(
+                    SessionPersistentMemoryRecord.id.in_(chunk)
+                    & (
+                        SessionPersistentMemoryRevisionRecord.revision_number
+                        == SessionPersistentMemoryRecord.current_revision_number
+                    )
+                )
+                .order_by(SessionPersistentMemoryRevisionRecord.memory)
+            )
+        revision_ids = tuple(int(row.id) for row in revision_rows)
+        evidence_by_revision: dict[int, list[models.PersistentMemoryEvidence]] = {}
+        for chunk in _chunks(revision_ids):
+            evidence_rows = (
+                SessionPersistentMemoryEvidenceRecord.select()
+                .where(SessionPersistentMemoryEvidenceRecord.revision.in_(chunk))
+                .order_by(
+                    SessionPersistentMemoryEvidenceRecord.revision,
+                    SessionPersistentMemoryEvidenceRecord.turn_id,
+                    SessionPersistentMemoryEvidenceRecord.message_id,
+                )
+            )
+            for row in evidence_rows:
+                evidence_by_revision.setdefault(int(row.revision_id), []).append(
+                    _persistent_evidence(row)
+                )
+        current_by_memory = {
+            str(row.memory_id): _persistent_revision(
+                row,
+                evidence=tuple(evidence_by_revision.get(int(row.id), ())),
+            )
+            for row in revision_rows
+        }
+        bundles: list[models.PersistentMemoryBundle] = []
+        for row in memory_rows:
+            current = current_by_memory.get(str(row.id))
+            if current is None:
+                raise RuntimeError(
+                    f"Persistent Memory current revision is missing: {row.id}"
+                )
+            bundles.append(
+                models.PersistentMemoryBundle(
+                    memory=_persistent_memory(row),
+                    current_revision=current,
+                    revisions=(current,),
+                )
+            )
+        return tuple(bundles)
+
     def _revision_with_evidence(
         self,
         row: SessionPersistentMemoryRevisionRecord,
@@ -687,6 +899,14 @@ class DreamMemoryRepository:
             row,
             evidence=tuple(_persistent_evidence(item) for item in evidence_rows),
         )
+
+
+def _reference_session_clause(locator: SessionReferenceLocator):
+    return (
+        (SessionRecord.id == str(locator.session_id))
+        & (SessionRecord.workspace == str(locator.workspace_id))
+        & (SessionRecord.story == int(locator.story_id))
+    )
 
 
 def _to_state(row: SessionDreamStateRecord) -> models.DreamState:

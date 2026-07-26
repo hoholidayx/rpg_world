@@ -17,6 +17,7 @@ from rpg_data.model.session import (
     WORLD_ADVANCING_TURN_MODES,
     SessionMessage,
 )
+from rpg_data.model.session_reference import SessionReferenceLocator
 from rpg_data.transaction import DataTransactionMode
 from rpg_memory.types import EpistemicStatus, MemoryKind
 
@@ -54,7 +55,34 @@ class StoryMemoryDataPort(Protocol):
         dream_processed: bool | None,
     ) -> models.SessionStoryMemoryPage: ...
 
+    def require_reference_scope(
+        self,
+        locator: SessionReferenceLocator,
+    ) -> None: ...
+
+    def list_reference_page(
+        self,
+        locator: SessionReferenceLocator,
+        *,
+        page: int,
+        page_size: int,
+        memory_kind: str | None,
+        dream_processed: bool | None,
+    ) -> models.SessionStoryMemoryPage: ...
+
     def get(self, memory_id: int) -> models.SessionStoryMemory | None: ...
+
+    def get_reference(
+        self,
+        locator: SessionReferenceLocator,
+        memory_id: int,
+    ) -> models.SessionStoryMemory | None: ...
+
+    def get_for_session(
+        self,
+        session_id: str,
+        memory_id: int,
+    ) -> models.SessionStoryMemory | None: ...
 
     def get_by_dedupe_key(
         self,
@@ -197,6 +225,50 @@ class StoryMemoryApplicationService:
 
     def get(self, memory_id: int) -> models.SessionStoryMemory | None:
         return self._data.get(memory_id)
+
+    def get_for_session(
+        self,
+        session_id: str,
+        memory_id: int,
+    ) -> models.SessionStoryMemory | None:
+        """Return one row only when it belongs to the requested Session."""
+
+        return self._data.get_for_session(str(session_id), int(memory_id))
+
+    def list_reference_page(
+        self,
+        locator: SessionReferenceLocator,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        memory_kind: str | MemoryKind | None = None,
+        dream_processed: bool | None = None,
+    ) -> models.SessionStoryMemoryPage:
+        """Read one fully scoped reference page in a deferred snapshot."""
+
+        normalized_kind = (
+            _memory_kind(memory_kind).value if memory_kind not in (None, "") else None
+        )
+        with self._data.transaction():
+            self._data.require_reference_scope(locator)
+            return self._data.list_reference_page(
+                locator,
+                page=page,
+                page_size=page_size,
+                memory_kind=normalized_kind,
+                dream_processed=dream_processed,
+            )
+
+    def get_reference(
+        self,
+        locator: SessionReferenceLocator,
+        memory_id: int,
+    ) -> models.SessionStoryMemory | None:
+        """Read one fully scoped Story Memory in a deferred snapshot."""
+
+        with self._data.transaction():
+            self._data.require_reference_scope(locator)
+            return self._data.get_reference(locator, int(memory_id))
 
     def get_context_items(self, session_id: str) -> tuple[StoryMemoryContextItem, ...]:
         memories = self._data.list(session_id)

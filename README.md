@@ -85,7 +85,7 @@ uv run python -m run_play_api
 uv run python -m run_telegram
 uv run python -m run_cli
 
-# CLI / Telegram / API 都通过 agent_client 访问 Agent 服务
+# CLI / Telegram / API 的 turn、命令和 Session mutation 都通过 agent_client
 uv run python -m channels.cli.repl
 
 # 直接调试 API（自动重载）
@@ -111,7 +111,7 @@ RPG World 采用独立 Agent、LLM、Dream、Media 与 TTS 服务拓扑。只有
 `rpg_memory.dream` 做离线提炼。只有 `run_llm.py` 进程读取
 `llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 和本地 llama runtime。
 Agent/Memory、Dream 与 TTS Service 通过 `llm_client` 调用 LLM 服务；Play API 的聊天、Dream、媒体和语音链路分别通过
-`AgentClient`、`DreamClient`、`MediaClient`、`TTSClient` 访问独立服务，CLI 与 Telegram 通过 `AgentClient` 调用 Agent 服务。
+`AgentClient`、`DreamClient`、`MediaClient`、`TTSClient` 访问独立服务，CLI 与 Telegram 通过 `AgentClient` 调用 Agent 服务。Telegram 可选资料菜单通过进程内 Session Reference 只读查询已提交数据，不持有 Agent、Dream 或 LLM runtime。
 
 ```
 run_llm            -> llm_service.main:app   -> Provider + local llama runtime
@@ -121,7 +121,7 @@ run_media          -> media_service.main:app -> rpg_media + rpg_data
 run_tts            -> tts_service.main:app   -> rpg_tts + rpg_data + llm_client
 run_play_api       -> play_api.main:app      -> AgentClient + DreamClient + MediaClient + TTSClient
 run_cli            -> channels.cli.repl      -> AgentClient
-run_telegram       -> channels.telegram.runner -> AgentClient
+run_telegram       -> channels.telegram.runner -> AgentClient + SessionReferenceReader
 
 # 可选的前台编排入口，仅负责启动/停止上述独立进程，不合并任何运行时
 run_all            -> run_llm + run_agent + run_dream + run_media + run_tts + run_play_api
@@ -303,7 +303,8 @@ Telegram 渠道当前支持：
 - 同一 Telegram chat 或同一 session 同时只接受一个生成，新输入会立即提示忙碌而不进入 AgentMailbox 排队；streaming bot 可用 `/stop` 或生成中按钮按 request ID 停止。
 - RP 标签展示投影、Markdown 到 Telegram HTML 的渲染与 4096 字符分块发送；原始 assistant content 不改写。
 - `/start` 游玩入口卡、按钮角色选择、本地动态 `/help`、精简 Bot 菜单及后端高级斜杠命令透传。
-- Inline Keyboard callback 使用带 10 分钟 TTL、chat/session 归属校验和一次性 claim 的短 token。
+- 可选 `/info` 多段菜单只读查看角色、状态、剧情归纳、Story Memory 和主 Agent 可见 Persistent Memory；生成期间仍可查看已提交内容。
+- Inline Keyboard callback 使用带 10 分钟 TTL、chat/session 归属校验、一次性 claim 和 View Group 失效的短 token。
 - 每个 bot 绑定 `workspace_id + story_id`，启动时解析一个默认 session；未 pin 的 chat 使用 bot 默认 session，显式切换后会在当前 chat 内钉住 session。
 - `/sessions` 使用标题和短 ID 展示会话；`/session_create <title>` 直接新建并进入，无标题命令或按钮进入标题输入状态，支持 `/cancel`。
 - `proxy`、流式编辑间隔、最小编辑字符数、请求超时等参数由 `channels/settings.yaml` 的 bot 配置控制。
@@ -896,6 +897,8 @@ base:
           story_id: 1
           session_id: ""
           session_title: main
+          # 已知 Telegram ACL/日志问题修复前保持关闭，仅可信环境显式开启。
+          reference_menu_enabled: false
     cli:
       workspace_id: demo_workspace
       story_id: 1

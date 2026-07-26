@@ -9,7 +9,13 @@ from peewee import Database, IntegrityError
 
 from rpg_data.model import memory as models
 from rpg_data.model.session import SessionMessage
+from rpg_data.model.session_reference import SessionReferenceLocator
 from rpg_data.errors import DataConditionalWriteError, DataIntegrityError
+from rpg_data.repositories._utils import to_memory_evidence, to_session_story_memory
+from rpg_data.repositories.records import (
+    SessionStoryMemoryEvidenceRecord,
+    SessionStoryMemoryRecord,
+)
 from rpg_data.repositories.story_memory_repo import StoryMemoryRepository
 from rpg_data.transaction import DataTransactionMode
 
@@ -64,8 +70,82 @@ class StoryMemoryDataService:
             dream_processed=dream_processed,
         )
 
+    def require_reference_scope(
+        self,
+        locator: SessionReferenceLocator,
+    ) -> None:
+        """Require complete Session ownership without deciding lifecycle policy."""
+
+        self._records.require_reference_scope(locator)
+
+    def list_reference_page(
+        self,
+        locator: SessionReferenceLocator,
+        *,
+        page: int,
+        page_size: int,
+        memory_kind: str | None,
+        dream_processed: bool | None,
+    ) -> models.SessionStoryMemoryPage:
+        """Return a page whose resource query is scoped by the full Locator."""
+
+        if page <= 0:
+            raise ValueError("Story Memory page must be positive")
+        if page_size <= 0 or page_size > 100:
+            raise ValueError("Story Memory page_size must be between 1 and 100")
+        return self._records.list_reference_page(
+            locator,
+            page=page,
+            page_size=page_size,
+            memory_kind=memory_kind,
+            dream_processed=dream_processed,
+        )
+
     def get(self, memory_id: int) -> models.SessionStoryMemory | None:
         return self._records.get(memory_id)
+
+    def get_reference(
+        self,
+        locator: SessionReferenceLocator,
+        memory_id: int,
+    ) -> models.SessionStoryMemory | None:
+        """Return a Story Memory only from the complete requested scope."""
+
+        return self._records.get_reference(locator, int(memory_id))
+
+    def get_for_session(
+        self,
+        session_id: str,
+        memory_id: int,
+    ) -> models.SessionStoryMemory | None:
+        """Return a Story Memory only when it belongs to ``session_id``."""
+
+        row = (
+            SessionStoryMemoryRecord.select()
+            .where(
+                (SessionStoryMemoryRecord.id == int(memory_id))
+                & (SessionStoryMemoryRecord.session == str(session_id))
+            )
+            .first()
+        )
+        if row is None:
+            return None
+        evidence_rows = (
+            SessionStoryMemoryEvidenceRecord.select()
+            .join(SessionStoryMemoryRecord)
+            .where(
+                (SessionStoryMemoryEvidenceRecord.story_memory == int(memory_id))
+                & (SessionStoryMemoryRecord.session == str(session_id))
+            )
+            .order_by(
+                SessionStoryMemoryEvidenceRecord.turn_id,
+                SessionStoryMemoryEvidenceRecord.message_id,
+            )
+        )
+        return to_session_story_memory(
+            row,
+            evidence=tuple(to_memory_evidence(item) for item in evidence_rows),
+        )
 
     def get_by_dedupe_key(
         self,

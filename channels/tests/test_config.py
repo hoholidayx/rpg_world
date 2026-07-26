@@ -159,6 +159,23 @@ def test_dict_deep_merge_keeps_base_values(monkeypatch, tmp_path):
     assert bot.workspace_id == "override_workspace"
     assert bot.story_id == 2
     assert bot.shutdown_grace_ms == 15_000
+    assert bot.reference_menu_enabled is False
+
+
+def test_telegram_reference_menu_is_opt_in(monkeypatch, tmp_path):
+    settings = _load(
+        tmp_path,
+        monkeypatch,
+        profile_override="""
+    channels:
+      telegram:
+        bots:
+          main:
+            reference_menu_enabled: true
+""",
+    )
+
+    assert settings.telegram_bots[0].reference_menu_enabled is True
 
 
 def test_telegram_bots_merge_by_mapping_key_and_append_new(monkeypatch, tmp_path):

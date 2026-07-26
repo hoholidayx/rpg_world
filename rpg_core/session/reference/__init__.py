@@ -1,0 +1,67 @@
+"""Common, channel-neutral Session reference query boundary."""
+
+from rpg_core.session.reference.errors import (
+    SessionReferenceError,
+    SessionReferenceNotFoundError,
+    SessionReferenceReaderClosedError,
+    SessionReferenceResourceDisabledError,
+    SessionReferenceUnavailableError,
+)
+from rpg_core.session.reference.models import (
+    ALL_SESSION_REFERENCE_RESOURCES,
+    CharacterCard,
+    CharacterDetail,
+    CharacterDetailSummary,
+    CharacterSummary,
+    DEFAULT_SESSION_REFERENCE_POLICY,
+    EvidenceReference,
+    PersistentMemoryDetail,
+    PersistentMemorySummary,
+    ReferencePage,
+    SessionReferenceLocator,
+    SessionReferencePolicy,
+    SessionReferenceResource,
+    SessionReferenceScope,
+    StatusRow,
+    StatusTableDetail,
+    StatusTableSummary,
+    StoryMemoryDetail,
+    StoryMemorySummary,
+    SummaryDetail,
+    SummarySummary,
+)
+from rpg_core.session.reference.ports import SessionReferenceReader
+from rpg_core.session.reference.runtime import ThreadedSessionReferenceReader
+from rpg_core.session.reference.service import SessionReferenceApplicationService
+
+__all__ = [
+    "ALL_SESSION_REFERENCE_RESOURCES",
+    "CharacterCard",
+    "CharacterDetail",
+    "CharacterDetailSummary",
+    "CharacterSummary",
+    "DEFAULT_SESSION_REFERENCE_POLICY",
+    "EvidenceReference",
+    "PersistentMemoryDetail",
+    "PersistentMemorySummary",
+    "ReferencePage",
+    "SessionReferenceApplicationService",
+    "SessionReferenceError",
+    "SessionReferenceLocator",
+    "SessionReferenceNotFoundError",
+    "SessionReferencePolicy",
+    "SessionReferenceReader",
+    "SessionReferenceReaderClosedError",
+    "SessionReferenceResource",
+    "SessionReferenceResourceDisabledError",
+    "SessionReferenceScope",
+    "SessionReferenceUnavailableError",
+    "StatusRow",
+    "StatusTableDetail",
+    "StatusTableSummary",
+    "StoryMemoryDetail",
+    "StoryMemorySummary",
+    "SummaryDetail",
+    "SummarySummary",
+    "ThreadedSessionReferenceReader",
+]

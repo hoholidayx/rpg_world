@@ -34,6 +34,7 @@ class TelegramBotSettings:
     player_character_id: int = 0
     allow_from: list[str] | None = None
     streaming: bool = True
+    reference_menu_enabled: bool = False
     proxy: str = ""
     stream_edit_interval_ms: int = 800
     stream_edit_min_chars: int = 24
@@ -209,6 +210,12 @@ class ChannelsSettings(ProfiledYamlSettings):
             player_character_id=self._int(bot, "channels.telegram.bots", "player_character_id", 0),
             allow_from=[str(item) for item in allow_from],
             streaming=self._bool(bot, "channels.telegram.bots", "streaming", True),
+            reference_menu_enabled=self._bool(
+                bot,
+                "channels.telegram.bots",
+                "reference_menu_enabled",
+                False,
+            ),
             proxy=str(bot.get("proxy", "") or ""),
             stream_edit_interval_ms=self._int(bot, "channels.telegram.bots", "stream_edit_interval_ms", 800),
             stream_edit_min_chars=self._int(bot, "channels.telegram.bots", "stream_edit_min_chars", 24),

@@ -10,6 +10,7 @@ from peewee import SqliteDatabase
 from commons.errors import InvalidTurnMetadataError
 from rpg_data import db, models
 from rpg_data.migrations.runner import run_migrations
+from rpg_data.model.session_reference import SessionReferenceLocator
 from rpg_data.services.message import MessageDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_memory.story.application import StoryMemoryApplicationService
@@ -188,6 +189,41 @@ def test_story_memory_service_lists_filtered_pages_and_session_stats(
             story_memory.list_page(session_id, memory_kind="invalid")
         with pytest.raises(ValueError, match="page_size"):
             story_memory.list_page(session_id, page_size=101)
+    finally:
+        database.close()
+
+
+def test_story_memory_get_for_session_never_crosses_session_scope(
+    tmp_path: Path,
+) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        story_memory = _story_memory(database)
+        owner_session_id = _create_test_session(database, "s_story_owner")
+        other_session_id = _create_test_session(database, "s_story_other")
+        memory = story_memory.add_detail(
+            owner_session_id,
+            "仅属于原会话的剧情事实。",
+            turn_id=1,
+        )
+        locator = SessionReferenceLocator(
+            session_id=owner_session_id,
+            workspace_id="demo_workspace",
+            story_id=1,
+        )
+
+        assert story_memory.get_for_session(owner_session_id, memory.id) == memory
+        assert story_memory.get_for_session(other_session_id, memory.id) is None
+        assert story_memory.get_reference(locator, memory.id) == memory
+        assert story_memory.list_reference_page(locator).items == (memory,)
+        with pytest.raises(FileNotFoundError):
+            story_memory.list_reference_page(
+                SessionReferenceLocator(
+                    session_id=owner_session_id,
+                    workspace_id="demo_workspace",
+                    story_id=2,
+                )
+            )
     finally:
         database.close()
 

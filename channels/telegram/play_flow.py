@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from channels.telegram.action_registry import TelegramActionRegistry
+from channels.telegram.reference_flow import REFERENCE_ACTION_ROOT
 from channels.telegram.session_flow import short_session_id
 
 if TYPE_CHECKING:
@@ -44,40 +45,61 @@ class TelegramPlayFlow:
         self,
         chat_id: str,
         overview: AgentSessionOverviewPayload,
+        *,
+        reference_menu_enabled: bool = False,
     ) -> InlineKeyboardMarkup:
         session_id = str(overview["session_id"])
-        return InlineKeyboardMarkup(
+        view_group_id = self._action_registry.create_view_group()
+        rows = [
             [
+                InlineKeyboardButton(
+                    "选择角色",
+                    callback_data=self._action_registry.add(
+                        kind=PLAY_ACTION_CHOOSE_ROLE,
+                        chat_id=chat_id,
+                        session_id=session_id,
+                        view_group_id=view_group_id,
+                    ),
+                ),
+                InlineKeyboardButton(
+                    "切换会话",
+                    callback_data=self._action_registry.add(
+                        kind=PLAY_ACTION_OPEN_SESSIONS,
+                        chat_id=chat_id,
+                        session_id=session_id,
+                        view_group_id=view_group_id,
+                    ),
+                ),
+            ],
+        ]
+        if reference_menu_enabled:
+            rows.append(
                 [
                     InlineKeyboardButton(
-                        "选择角色",
+                        "查看资料",
                         callback_data=self._action_registry.add(
-                            kind=PLAY_ACTION_CHOOSE_ROLE,
+                            kind=REFERENCE_ACTION_ROOT,
                             chat_id=chat_id,
                             session_id=session_id,
-                        ),
-                    ),
-                    InlineKeyboardButton(
-                        "切换会话",
-                        callback_data=self._action_registry.add(
-                            kind=PLAY_ACTION_OPEN_SESSIONS,
-                            chat_id=chat_id,
-                            session_id=session_id,
-                        ),
-                    ),
-                ],
-                [
-                    InlineKeyboardButton(
-                        "开始游玩",
-                        callback_data=self._action_registry.add(
-                            kind=PLAY_ACTION_START,
-                            chat_id=chat_id,
-                            session_id=session_id,
+                            view_group_id=view_group_id,
                         ),
                     )
-                ],
+                ]
+            )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "开始游玩",
+                    callback_data=self._action_registry.add(
+                        kind=PLAY_ACTION_START,
+                        chat_id=chat_id,
+                        session_id=session_id,
+                        view_group_id=view_group_id,
+                    )
+                )
             ]
         )
+        return InlineKeyboardMarkup(rows)
 
     @staticmethod
     def render_role_picker_text(overview: AgentSessionOverviewPayload) -> str:

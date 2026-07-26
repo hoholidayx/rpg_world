@@ -34,13 +34,22 @@ from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filt
 
 from agent_service.client import AgentClientError
 from channels.base import ChannelAdapter
-from channels.telegram.action_registry import TelegramActionRegistry
+from channels.telegram.action_registry import (
+    TelegramActionRegistry,
+    TelegramCallbackAction,
+)
 from channels.telegram.play_flow import (
     PLAY_ACTION_BIND_ROLE,
     PLAY_ACTION_CHOOSE_ROLE,
     PLAY_ACTION_OPEN_SESSIONS,
     PLAY_ACTION_START,
     TelegramPlayFlow,
+)
+from channels.telegram.reference_flow import (
+    REFERENCE_ACTION_KINDS,
+    REFERENCE_ACTION_ROOT,
+    TelegramReferenceFlow,
+    TelegramReferenceView,
 )
 from channels.telegram.render import (
     chunk_rendered_text,
@@ -59,10 +68,17 @@ from channels.telegram.turn_flow import (
     TelegramTurnFlow,
 )
 from rpg_core.agent.protocol import TurnCancelStatus
+from rpg_core.session.reference import (
+    SessionReferenceLocator,
+    SessionReferenceNotFoundError,
+    SessionReferenceResourceDisabledError,
+    SessionReferenceUnavailableError,
+)
 
 if TYPE_CHECKING:
     from agent_service.client import AgentClient
     from agent_service.schemas import AgentSessionOverviewPayload
+    from rpg_core.session.reference import SessionReferenceReader
 
 _TELEGRAM_PARSE_MODE = "HTML"
 _TELEGRAM_COMMAND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
@@ -87,6 +103,7 @@ _SESSION_RECOVERY_ACTIONS = frozenset({
 })
 _LOCAL_COMMANDS = {
     "start": "打开游玩入口",
+    "info": "查看当前会话资料",
     "help": "查看全部可用命令",
     "role_bind": "选择或切换玩家角色",
     "sessions": "查看并切换会话",
@@ -203,6 +220,8 @@ class TelegramAdapter(ChannelAdapter):
         player_character_id: int = 0,
         session_id: str | None = None,
         session_title: str | None = None,
+        reference_menu_enabled: bool = False,
+        reference_reader: SessionReferenceReader | None = None,
     ) -> None:
         super().__init__()
         self._bot_name = bot_name
@@ -219,10 +238,16 @@ class TelegramAdapter(ChannelAdapter):
         self._player_character_id = int(player_character_id or 0)
         self._default_session_id = (session_id or "").strip()
         self._session_title = (session_title or bot_name or "Telegram").strip()
+        self._reference_menu_enabled = bool(reference_menu_enabled)
         self._app: Application | None = None
         self._action_registry = TelegramActionRegistry()
         self._session_flow = TelegramSessionFlow(self._action_registry)
         self._play_flow = TelegramPlayFlow(self._action_registry)
+        self._reference_flow = (
+            TelegramReferenceFlow(self._action_registry, reference_reader)
+            if reference_reader is not None
+            else None
+        )
         self._turn_flow = TelegramTurnFlow(
             presenter=self,
             streaming=self._streaming,
@@ -249,6 +274,13 @@ class TelegramAdapter(ChannelAdapter):
         super().bind_agent_client(client)
         self._turn_flow.bind_agent_client(client)
 
+    def bind_reference_reader(self, reader: SessionReferenceReader) -> None:
+        """Bind the shared read-only Session reference boundary."""
+        self._reference_flow = TelegramReferenceFlow(
+            self._action_registry,
+            reader,
+        )
+
     # ── 生命周期 ────────────────────────────────────────────────────────
 
     async def start(self) -> None:
@@ -256,7 +288,7 @@ class TelegramAdapter(ChannelAdapter):
         logger.info(
             "telegram: preparing adapter bot={} "
             "(streaming={}, proxy={}, interval_ms={}, min_chars={}, "
-            "request_timeout_ms={}, shutdown_grace_ms={})",
+            "request_timeout_ms={}, shutdown_grace_ms={}, reference_menu={})",
             self._bot_name,
             self._streaming,
             self._proxy or "<disabled>",
@@ -264,6 +296,7 @@ class TelegramAdapter(ChannelAdapter):
             self._stream_edit_min_chars,
             int(self._request_timeout * 1000),
             int(self._shutdown_grace * 1000),
+            self._reference_menu_enabled,
         )
         if not self._is_valid_token(self._token):
             raise ValueError("telegram: bot_token is empty")
@@ -486,6 +519,8 @@ class TelegramAdapter(ChannelAdapter):
         if not self._app:
             logger.warning("telegram: send_html skipped because application is not ready")
             return None
+        if len(text) > 4096:
+            raise ValueError("Telegram HTML message exceeds 4096 characters")
         send_kwargs: dict[str, object] = {
             "chat_id": int(chat_id),
             "text": text,
@@ -541,17 +576,22 @@ class TelegramAdapter(ChannelAdapter):
         message_id: int,
         text: str,
         *,
+        reply_markup: InlineKeyboardMarkup | None = None,
         terminal: bool = False,
     ) -> bool:
         """Edit one Telegram message with already-rendered HTML."""
         if not self._app:
             return False
+        if len(text) > 4096:
+            raise ValueError("Telegram HTML message exceeds 4096 characters")
         edit_kwargs: dict[str, object] = {
             "chat_id": int(chat_id),
             "message_id": int(message_id),
             "text": text,
             "parse_mode": _TELEGRAM_PARSE_MODE,
         }
+        if reply_markup is not None:
+            edit_kwargs["reply_markup"] = reply_markup
         if terminal:
             try:
                 result = await self._terminal_request(
@@ -670,6 +710,8 @@ class TelegramAdapter(ChannelAdapter):
             "session_create",
             "clear",
         ]
+        if self._reference_menu_enabled:
+            menu_names.insert(1, "info")
         if "compact" in agent_command_names:
             menu_names.append("compact")
         menu_names.append("stop")
@@ -920,12 +962,17 @@ class TelegramAdapter(ChannelAdapter):
         if command == "/stop":
             await self._stop_current_turn(chat_id)
             return
-        if self._turn_flow.busy_reason(chat_id, session_id) is not None:
-            await self.send_text(chat_id, _COMMAND_BUSY_TEXT)
-            return
 
         command_parts = command.split(maxsplit=1)
         command_name = command_parts[0] if command_parts else ""
+
+        if command == "/info":
+            await self._send_reference_root(chat_id)
+            return
+
+        if self._turn_flow.busy_reason(chat_id, session_id) is not None:
+            await self.send_text(chat_id, _COMMAND_BUSY_TEXT)
+            return
 
         if command == "/start":
             await self._on_start(update, _context)
@@ -1104,6 +1151,7 @@ class TelegramAdapter(ChannelAdapter):
         resolved_action = resolution.action
         if (
             resolved_action.kind != _TURN_ACTION_STOP
+            and resolved_action.kind not in REFERENCE_ACTION_KINDS
             and self._turn_flow.busy_reason(chat_id, current_session_id) is not None
         ):
             await self._answer_callback_query(
@@ -1112,7 +1160,10 @@ class TelegramAdapter(ChannelAdapter):
                 _CALLBACK_BUSY_TEXT,
             )
             return
-        if resolved_action.kind not in _SESSION_RECOVERY_ACTIONS:
+        if (
+            resolved_action.kind not in _SESSION_RECOVERY_ACTIONS
+            and resolved_action.kind not in REFERENCE_ACTION_KINDS
+        ):
             try:
                 await self._get_session_overview(chat_id)
             except Exception as exc:
@@ -1145,7 +1196,15 @@ class TelegramAdapter(ChannelAdapter):
                 show_alert=True,
             )
             return
+        if action.kind in REFERENCE_ACTION_KINDS:
+            # The selected token was consumed by ``claim``. Remove the rest of
+            # the old menu before the first async read so two sibling buttons
+            # cannot race to replace the same Telegram message.
+            self._action_registry.invalidate_view_group(action.view_group_id)
         await self._answer_callback_query(query, chat_id)
+        if action.kind in REFERENCE_ACTION_KINDS:
+            await self._handle_reference_action(query, chat_id, action)
+            return
         try:
             if action.kind == _TURN_ACTION_STOP:
                 await self._stop_current_turn(chat_id)
@@ -1251,6 +1310,8 @@ class TelegramAdapter(ChannelAdapter):
         ):
             raise RuntimeError(str(result.get("reply") or "会话切换失败"))
         self._session_flow.pin_session(chat_id, active_session)
+        if active_session != source_session_id:
+            self._action_registry.invalidate_chat(chat_id)
         return active_session
 
     async def _validate_switch_target(
@@ -1317,6 +1378,8 @@ class TelegramAdapter(ChannelAdapter):
             expected_current_session_id=active.session_id,
             default_session_id=self._default_session_id,
         )
+        if pinned and session_id != active.session_id:
+            self._action_registry.invalidate_chat(active.chat_id)
         if not pinned:
             logger.warning(
                 "telegram: ignored stale active-session locator "
@@ -1334,12 +1397,172 @@ class TelegramAdapter(ChannelAdapter):
             return False
         return exc.status_code in {404, 409}
 
+    def _reference_locator(self, chat_id: str) -> SessionReferenceLocator:
+        return SessionReferenceLocator(
+            session_id=self.get_session_id(chat_id),
+            workspace_id=self._workspace_id,
+            story_id=self._story_id,
+        )
+
+    async def _send_reference_root(self, chat_id: str) -> None:
+        if not self._reference_menu_enabled:
+            await self.send_text(chat_id, "资料菜单未启用。")
+            return
+        flow = self._reference_flow
+        if flow is None:
+            await self.send_text(
+                chat_id,
+                "资料读取暂不可用，聊天功能不受影响。",
+            )
+            return
+        locator = self._reference_locator(chat_id)
+        try:
+            view = await flow.render_root(locator, chat_id)
+        except SessionReferenceUnavailableError:
+            await self._send_session_picker(
+                chat_id,
+                session_unavailable=True,
+            )
+            return
+        except Exception:
+            logger.exception(
+                "telegram: reference root failed bot={} chat_id={} session_id={}",
+                self._bot_name,
+                chat_id,
+                locator.session_id,
+            )
+            retry_action = self._action_registry.create(
+                kind=REFERENCE_ACTION_ROOT,
+                chat_id=chat_id,
+                session_id=locator.session_id,
+            )
+            view = flow.render_failure(
+                locator,
+                chat_id,
+                retry_action,
+                text="资料暂时无法读取，请稍后重试。",
+            )
+        await self._present_reference_view(chat_id, view)
+
+    async def _handle_reference_action(
+        self,
+        query: CallbackQuery,
+        chat_id: str,
+        action: TelegramCallbackAction,
+    ) -> None:
+        flow = self._reference_flow
+        if not self._reference_menu_enabled:
+            self._action_registry.invalidate_view_group(action.view_group_id)
+            await self.send_text(chat_id, "资料菜单未启用。")
+            return
+        if flow is None:
+            self._action_registry.invalidate_view_group(action.view_group_id)
+            await self.send_text(
+                chat_id,
+                "资料读取暂不可用，聊天功能不受影响。",
+            )
+            return
+
+        locator = self._reference_locator(chat_id)
+        try:
+            view = await flow.render_action(locator, chat_id, action)
+        except SessionReferenceUnavailableError:
+            self._action_registry.invalidate_view_group(action.view_group_id)
+            await self._send_session_picker(
+                chat_id,
+                session_unavailable=True,
+            )
+            return
+        except SessionReferenceNotFoundError:
+            view = flow.render_failure(
+                locator,
+                chat_id,
+                action,
+                text="内容已变化或不存在，请刷新列表后重新选择。",
+                content_changed=True,
+            )
+        except SessionReferenceResourceDisabledError:
+            view = flow.render_failure(
+                locator,
+                chat_id,
+                action,
+                text="该资料分类当前未开放。",
+                content_changed=True,
+            )
+        except Exception:
+            logger.exception(
+                "telegram: reference action failed "
+                "bot={} chat_id={} session_id={} kind={}",
+                self._bot_name,
+                chat_id,
+                locator.session_id,
+                action.kind,
+            )
+            view = flow.render_failure(
+                locator,
+                chat_id,
+                action,
+                text="该资料暂时无法读取，请稍后重试。",
+            )
+
+        raw_message_id = (
+            query.message.message_id
+            if query.message is not None
+            else None
+        )
+        message_id = (
+            raw_message_id
+            if isinstance(raw_message_id, int)
+            else None
+        )
+        await self._present_reference_view(
+            chat_id,
+            view,
+            message_id=message_id,
+            previous_view_group_id=action.view_group_id,
+        )
+
+    async def _present_reference_view(
+        self,
+        chat_id: str,
+        view: TelegramReferenceView,
+        *,
+        message_id: int | None = None,
+        previous_view_group_id: str | None = None,
+    ) -> bool:
+        delivered = False
+        if message_id is not None:
+            delivered = await self.edit_html(
+                chat_id,
+                message_id,
+                view.html,
+                reply_markup=view.reply_markup,
+            )
+        if not delivered:
+            sent_message_id = await self.send_html(
+                chat_id,
+                view.html,
+                reply_markup=view.reply_markup,
+            )
+            delivered = sent_message_id is not None
+        if delivered:
+            self._action_registry.invalidate_view_group(
+                previous_view_group_id,
+            )
+            return True
+        self._action_registry.invalidate_view_group(view.view_group_id)
+        return False
+
     async def _send_entry_card(self, chat_id: str) -> None:
         overview = await self._get_session_overview(chat_id)
         await self.send_text(
             chat_id,
             self._play_flow.render_entry_text(overview),
-            reply_markup=self._play_flow.build_entry_keyboard(chat_id, overview),
+            reply_markup=self._play_flow.build_entry_keyboard(
+                chat_id,
+                overview,
+                reference_menu_enabled=self._reference_menu_enabled,
+            ),
         )
 
     async def _send_role_picker(
@@ -1388,6 +1611,8 @@ class TelegramAdapter(ChannelAdapter):
             "session_create",
             "cancel",
         ]
+        if self._reference_menu_enabled:
+            local_names.insert(1, "info")
         local_names.append("stop")
         commands: dict[str, str] = {
             name: _LOCAL_COMMANDS[name]

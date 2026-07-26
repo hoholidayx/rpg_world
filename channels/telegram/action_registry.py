@@ -49,6 +49,7 @@ class TelegramCallbackAction:
     created_at: float = 0.0
     expires_at: float = 0.0
     consume_policy: CallbackConsumePolicy = CallbackConsumePolicy.ON_CLAIM
+    view_group_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,20 @@ class TelegramActionRegistry:
         self._clock = clock
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(9))
         self._actions: dict[str, TelegramCallbackAction] = {}
+        self._view_groups: dict[str, set[str]] = {}
+
+    def create_view_group(self) -> str:
+        """Reserve an opaque group for all actions rendered in one menu view."""
+        for _ in range(100):
+            group_id = str(self._token_factory())
+            if (
+                group_id
+                and group_id not in self._view_groups
+                and group_id not in self._actions
+            ):
+                self._view_groups[group_id] = set()
+                return group_id
+        raise RuntimeError("failed to allocate unique callback view group")
 
     def create(
         self,
@@ -91,6 +106,7 @@ class TelegramActionRegistry:
         payload: Mapping[str, ActionValue] | None = None,
         consume_policy: CallbackConsumePolicy = CallbackConsumePolicy.ON_CLAIM,
         ttl_seconds: float | None = None,
+        view_group_id: str | None = None,
     ) -> TelegramCallbackAction:
         """Create an action ready for registration."""
         now = self._clock()
@@ -105,6 +121,7 @@ class TelegramActionRegistry:
             created_at=now,
             expires_at=now + ttl,
             consume_policy=consume_policy,
+            view_group_id=str(view_group_id) if view_group_id is not None else None,
         )
 
     def register(self, action: TelegramCallbackAction) -> str:
@@ -120,6 +137,8 @@ class TelegramActionRegistry:
         if len(callback_data.encode("utf-8")) > 64:
             raise ValueError("callback data exceeds Telegram 64-byte limit")
         self._actions[stored.token] = stored
+        if stored.view_group_id is not None:
+            self._view_groups.setdefault(stored.view_group_id, set()).add(stored.token)
         return callback_data
 
     def add(
@@ -131,6 +150,7 @@ class TelegramActionRegistry:
         payload: Mapping[str, ActionValue] | None = None,
         consume_policy: CallbackConsumePolicy = CallbackConsumePolicy.ON_CLAIM,
         ttl_seconds: float | None = None,
+        view_group_id: str | None = None,
     ) -> str:
         """Create and register an action in one call."""
         return self.register(
@@ -141,6 +161,7 @@ class TelegramActionRegistry:
                 payload=payload,
                 consume_policy=consume_policy,
                 ttl_seconds=ttl_seconds,
+                view_group_id=view_group_id,
             )
         )
 
@@ -162,7 +183,7 @@ class TelegramActionRegistry:
         now = self._clock()
         action = self._actions.get(token)
         if action is not None and now >= action.expires_at:
-            self._actions.pop(token, None)
+            self._remove(token)
             self._cleanup_expired(now)
             self._log_rejection(CallbackResolutionStatus.EXPIRED, token)
             return TelegramCallbackResolution(CallbackResolutionStatus.EXPIRED, token=token)
@@ -190,14 +211,24 @@ class TelegramActionRegistry:
         if action is None:
             return None
         if self._clock() >= action.expires_at:
-            self._actions.pop(token, None)
+            self._remove(token)
             return None
         if action.consume_policy == CallbackConsumePolicy.ON_CLAIM:
-            return self._actions.pop(token, None)
+            self._remove(token)
         return action
 
     def invalidate(self, token: str) -> bool:
-        return self._actions.pop(str(token), None) is not None
+        return self._remove(str(token)) is not None
+
+    def invalidate_view_group(self, view_group_id: str | None) -> int:
+        """Invalidate sibling controls belonging to an edited-away menu."""
+        if view_group_id is None:
+            return 0
+        group_id = str(view_group_id)
+        tokens = tuple(self._view_groups.pop(group_id, ()))
+        for token in tokens:
+            self._actions.pop(token, None)
+        return len(tokens)
 
     def invalidate_chat(self, chat_id: str) -> int:
         return self._invalidate_matching(lambda action: action.chat_id == str(chat_id))
@@ -207,6 +238,7 @@ class TelegramActionRegistry:
 
     def clear(self) -> None:
         self._actions.clear()
+        self._view_groups.clear()
 
     def __len__(self) -> int:
         return len(self._actions)
@@ -214,20 +246,36 @@ class TelegramActionRegistry:
     def _new_token(self) -> str:
         for _ in range(100):
             token = str(self._token_factory())
-            if token and token not in self._actions:
+            if (
+                token
+                and token not in self._actions
+                and token not in self._view_groups
+            ):
                 return token
         raise RuntimeError("failed to allocate unique callback token")
 
     def _cleanup_expired(self, now: float) -> None:
         expired = [token for token, action in self._actions.items() if now >= action.expires_at]
         for token in expired:
-            self._actions.pop(token, None)
+            self._remove(token)
 
     def _invalidate_matching(self, predicate: Callable[[TelegramCallbackAction], bool]) -> int:
         tokens = [token for token, action in self._actions.items() if predicate(action)]
         for token in tokens:
-            self._actions.pop(token, None)
+            self._remove(token)
         return len(tokens)
+
+    def _remove(self, token: str) -> TelegramCallbackAction | None:
+        action = self._actions.pop(token, None)
+        if action is None or action.view_group_id is None:
+            return action
+        group_tokens = self._view_groups.get(action.view_group_id)
+        if group_tokens is None:
+            return action
+        group_tokens.discard(token)
+        if not group_tokens:
+            self._view_groups.pop(action.view_group_id, None)
+        return action
 
     @staticmethod
     def _log_rejection(status: CallbackResolutionStatus, token: str) -> None:

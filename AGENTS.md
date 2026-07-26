@@ -3,7 +3,7 @@
 ## 产品与模块边界
 
 - Play WebUI 是沉浸式 RP 的唯一 Web 主体验，Telegram 只承担轻量入口、通知和兜底交互；不要恢复 Dashboard API/WebUI，新增体验型能力优先落到 Play WebUI。
-- 修改启动流程、渠道生命周期、共享状态或 `AgentManager` 前先阅读 `CLAUDE.md`。各进程使用独立入口：`run_agent.py` 独占 `AgentManager` / `RPGGameAgent`，`run_dream.py` 独占 `rpg_memory.dream` 编排，`run_llm.py` 独占 Provider 密钥、OpenAI/llama client 和本地 llama runtime；Media、TTS、Play API 与渠道只能通过相应服务客户端访问这些能力。`run_all.py` 只能编排独立子进程，不得持有或合并业务 runtime。
+- 修改启动流程、渠道生命周期、共享状态或 `AgentManager` 前先阅读 `CLAUDE.md`。各进程使用独立入口：`run_agent.py` 独占 `AgentManager` / `RPGGameAgent`，`run_dream.py` 独占 `rpg_memory.dream` 编排，`run_llm.py` 独占 Provider 密钥、OpenAI/llama client 和本地 llama runtime；Media、TTS、Play API 与渠道只能通过相应服务客户端访问这些能力。Telegram 可在共址进程内通过 `rpg_core.session.reference` 与窄 `rpg_data` 服务只读查询已提交 Session 资料，但不得因此持有上述业务 runtime。`run_all.py` 只能编排独立子进程，不得持有或合并业务 runtime。
 - `play_api/`、`agent_service/`、`dream_service/`、`media_service/`、`tts_service/` 和 `channels/` 是接入/进程边界；`rpg_core/`、`rpg_memory/`、`rpg_media/`、`rpg_tts/` 是无框架业务模块，`memory_retrieval/` 是业务无关的检索基础包。HTTP、SSE、Telegram、CLI 和前端概念不得进入业务模块。
 - Play WebUI 访问 Dream、Media、TTS 和 Agent 能力必须经 Play API 代理；Play API 不直接持有 Agent runtime、LLM Provider 或读取媒体二进制工作区文件。独立服务故障不得阻塞基础聊天加载与输入。
 - Dream v1 无入站鉴权，只允许监听 localhost/loopback IP，非 loopback 配置必须启动失败。
@@ -11,15 +11,16 @@
 - 本地 llama 保持 LLM Service 进程内、按不可变模型键由 actor 线程串行执行；不要恢复子进程 worker。`request_timeout_ms` 包含排队和执行，无法中断的 native call 超时后自然排空。
 - LLM Service `/health` 免 Bearer 鉴权且只表示进程存活/配置已加载；其它业务接口仍鉴权。`RPG_WORLD_LLM_SERVICE_TOKEN` 与 `RPG_WORLD_PLAY_EVENT_TOKEN` 未设置时仅本地开发可回退内置 token 并 warning，生产必须显式覆盖，内部事件 token 不得暴露给 WebUI。
 - 会话链路统一使用全局短 `session_id`；创建时绑定 `workspace_id + story_id`，之后由服务端反查上下文。`AgentManager` 只按 `session_id` 缓存 agent；不要恢复三元 locator、`api_key` 缓存键、`cli_direct` 默认 ID 或用户自定义 session ID 创建入口。
-- CLI/Telegram 通过 catalog 解析配置的 `workspace_id + story_id + optional session_id + session_title`，运行时能力统一走 Agent service；工作区选择不得写回共享运行时状态。
+- CLI/Telegram 通过 catalog 解析配置的 `workspace_id + story_id + optional session_id + session_title`；turn、命令、Session mutation 与生命周期能力统一走 Agent service。Telegram 的已提交角色、状态、Summary、Story/Persistent Memory 资料只允许经公共 Session Reference 查询层读取，工作区选择不得写回共享运行时状态。
 - `data/` 是运行数据目录，历史、摘要、索引、SQLite WAL/SHM 和导入运行文件默认不纳入提交。
 
 ## `rpg_data` 数据层约束
 
 - `rpg_data` 负责数据如何可靠、高效、原子地存取，不应被窄化为简单 CRUD：数据库连接/migration、Peewee record、typed DTO、复杂关联查询、分页/排序、高效 read model、批量写入、CAS/条件更新、数据库级原子操作、序列化、归属与完整性校验都应留在数据层；业务层不得拼装 SQL 语义或制造 N+1/事务竞争。
 - `rpg_data` 不得决定产品行为：不做默认选择、调度/抽样、优先级合并、冷却/重试、状态机下一步、生命周期策略、派生/重置/删除保留矩阵、Prompt/模板渲染、玩家文案或跨聚合业务编排。
-- `DataServiceGateway` 是合法的数据库生命周期与 Data Service 注册表；composition root 可从中取得具体 service，但业务 service 必须依赖窄 Protocol/Data Service，不得持有整个 Gateway 作为 service locator。`rpg_core` 仅 `agent/agent.py` 与 `context/factory.py` 可以取得 Gateway，并必须立即把具体 service 逐项注入；进程边界的现有 lookup 与整 Gateway 引用由架构测试显式 allowlist，禁止新增。
+- `DataServiceGateway` 是合法的数据库生命周期与 Data Service 注册表；composition root 可从中取得具体 service，但业务 service 必须依赖窄 Protocol/Data Service，不得持有整个 Gateway 作为 service locator。`rpg_core` 仅 `agent/agent.py` 与 `context/factory.py` 可以取得 Gateway，并必须立即把具体 service 逐项注入；`run_telegram.py` 是 Session Reference 只读能力的显式进程组装边界。其它 lookup 与整 Gateway 引用由架构测试显式 allowlist，禁止新增。
 - `rpg_data` 的公开类型化持久化边界统一使用 Service 语义；Session、Message、Plot、Narrative Outcome、Dream/Memory、Status、Media 与 TTS 等新的大业务聚合入口命名为 `*DataService`，Repository/Peewee 实现只在 `rpg_data` 内部使用。既有简单 Character/Lorebook CRUD 可保留清晰的 `*ReadService` / `*ManagementService`，不为后缀或形式统一机械增加 application/facade/adapter 样板层。
+- `SessionReferenceDataService` 只提供完整 Session/Workspace/Story 归属校验、稳定分页、批量关联和只读存储模型；玩家可见字段、资源分组、Persistent Memory Evidence 投影和渠道菜单归 `rpg_core.session.reference`、`rpg_memory` 与渠道各自 owner，禁止进入数据层。
 - 业务归属固定：Plot Scheduler 与 Narrative Outcome 在 `rpg_core/rp_modules`，Session/角色/Opening/状态/Scene 在 `rpg_core`，Dream/Story Memory/Persistent Memory 在 `rpg_memory`，媒体与语音分别在 `rpg_media`、`rpg_tts`；service composition root 只负责依赖组装和进程适配。
 - 需要跨多次数据操作保持原子性时，由 `rpg_data` 提供无业务语义的 transaction/unit-of-work 或调用方指定的 bulk primitive，业务层决定事务内做什么。业务层不得直接使用 Repository/Peewee record，跨层结果使用 typed contract；Session、Memory、Status、Media、TTS 与 Narrative Outcome 存储契约优先从 `rpg_data.model.*` 引用，`rpg_data.models` 仅保留兼容重导出。
 - 数据层错误只表达 not found、integrity、conflict、conditional update failed 等数据事实；领域错误码、HTTP 状态和玩家提示由上层映射。`rpg_data` 不得导入业务模块、事件 publisher、WebUI 或渠道语义。

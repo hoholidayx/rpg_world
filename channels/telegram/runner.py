@@ -1,13 +1,14 @@
 """Telegram 独立入口。
 
 在独立进程中启动所有 enabled=true 的 Telegram bot。
-通过 ``AgentClient`` 访问独立 Agent 服务。
+写操作通过 ``AgentClient`` 访问独立 Agent 服务，可注入共享只读资料 Reader。
 """
 
 from __future__ import annotations
 
 import asyncio
 import signal
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -15,6 +16,9 @@ from agent_service.client import AgentClient
 from channels.config import settings as channels_settings
 from channels.telegram.adapter import TelegramAdapter
 from commons.process_logging import configure_process_logging
+
+if TYPE_CHECKING:
+    from rpg_core.session.reference import SessionReferenceReader
 
 
 class _BotRuntime:
@@ -34,6 +38,7 @@ class _BotRuntime:
 async def _start_enabled_bots(
     stop_event: asyncio.Event,
     fatal_error: asyncio.Event | None = None,
+    reference_reader: SessionReferenceReader | None = None,
 ) -> list[_BotRuntime]:
     runtimes: list[_BotRuntime] = []
     enabled_bots = [bot for bot in channels_settings.telegram_bots if bot.enabled]
@@ -85,6 +90,8 @@ async def _start_enabled_bots(
                 session_id=str(session["session_id"]),
                 session_title=str(session.get("title") or bot.session_title),
                 agent_client=client,
+                reference_menu_enabled=bot.reference_menu_enabled,
+                reference_reader=reference_reader,
             )
             start_task = asyncio.create_task(adapter.start(), name=f"telegram:{bot.name}")
             start_task.add_done_callback(_on_start_done)
@@ -134,13 +141,22 @@ def _install_stop_handlers(stop_event: asyncio.Event) -> None:
             pass
 
 
-async def main() -> int:
-    configure_process_logging("telegram", channels_settings.logging)
+async def main(
+    reference_reader: SessionReferenceReader | None = None,
+    *,
+    configure_logging: bool = True,
+) -> int:
+    if configure_logging:
+        configure_process_logging("telegram", channels_settings.logging)
     stop_event = asyncio.Event()
     fatal_error = asyncio.Event()
     runtimes: list[_BotRuntime] = []
     try:
-        runtimes = await _start_enabled_bots(stop_event, fatal_error)
+        runtimes = await _start_enabled_bots(
+            stop_event,
+            fatal_error,
+            reference_reader,
+        )
         if not runtimes:
             return 0
 

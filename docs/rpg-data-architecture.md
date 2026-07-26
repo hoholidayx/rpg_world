@@ -111,6 +111,7 @@ Repository 是 `rpg_data` 内部的 Peewee 实现细节，负责查询表达式�
 当前可参考的聚合入口包括：
 
 - `SessionDataService`：Session/profile、角色与 Opening read model、派生账本、调用方指定的复制/删除和 Session 级原子边界；
+- `SessionReferenceDataService`：完整 Session/Workspace/Story 归属校验、资料列表/详情的稳定分页与批量关联 read model、Summary 路径和 turn-range 数据事实；
 - `PlotSchedulingDataService`：Plot 定义、Session 覆盖、决策账本和分页 read model；
 - `DreamMemoryDataService`：Dream/Persistent Memory 账本、CAS、批量与 `IMMEDIATE` 事务；
 - `StoryMemoryDataService`：Story Memory/Evidence 的查询、分页与类型化写入。
@@ -121,6 +122,33 @@ Repository 是 `rpg_data` 内部的 Peewee 实现细节，负责查询表达式�
 - `RPModuleDataService`：内置 catalog、Story mount、Session override 的 typed CRUD，以及解析单个 Session snapshot 所需的聚合 read model。
 - `MessageDataService`：主历史 CRUD、turn window/分页、processed flag 聚合与调用方指定的批量标记；不决定 Context 投影或 Summary/Story Memory 候选。
 - `NarrativeOutcomeDataService`：调用方准备好的 Outcome ledger row 追加、按 turn 查询和删除；不判断 Outcome code、sample、权重来源或剧情语义。
+
+### 跨渠道 Session Reference 查询
+
+已提交 Session 资料使用进程内的公共只读查询边界：
+
+```text
+Telegram composition root
+        │
+        ├── AgentClient（turn、命令、Session mutation）
+        │
+        └── Async SessionReferenceReader
+                    │
+                    ▼
+          rpg_core.session.reference
+             ├── Summary reader
+             ├── Story/Persistent Memory provider
+             └── narrow data ports
+                    │
+                    ▼
+          rpg_data Data Services
+```
+
+- `rpg_core.session.reference` 决定 ready 门禁、玩家可见字段、资源分组和公共投影，公开不可变 DTO 与窄 Protocol；它不得持有 Gateway、Repository、Peewee 或渠道类型。
+- `SessionReferenceDataService` 只决定如何用完整 `session_id + workspace_id + story_id` 安全、高效读取角色、状态和 Summary 数据事实。单项查询必须在 SQL 中验证资源归属，不能先按全局 ID 读取再由上层比较。
+- Story Memory 规范化和 Persistent Memory 的 active/Evidence-valid/current-revision 投影仍归 `rpg_memory`；Summary Markdown 解析仍归 `rpg_core.summary`。渠道和数据层不得复制这些规则。
+- Telegram Adapter 只接收异步 Reader；`run_telegram.py` 是唯一 Gateway composition root。同步数据库和文件 I/O 必须移出事件循环，并在每次 worker 调用后关闭该线程的连接。
+- 不同渠道需要不同业务时，通过替换窄 Provider、不可变 Policy、装饰 Reader 或实现完整 Reader Protocol 组合，不通过 Application Service 继承、全局可变 registry 或静默 fallback 扩展。
 
 Status 的产品策略由 Core 持有：`StatusTableAdministrationService` 决定 Story 定义与 Session 表管理规则，`SessionStatusLifecycleService` 决定何时按当前 Story 定义复制或 reset，`SceneStatusService` 决定 Scene 字段约束与 active Scene，`StatusContextService` 决定角色名修复和 Context 可见性，`StatusManager` 决定 Agent 当前 turn 的即时写入与 bootstrap 资格。上述服务只接收窄 Data Port；`StatusDataService` 不重新暴露这些业务入口。
 

@@ -118,3 +118,64 @@ def test_invalidate_token_chat_session_and_clear() -> None:
     registry.add(kind="four", chat_id="3", session_id=None)
     registry.clear()
     assert len(registry) == 0
+
+
+def test_view_group_invalidates_only_sibling_controls() -> None:
+    registry = _registry()
+    group_id = registry.create_view_group()
+    first = registry.add(
+        kind="first",
+        chat_id="1",
+        session_id="s1",
+        view_group_id=group_id,
+    )
+    second = registry.add(
+        kind="second",
+        chat_id="1",
+        session_id="s1",
+        view_group_id=group_id,
+    )
+    unrelated = registry.add(kind="other", chat_id="1", session_id="s1")
+
+    first_resolution = registry.resolve(
+        first,
+        chat_id="1",
+        current_session_id="s1",
+    )
+    claimed = registry.claim(first_resolution.token)
+
+    assert claimed is not None
+    assert claimed.view_group_id == group_id
+    assert registry.invalidate_view_group(group_id) == 1
+    assert not registry.resolve(
+        second,
+        chat_id="1",
+        current_session_id="s1",
+    ).resolved
+    assert registry.resolve(
+        unrelated,
+        chat_id="1",
+        current_session_id="s1",
+    ).resolved
+
+
+def test_expired_group_membership_is_cleaned() -> None:
+    clock = _Clock()
+    registry = _registry(clock)
+    group_id = registry.create_view_group()
+    callback_data = registry.add(
+        kind="short",
+        chat_id="1",
+        session_id="s1",
+        ttl_seconds=1,
+        view_group_id=group_id,
+    )
+
+    clock.value += 1
+
+    assert registry.resolve(
+        callback_data,
+        chat_id="1",
+        current_session_id="s1",
+    ).status == CallbackResolutionStatus.EXPIRED
+    assert registry.invalidate_view_group(group_id) == 0

@@ -44,6 +44,7 @@ from rpg_data.services.narrative_outcome import NarrativeOutcomeDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session_composer import SessionComposerDataService
+from rpg_data.services.session_reference import SessionReferenceDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_data.services.story_pack import StoryPackDataService
@@ -67,6 +68,9 @@ PRODUCTION_ROOTS = (
     "rpg_mcp",
     "rpg_tts",
     "tts_service",
+)
+PRODUCTION_ENTRYPOINTS = (
+    "run_telegram.py",
 )
 
 FORBIDDEN_DATA_DEPENDENCIES = (
@@ -96,6 +100,8 @@ RECENT_APPLICATION_SERVICE_FILES = (
     "rpg_core/session/history.py",
     "rpg_core/session/manager.py",
     "rpg_core/session/progress.py",
+    "rpg_core/session/reference/service.py",
+    "rpg_core/session/reference/runtime.py",
     "rpg_core/rp_modules/application.py",
     "rpg_core/rp_modules/narrative_outcome/ledger.py",
     "rpg_core/rp_modules/plot_scheduler/management.py",
@@ -159,6 +165,7 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "rpg_core/agent/agent.py",
     "rpg_core/context/factory.py",
     "rpg_mcp/composition.py",
+    "run_telegram.py",
     "tts_service/main.py",
 })
 
@@ -174,6 +181,7 @@ WHOLE_GATEWAY_REFERENCE_ALLOWLIST = frozenset({
     "media_service/main.py",
     "play_api/backends/data_manager.py",
     "rpg_mcp/composition.py",
+    "run_telegram.py",
     "tts_service/main.py",
 })
 
@@ -317,6 +325,7 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         MediaDataService,
         TTSDataService,
         SessionComposerDataService,
+        SessionReferenceDataService,
         RPModuleDataService,
         MessageDataService,
         NarrativeOutcomeDataService,
@@ -357,6 +366,98 @@ def test_composer_application_service_uses_narrow_data_port() -> None:
 
     assert "rpg_data.services.gateway" not in imports
     assert "rpg_data.services.session_composer" not in imports
+
+
+def test_session_reference_application_uses_only_narrow_data_ports() -> None:
+    forbidden_prefixes = (
+        "channels",
+        "peewee",
+        "play_api",
+        "rpg_data.repositories",
+        "rpg_data.services",
+    )
+    violations: list[str] = []
+    reference_root = ROOT / "rpg_core/session/reference"
+    for path in _python_files(reference_root):
+        for imported in _imports(path):
+            if imported.startswith(forbidden_prefixes):
+                violations.append(
+                    f"{path.relative_to(ROOT)}: {imported}"
+                )
+
+    assert violations == []
+
+
+def test_telegram_reference_handlers_do_not_import_persistence_or_source_policy() -> None:
+    forbidden_prefixes = (
+        "peewee",
+        "rpg_data",
+        "rpg_memory.persistent.ledger",
+        "rpg_core.summary.reader",
+    )
+    violations: list[str] = []
+    for path in _python_files(ROOT / "channels/telegram"):
+        for imported in _imports(path):
+            if imported.startswith(forbidden_prefixes):
+                violations.append(
+                    f"{path.relative_to(ROOT)}: {imported}"
+                )
+
+    assert violations == []
+
+
+def test_telegram_composition_root_does_not_import_business_runtimes() -> None:
+    forbidden_prefixes = (
+        "agent_service.main",
+        "dream_service",
+        "llm_client",
+        "llm_service",
+        "media_service.main",
+        "peewee",
+        "rpg_core.agent",
+        "rpg_data.repositories",
+        "rpg_memory.dream",
+        "rpg_media",
+        "rpg_tts",
+        "tts_service.main",
+    )
+    path = ROOT / "run_telegram.py"
+    violations = [
+        imported
+        for imported in _imports(path)
+        if imported.startswith(forbidden_prefixes)
+    ]
+
+    assert violations == []
+
+
+def test_persistent_reference_policy_uses_only_narrow_data_contracts() -> None:
+    forbidden_prefixes = (
+        "channels",
+        "peewee",
+        "play_api",
+        "rpg_core",
+        "rpg_data.repositories",
+        "rpg_data.services",
+    )
+    path = ROOT / "rpg_memory/persistent/reference.py"
+    violations = [
+        imported
+        for imported in _imports(path)
+        if imported.startswith(forbidden_prefixes)
+    ]
+
+    assert violations == []
+
+
+def test_session_reference_data_service_does_not_own_player_policy() -> None:
+    source = (
+        ROOT / "rpg_data/services/session_reference.py"
+    ).read_text(encoding="utf-8")
+
+    assert "SESSION_LIFECYCLE_READY" not in source
+    assert "project_context_memories" not in source
+    assert "Telegram" not in source
 
 
 def test_composer_data_services_do_not_expose_business_resolution() -> None:
@@ -456,6 +557,8 @@ def test_narrative_outcome_data_service_does_not_expose_rp_policy() -> None:
 def _production_python_files():
     for root_name in PRODUCTION_ROOTS:
         yield from _python_files(ROOT / root_name)
+    for relative_path in PRODUCTION_ENTRYPOINTS:
+        yield ROOT / relative_path
 
 
 def _python_files(root: Path):

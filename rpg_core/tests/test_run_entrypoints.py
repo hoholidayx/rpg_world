@@ -245,17 +245,21 @@ def test_service_entrypoint_configures_process_logging_before_uvicorn(
 
 
 def test_run_telegram_main_forwards(monkeypatch):
-    called = False
+    calls: list[tuple[object, bool]] = []
 
-    async def _fake_main() -> int:
-        nonlocal called
-        called = True
+    async def _fake_main(*, reference_reader, configure_logging) -> int:
+        calls.append((reference_reader, configure_logging))
         return 7
 
+    monkeypatch.setattr(
+        run_telegram,
+        "configure_process_logging",
+        lambda _name, _settings: None,
+    )
     monkeypatch.setattr(run_telegram, "_telegram_main", _fake_main)
 
     assert asyncio.run(run_telegram.main()) == 7
-    assert called is True
+    assert calls == [(None, False)]
 
 
 def test_run_cli_main_forwards(monkeypatch):

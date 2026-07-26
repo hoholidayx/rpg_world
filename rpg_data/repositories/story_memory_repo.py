@@ -8,6 +8,7 @@ from peewee import Database, SQL, fn
 
 from rpg_data.model import memory as models
 from rpg_data.model.session import SessionMessage
+from rpg_data.model.session_reference import SessionReferenceLocator
 from rpg_data.repositories._utils import (
     get_or_none,
     to_memory_evidence,
@@ -103,8 +104,107 @@ class StoryMemoryRepository:
             ),
         )
 
+    def require_reference_scope(
+        self,
+        locator: SessionReferenceLocator,
+    ) -> None:
+        """Require the complete catalog scope without applying lifecycle policy."""
+
+        if not (
+            SessionRecord.select(SessionRecord.id)
+            .where(_reference_session_clause(locator))
+            .exists()
+        ):
+            raise FileNotFoundError(
+                "Session reference scope not found: "
+                f"{locator.workspace_id}/{locator.story_id}/{locator.session_id}"
+            )
+
+    def list_reference_page(
+        self,
+        locator: SessionReferenceLocator,
+        *,
+        page: int,
+        page_size: int,
+        memory_kind: str | None,
+        dream_processed: bool | None,
+    ) -> models.SessionStoryMemoryPage:
+        """List Story Memory through a complete Session ownership join."""
+
+        session_clause = _reference_story_memory_clause(locator)
+        filtered_clause = session_clause
+        if memory_kind:
+            filtered_clause &= SessionStoryMemoryRecord.memory_kind == memory_kind
+        if dream_processed is not None:
+            filtered_clause &= (
+                SessionStoryMemoryRecord.dream_processed == bool(dream_processed)
+            )
+
+        filtered_query = (
+            SessionStoryMemoryRecord.select()
+            .join(SessionRecord)
+            .where(filtered_clause)
+        )
+        total = filtered_query.count()
+        rows = tuple(
+            filtered_query.order_by(
+                SessionStoryMemoryRecord.updated_at.desc(),
+                SessionStoryMemoryRecord.id.desc(),
+            ).paginate(page, page_size)
+        )
+        scoped_query = (
+            SessionStoryMemoryRecord.select()
+            .join(SessionRecord)
+            .where(session_clause)
+        )
+        total_facts = scoped_query.count()
+        dream_processed_facts = (
+            SessionStoryMemoryRecord.select()
+            .join(SessionRecord)
+            .where(session_clause & SessionStoryMemoryRecord.dream_processed)
+            .count()
+        )
+        latest_updated_at = (
+            SessionStoryMemoryRecord.select(
+                fn.MAX(SessionStoryMemoryRecord.updated_at)
+            )
+            .join(SessionRecord)
+            .where(session_clause)
+            .scalar()
+        )
+        return models.SessionStoryMemoryPage(
+            items=self._to_story_memories(rows),
+            page=page,
+            page_size=page_size,
+            total=total,
+            stats=models.SessionStoryMemoryStats(
+                total_facts=total_facts,
+                dream_processed_facts=dream_processed_facts,
+                pending_dream_facts=total_facts - dream_processed_facts,
+                latest_updated_at=str(latest_updated_at or ""),
+            ),
+        )
+
     def get(self, memory_id: int) -> models.SessionStoryMemory | None:
         row = get_or_none(SessionStoryMemoryRecord, int(memory_id))
+        return self._to_story_memory(row) if row is not None else None
+
+    def get_reference(
+        self,
+        locator: SessionReferenceLocator,
+        memory_id: int,
+    ) -> models.SessionStoryMemory | None:
+        """Get one Story Memory through a complete Session ownership join."""
+
+        row = (
+            SessionStoryMemoryRecord.select()
+            .join(SessionRecord)
+            .where(
+                _reference_story_memory_clause(locator)
+                & (SessionStoryMemoryRecord.id == int(memory_id))
+            )
+            .first()
+        )
         return self._to_story_memory(row) if row is not None else None
 
     def get_by_dedupe_key(
@@ -307,3 +407,18 @@ def _row_payload(values: models.StoryMemoryRowValues) -> dict[str, object]:
         "metadata_json": values.metadata_json,
         "version": values.version,
     }
+
+
+def _reference_session_clause(locator: SessionReferenceLocator):
+    return (
+        (SessionRecord.id == str(locator.session_id))
+        & (SessionRecord.workspace == str(locator.workspace_id))
+        & (SessionRecord.story == int(locator.story_id))
+    )
+
+
+def _reference_story_memory_clause(locator: SessionReferenceLocator):
+    return (
+        _reference_session_clause(locator)
+        & (SessionStoryMemoryRecord.session == str(locator.session_id))
+    )

@@ -6,6 +6,10 @@ from rpg_core.summary.compressor import (
     SummaryCompressor,
 )
 from rpg_core.summary.reader import SummaryDocument, SummaryIndex, SummaryReader
+from rpg_core.summary.reference import (
+    ResolvedSummaryDocument,
+    SessionSummaryReferenceProvider,
+)
 from rpg_core.summary.store import SummaryStore
 
 __all__ = [
@@ -15,5 +19,7 @@ __all__ = [
     "SummaryDocument",
     "SummaryIndex",
     "SummaryReader",
+    "ResolvedSummaryDocument",
+    "SessionSummaryReferenceProvider",
     "SummaryStore",
 ]

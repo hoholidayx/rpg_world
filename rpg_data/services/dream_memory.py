@@ -9,6 +9,7 @@ from peewee import Database, IntegrityError
 
 from rpg_data.model import memory as models
 from rpg_data.model.session import SessionMessage
+from rpg_data.model.session_reference import SessionReferenceLocator
 from rpg_data.errors import DataConditionalWriteError, DataIntegrityError
 from rpg_data.repositories.dream_memory_repo import DreamMemoryRepository
 from rpg_data.repositories.story_memory_repo import StoryMemoryRepository
@@ -44,6 +45,27 @@ class DreamMemoryDataService:
         message_ids: Sequence[int] | None = None,
     ) -> tuple[SessionMessage, ...]:
         return self._records.list_messages(session_id, message_ids=message_ids)
+
+    def require_reference_scope(
+        self,
+        locator: SessionReferenceLocator,
+    ) -> None:
+        """Require complete Session ownership without deciding lifecycle policy."""
+
+        self._records.require_reference_scope(locator)
+
+    def list_reference_messages(
+        self,
+        locator: SessionReferenceLocator,
+        *,
+        message_ids: Sequence[int],
+    ) -> tuple[SessionMessage, ...]:
+        """Load Evidence messages through the complete requested scope."""
+
+        return self._records.list_reference_messages(
+            locator,
+            message_ids=message_ids,
+        )
 
     def list_story_memories(
         self,
@@ -194,8 +216,74 @@ class DreamMemoryDataService:
     ) -> tuple[models.PersistentMemoryBundle, ...]:
         return self._records.list_memories(session_id, lifecycle=lifecycle)
 
+    def list_current_memories(
+        self,
+        session_id: str,
+        *,
+        lifecycle: str | None = None,
+    ) -> tuple[models.PersistentMemoryBundle, ...]:
+        return self._records.list_current_memories(
+            session_id,
+            lifecycle=lifecycle,
+        )
+
+    def list_current_reference_memories(
+        self,
+        locator: SessionReferenceLocator,
+        *,
+        lifecycle: str | None = None,
+    ) -> tuple[models.PersistentMemoryBundle, ...]:
+        """Return current-only bundles from the complete requested scope."""
+
+        return self._records.list_current_reference_memories(
+            locator,
+            lifecycle=lifecycle,
+        )
+
     def get_memory(self, memory_id: str) -> models.PersistentMemoryBundle | None:
         return self._records.get_memory(memory_id)
+
+    def get_memory_for_session(
+        self,
+        session_id: str,
+        memory_id: str,
+    ) -> models.PersistentMemoryBundle | None:
+        """Return a Persistent Memory only when it belongs to ``session_id``."""
+
+        return self._records.get_memory_for_session(session_id, memory_id)
+
+    def get_current_memory_for_session(
+        self,
+        session_id: str,
+        memory_id: str,
+    ) -> models.PersistentMemoryBundle | None:
+        """Return one scoped memory with only its current revision loaded."""
+
+        return self._records.get_current_memory_for_session(
+            session_id,
+            memory_id,
+        )
+
+    def get_current_reference_memory(
+        self,
+        locator: SessionReferenceLocator,
+        memory_id: str,
+    ) -> models.PersistentMemoryBundle | None:
+        """Return one current-only bundle from the complete requested scope."""
+
+        return self._records.get_current_reference_memory(
+            locator,
+            memory_id,
+        )
+
+    def get_for_session(
+        self,
+        session_id: str,
+        memory_id: str,
+    ) -> models.PersistentMemoryBundle | None:
+        """Alias for the Session-scoped Persistent Memory read."""
+
+        return self.get_memory_for_session(session_id, memory_id)
 
     def get_memory_by_dedupe_key(
         self,

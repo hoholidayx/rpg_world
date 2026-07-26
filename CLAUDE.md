@@ -48,7 +48,7 @@ uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir age
 # Play WebUI 开发服务器
 cd play_webui && npm run dev
 
-# CLI / Telegram 通过 agent_client 访问 Agent 服务
+# CLI / Telegram 的 turn、命令和 Session mutation 通过 agent_client 访问 Agent 服务
 uv run python -m channels.cli.repl
 
 # 验证导入
@@ -67,7 +67,7 @@ rpg_world/
 ├── run_play_api.py                # Play API 入口
 ├── run_all.py                     # 一键拉起六个独立后端进程的前台入口
 ├── run_cli.py                     # CLI 入口（AgentClient）
-├── run_telegram.py                # Telegram 入口（AgentClient）
+├── run_telegram.py                # Telegram 入口（AgentClient + Session Reference 只读组装）
 ├── commons/                       # 共享配置加载与 JSON/YAML 类型别名
 ├── channels/                     # 多渠道适配器
 │   ├── base.py                   #   ChannelAdapter 抽象基类
@@ -179,8 +179,11 @@ RPG World 采用 **独立 Agent、LLM、Dream、Media、TTS 服务 + 独立入�
 其他进程保持不动并使启动失败；六个服务配置为重复端口时同样拒绝启动。
 只有 `run_agent.py` 进程持有 `AgentManager` 和 `RPGGameAgent`。Agent 进程使用 `rpg_memory` 做 RP 召回与 Context 投影，底层检索委托业务无关的 `memory_retrieval`；`run_dream.py` 使用无框架的 `rpg_memory.dream` 做离线提炼并经 `rpg_data` 写 Persistent Memory。`rpg_core` 不运行 Dream consolidation、不写该账本，二者也都不得持有 Provider。
 只有 `run_llm.py` 进程读取 `llm_service/llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 与本地 llama runtime；Agent、Memory、Dream、TTS 及未来 Media planner 只能通过 `llm_client` 调用它。
-Play API、CLI、Telegram 不创建 agent，不缓存 agent，不配置 llama，只通过
-`agent_service.client.AgentClient` 访问 Agent 服务。
+Play API、CLI、Telegram 不创建 agent，不缓存 agent，不配置 llama；turn、命令、
+Session mutation 与生命周期能力只通过 `agent_service.client.AgentClient` 访问 Agent 服务。
+Telegram 可在共址部署中通过 `rpg_core.session.reference` 与窄 `rpg_data` 服务读取已经提交的
+Session 角色、状态、Summary、Story Memory 和 Persistent Memory，但不得持有 Agent、Dream 或
+Provider runtime，也不得把 Gateway、Repository 或 Peewee 对象传入渠道 handler。
 
 Media service 是另一个独立进程，只持有 `rpg_media`、`rpg_data`、图片 Provider 与数据库持久 worker；它不导入 Agent runtime，也不持有 llama worker。Play API 作为独立后端链路的接入边界：聊天走 `AgentClient`，媒体走 `MediaClient`，TTS 走 `TTSClient`。Media service 中断只使媒体接口返回 503，不得阻塞 SessionRoom、composer 或 Agent SSE。
 
@@ -208,7 +211,7 @@ run_media          -> media_service.main:app      -> rpg_media + rpg_data
 run_tts            -> tts_service.main:app        -> rpg_tts + rpg_data + llm_client
 run_play_api       -> play_api.main:app           -> AgentClient + DreamClient + MediaClient + TTSClient
 run_cli            -> channels.cli.repl           -> AgentClient
-run_telegram       -> channels.telegram.runner    -> AgentClient
+run_telegram       -> channels.telegram.runner    -> AgentClient + SessionReferenceReader
 ```
 
 根目录还提供同级快捷入口，便于单独调试和查找：
@@ -220,7 +223,7 @@ run_dream.py -> dream_service.main
 run_media.py -> media_service.main
 run_tts.py -> tts_service.main
 run_play_api.py -> play_api.main
-run_telegram.py -> channels.telegram.runner
+run_telegram.py -> channels.telegram.runner + rpg_core.session.reference composition
 run_cli.py      -> channels.cli.repl
 ```
 
@@ -364,6 +367,9 @@ Telegram 例外：入口卡、角色按钮、`/sessions`、无参数 `/session_s
 与当前 session。`/session_create <title>` 在 Telegram 渠道内直接创建系统生成 ID 的 session；无标题
 命令及“新建并进入”按钮使用 `TelegramSessionFlow` 的短期 pending 状态收集标题。创建成功后必须经
 现有 `/session_switch <id>` 命令切换，确认 active session 后才 pin 当前 chat。
+`/info` 与资料菜单也是渠道只读交互：Adapter 只依赖异步 `SessionReferenceReader`，每次查询携带
+完整 `session_id + workspace_id + story_id` locator。公共业务层负责玩家可见投影，`rpg_data`
+负责归属、分页和批量关联；Telegram 只负责按钮、HTML、分页和错误文案。
 
 ### Telegram 渠道当前能力
 
@@ -371,19 +377,25 @@ Telegram 是轻量入口、推送通知、快速回复和兜底交互；新增�
 
 | 能力 | 当前实现 |
 |---|---|
-| 启动方式 | `uv run python -m run_telegram`（通过 `agent_client` 访问 Agent 服务） |
+| 启动方式 | `uv run python -m run_telegram`（Agent 写链路走 `agent_client`，已提交资料走本地 Session Reference） |
 | 长轮询 | `python-telegram-bot` `Application` + `updater.start_polling()` |
 | 流式输出 | `TelegramTurnFlow` 通过 Application 托管任务发送占位、增量编辑和最终分块，支持间隔和最小字符数节流 |
 | 非流式输出 | 仍使用带 request ID 的 SSE transport，内部缓冲并在 DONE 后一次性展示 |
 | 渲染 | Telegram 展示层投影 `<rp-narration>` / `<rp-character>`，再转 Markdown HTML；原始 assistant content 不变 |
 | 命令 | 轻量 Bot 菜单、本地动态 `/help`、后端斜杠命令和 Telegram 命令规范化 |
 | 入口 | `/start` 展示故事、会话短 ID、玩家角色及角色/会话/开始游玩按钮；invalid 角色先进入按钮选择 |
+| 资料 | 可选 `/info` 多段菜单只读查看角色、状态、剧情归纳、Story Memory 与主 Agent 可见 Persistent Memory；默认关闭 |
 | 会话 | 每个 bot 启动时 ensure 默认 catalog session；会话菜单显示 title + 短 ID，支持按钮切换 |
 | 创建 | `/session_create <title>` 或“新建并进入”标题流程创建 session，成功执行 `/session_switch` 后固定切换 |
 | 二段状态 | `TelegramSessionFlow` 用进程内 pending 状态收集新会话标题，支持 `/cancel` 和超时 |
 | 并发 | 同一 chat 或同一 session 只允许一个 Telegram 生成；新输入立即拒绝，不进入 AgentMailbox 排队 |
 | 停止 | 所有 bot 提供 `/stop` 和“停止生成”按钮，按 active session/request ID 调用 Agent service `/chat/stop`；只有确认 `cancelled` 才展示 stopped，注册确认超时则关闭本地 transport 并展示 unknown |
 | 网络参数 | `proxy`、请求超时、流式编辑节流和 shutdown grace 来自 `channels/settings.yaml` 的 bot 配置 |
+
+`run_telegram.py` 是 Session Reference 的唯一数据库 composition root：进程级创建一次 Gateway，
+立即提取窄 Data Service 并组装共享 Reader；同步 SQLite/summary 文件读取通过有界
+`asyncio.to_thread()` 适配，worker 每次在 `finally` 关闭自己的 Peewee 连接。Reader 初始化失败只
+禁用资料能力，不阻塞 Agent 聊天。退出时先停止所有 Bot，再等待只读查询结束并关闭 Reader/Gateway。
 
 后续涉及 Telegram 的修改应优先补 `channels/tests/test_telegram.py`，尤其是：
 会话菜单、命令规范化、stream 编辑节流、请求失败/超时、Markdown 渲染、长文本分块。

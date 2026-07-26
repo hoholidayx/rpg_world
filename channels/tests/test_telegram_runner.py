@@ -63,6 +63,30 @@ async def test_main_configures_telegram_process_logging(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_main_can_skip_duplicate_process_logging(monkeypatch):
+    import channels.telegram.runner as runner_module
+
+    configured = []
+
+    async def fake_start_enabled_bots(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        runner_module,
+        "configure_process_logging",
+        lambda name, settings: configured.append((name, settings)),
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "_start_enabled_bots",
+        fake_start_enabled_bots,
+    )
+
+    assert await runner_module.main(configure_logging=False) == 0
+    assert configured == []
+
+
+@pytest.mark.asyncio
 async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     import channels.telegram.runner as runner_module
 
@@ -102,7 +126,11 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     monkeypatch.setattr(runner_module, "TelegramAdapter", FakeTelegramAdapter)
 
     stop_event = asyncio.Event()
-    runtimes = await runner_module._start_enabled_bots(stop_event)
+    reference_reader = object()
+    runtimes = await runner_module._start_enabled_bots(
+        stop_event,
+        reference_reader=reference_reader,
+    )
     await asyncio.gather(*(runtime.start_task for runtime in runtimes))
 
     assert [runtime.bot_name for runtime in runtimes] == ["main", "prod"]
@@ -114,6 +142,8 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     assert created_adapters[0]["story_id"] == 1
     assert created_adapters[0]["session_id"] == "resolved_main_workspace"
     assert created_adapters[0]["streaming"] is True
+    assert created_adapters[0]["reference_menu_enabled"] is False
+    assert created_adapters[0]["reference_reader"] is reference_reader
     assert created_adapters[0]["shutdown_grace_ms"] == 15000
     assert created_adapters[1]["bot_name"] == "prod"
     assert created_adapters[1]["token"] == "token-prod"
@@ -230,7 +260,12 @@ async def test_main_stops_adapters_on_shutdown(monkeypatch):
         client=FakeClient(),
     )
 
-    async def fake_start_enabled_bots(stop_event, fatal_error=None):  # noqa: ANN001
+    async def fake_start_enabled_bots(  # noqa: ANN001
+        stop_event,
+        fatal_error=None,
+        reference_reader=None,
+    ):
+        assert reference_reader is None
         stop_event.set()
         return [runtime]
 
@@ -260,7 +295,12 @@ async def test_main_returns_nonzero_on_startup_failure(monkeypatch):
     start_task = asyncio.create_task(asyncio.sleep(3600))
     runtime = SimpleNamespace(bot_name="main", adapter=adapter, start_task=start_task, client=None)
 
-    async def fake_start_enabled_bots(stop_event, fatal_error=None):  # noqa: ANN001
+    async def fake_start_enabled_bots(  # noqa: ANN001
+        stop_event,
+        fatal_error=None,
+        reference_reader=None,
+    ):
+        assert reference_reader is None
         if fatal_error is not None:
             fatal_error.set()
         stop_event.set()
