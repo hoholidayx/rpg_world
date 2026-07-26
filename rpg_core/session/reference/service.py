@@ -5,11 +5,15 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable, Sequence
-from typing import TypeVar
+from contextlib import contextmanager
+from typing import Iterator, TypeVar
 
 from rpg_data.model import memory as memory_models
 from rpg_data.model.session import SESSION_LIFECYCLE_READY
-from rpg_data.model.session_reference import SessionReferenceStatusOrder
+from rpg_data.model.session_reference import (
+    SessionReferenceScope as DataSessionReferenceScope,
+    SessionReferenceStatusOrder,
+)
 from rpg_memory.persistent.reference import PersistentMemoryReferenceItem
 
 from rpg_core.session.reference.errors import (
@@ -88,15 +92,16 @@ class SessionReferenceApplicationService:
         self,
         locator: SessionReferenceLocator,
     ) -> SessionReferenceScope:
-        scope = self._require_scope(locator)
-        return SessionReferenceScope(
-            locator=scope.locator,
-            title=scope.title,
-            lifecycle=scope.lifecycle,
-            player_character_id=scope.player_character_id,
-            version=scope.session_version,
-            updated_at=scope.updated_at,
-        )
+        locator = _normalized_locator(locator)
+        with self._snapshot(locator) as scope:
+            return SessionReferenceScope(
+                locator=scope.locator,
+                title=scope.title,
+                lifecycle=scope.lifecycle,
+                player_character_id=scope.player_character_id,
+                version=scope.session_version,
+                updated_at=scope.updated_at,
+            )
 
     def list_characters(
         self,
@@ -105,53 +110,53 @@ class SessionReferenceApplicationService:
         page: int = 1,
         page_size: int = 8,
     ) -> ReferencePage[CharacterSummary]:
-        scope = self._require_resource(
+        locator = _normalized_locator(locator)
+        page, page_size = self._validate_page(page, page_size)
+        with self._snapshot(
             locator,
             SessionReferenceResource.CHARACTERS,
-        )
-        page, page_size = self._validate_page(page, page_size)
-        result = self._scoped_call(
-            lambda: self._data.list_characters(
+        ) as scope:
+            result = self._data.list_characters(
                 locator,
                 page=page,
                 page_size=page_size,
             )
-        )
-        return _data_page(
-            result,
-            lambda item: _character_summary(
-                item,
-                player_character_id=scope.player_character_id,
-            ),
-        )
+            return _data_page(
+                result,
+                lambda item: _character_summary(
+                    item,
+                    player_character_id=scope.player_character_id,
+                ),
+            )
 
     def get_character(
         self,
         locator: SessionReferenceLocator,
         character_id: int,
     ) -> CharacterCard:
-        scope = self._require_resource(
+        locator = _normalized_locator(locator)
+        normalized_id = _positive_id(character_id, "character_id")
+        with self._snapshot(
             locator,
             SessionReferenceResource.CHARACTERS,
-        )
-        normalized_id = _positive_id(character_id, "character_id")
-        character = self._scoped_call(
-            lambda: self._data.get_character(locator, normalized_id)
-        )
-        if character is None:
-            raise SessionReferenceNotFoundError(
-                f"Character is no longer available: {normalized_id}"
-            )
+        ) as scope:
+            character = self._data.get_character(locator, normalized_id)
+            if character is None:
+                raise SessionReferenceNotFoundError(
+                    f"Character is no longer available: {normalized_id}"
+                )
 
-        return CharacterCard(
-            id=character.character_id,
-            name=character.name,
-            description=character.description,
-            is_player=scope.player_character_id == character.character_id,
-            details_count=character.details_count,
-            version=character.version,
-            updated_at=character.updated_at,
-        )
+            return CharacterCard(
+                id=character.character_id,
+                name=character.name,
+                description=character.description,
+                is_player=(
+                    scope.player_character_id == character.character_id
+                ),
+                details_count=character.details_count,
+                version=character.version,
+                updated_at=character.updated_at,
+            )
 
     def list_character_details(
         self,
@@ -161,24 +166,24 @@ class SessionReferenceApplicationService:
         page: int = 1,
         page_size: int = 8,
     ) -> ReferencePage[CharacterDetailSummary]:
-        self._require_resource(locator, SessionReferenceResource.CHARACTERS)
+        locator = _normalized_locator(locator)
         normalized_id = _positive_id(character_id, "character_id")
-        if self._scoped_call(
-            lambda: self._data.get_character(locator, normalized_id)
-        ) is None:
-            raise SessionReferenceNotFoundError(
-                f"Character is no longer available: {normalized_id}"
-            )
         page, page_size = self._validate_page(page, page_size)
-        result = self._scoped_call(
-            lambda: self._data.list_character_details(
+        with self._snapshot(
+            locator,
+            SessionReferenceResource.CHARACTERS,
+        ):
+            if self._data.get_character(locator, normalized_id) is None:
+                raise SessionReferenceNotFoundError(
+                    f"Character is no longer available: {normalized_id}"
+                )
+            result = self._data.list_character_details(
                 locator,
                 normalized_id,
                 page=page,
                 page_size=page_size,
             )
-        )
-        return _data_page(result, _character_detail_summary)
+            return _data_page(result, _character_detail_summary)
 
     def get_character_detail(
         self,
@@ -186,28 +191,31 @@ class SessionReferenceApplicationService:
         character_id: int,
         detail_id: int,
     ) -> CharacterDetail:
-        self._require_resource(locator, SessionReferenceResource.CHARACTERS)
+        locator = _normalized_locator(locator)
         normalized_character_id = _positive_id(character_id, "character_id")
         normalized_detail_id = _positive_id(detail_id, "detail_id")
-        detail = self._scoped_call(
-            lambda: self._data.get_character_detail(
+        with self._snapshot(
+            locator,
+            SessionReferenceResource.CHARACTERS,
+        ):
+            detail = self._data.get_character_detail(
                 locator,
                 normalized_character_id,
                 normalized_detail_id,
             )
-        )
-        if detail is None:
-            raise SessionReferenceNotFoundError(
-                f"Character detail is no longer available: {normalized_detail_id}"
+            if detail is None:
+                raise SessionReferenceNotFoundError(
+                    "Character detail is no longer available: "
+                    f"{normalized_detail_id}"
+                )
+            return CharacterDetail(
+                id=detail.detail_id,
+                character_id=detail.character_id,
+                title=detail.name,
+                content=detail.content,
+                version=detail.version,
+                updated_at=detail.updated_at,
             )
-        return CharacterDetail(
-            id=detail.detail_id,
-            character_id=detail.character_id,
-            title=detail.name,
-            content=detail.content,
-            version=detail.version,
-            updated_at=detail.updated_at,
-        )
 
     def list_status_tables(
         self,
@@ -217,65 +225,69 @@ class SessionReferenceApplicationService:
         page_size: int = 8,
         character_id: int | None = None,
     ) -> ReferencePage[StatusTableSummary]:
-        self._require_resource(
-            locator,
-            SessionReferenceResource.STATUS_TABLES,
-        )
+        locator = _normalized_locator(locator)
         normalized_character_id = (
             _positive_id(character_id, "character_id")
             if character_id is not None
             else None
         )
-        if normalized_character_id is not None and self._scoped_call(
-            lambda: self._data.get_character(locator, normalized_character_id)
-        ) is None:
-            raise SessionReferenceNotFoundError(
-                f"Character is no longer available: {normalized_character_id}"
-            )
         page, page_size = self._validate_page(page, page_size)
-        order = self._status_order(locator)
-        result = self._scoped_call(
-            lambda: self._data.list_status_tables(
+        with self._snapshot(
+            locator,
+            SessionReferenceResource.STATUS_TABLES,
+        ):
+            if (
+                normalized_character_id is not None
+                and self._data.get_character(
+                    locator,
+                    normalized_character_id,
+                )
+                is None
+            ):
+                raise SessionReferenceNotFoundError(
+                    "Character is no longer available: "
+                    f"{normalized_character_id}"
+                )
+            order = self._status_order(locator)
+            result = self._data.list_status_tables(
                 locator,
                 page=page,
                 page_size=page_size,
                 character_id=normalized_character_id,
                 order=order,
             )
-        )
-        return _data_page(result, _status_summary)
+            return _data_page(result, _status_summary)
 
     def get_status_table(
         self,
         locator: SessionReferenceLocator,
         table_id: int,
     ) -> StatusTableDetail:
-        self._require_resource(
+        locator = _normalized_locator(locator)
+        normalized_id = _positive_id(table_id, "table_id")
+        with self._snapshot(
             locator,
             SessionReferenceResource.STATUS_TABLES,
-        )
-        normalized_id = _positive_id(table_id, "table_id")
-        table = self._scoped_call(
-            lambda: self._data.get_status_table(locator, normalized_id)
-        )
-        if table is None:
-            raise SessionReferenceNotFoundError(
-                f"Status table is no longer available: {normalized_id}"
+        ):
+            table = self._data.get_status_table(locator, normalized_id)
+            if table is None:
+                raise SessionReferenceNotFoundError(
+                    f"Status table is no longer available: {normalized_id}"
+                )
+            return StatusTableDetail(
+                id=table.table_id,
+                name=table.name,
+                description=table.description,
+                kind=str(table.status_kind),
+                character_id=table.associated_character_id,
+                character_name=table.associated_character_name,
+                rows=tuple(
+                    StatusRow(key=row.key, value=row.value)
+                    for row in table.document.rows
+                ),
+                version=table.version,
+                updated_at=table.updated_at,
             )
-        return StatusTableDetail(
-            id=table.table_id,
-            name=table.name,
-            description=table.description,
-            kind=str(table.status_kind),
-            character_id=table.associated_character_id,
-            character_name=table.associated_character_name,
-            rows=tuple(
-                StatusRow(key=row.key, value=row.value)
-                for row in table.document.rows
-            ),
-            version=table.version,
-            updated_at=table.updated_at,
-        )
 
     def list_summaries(
         self,
@@ -284,41 +296,45 @@ class SessionReferenceApplicationService:
         page: int = 1,
         page_size: int = 8,
     ) -> ReferencePage[SummarySummary]:
-        self._require_resource(locator, SessionReferenceResource.SUMMARIES)
+        locator = _normalized_locator(locator)
         page, page_size = self._validate_page(page, page_size)
-        documents = self._scoped_call(
-            lambda: self._summaries.list_summaries(locator)
-        )
-        return _sequence_page(
-            documents,
-            page=page,
-            page_size=page_size,
-            project=lambda document: _summary_summary(
-                document,
-                excerpt_limit=self._policy.excerpt_limit,
-            ),
-        )
+        with self._snapshot(
+            locator,
+            SessionReferenceResource.SUMMARIES,
+        ):
+            documents = self._summaries.list_summaries(locator)
+            return _sequence_page(
+                documents,
+                page=page,
+                page_size=page_size,
+                project=lambda document: _summary_summary(
+                    document,
+                    excerpt_limit=self._policy.excerpt_limit,
+                ),
+            )
 
     def get_summary(
         self,
         locator: SessionReferenceLocator,
         summary_id: str,
     ) -> SummaryDetail:
-        self._require_resource(locator, SessionReferenceResource.SUMMARIES)
+        locator = _normalized_locator(locator)
         normalized_id = str(summary_id or "").strip()
         if not normalized_id:
             raise SessionReferenceNotFoundError("Summary id must not be empty")
-        document = self._scoped_call(
-            lambda: self._summaries.get_summary(locator, normalized_id)
-        )
-        if document is None:
-            raise SessionReferenceNotFoundError(
-                f"Summary is no longer available: {normalized_id}"
+        with self._snapshot(
+            locator,
+            SessionReferenceResource.SUMMARIES,
+        ):
+            document = self._summaries.get_summary(locator, normalized_id)
+            if document is None:
+                raise SessionReferenceNotFoundError(
+                    f"Summary is no longer available: {normalized_id}"
+                )
+            return _summary_detail(
+                document,
+                excerpt_limit=self._policy.excerpt_limit,
             )
-        return _summary_detail(
-            document,
-            excerpt_limit=self._policy.excerpt_limit,
-        )
 
     def list_story_memories(
         self,
@@ -327,46 +343,47 @@ class SessionReferenceApplicationService:
         page: int = 1,
         page_size: int = 8,
     ) -> ReferencePage[StoryMemorySummary]:
-        self._require_resource(
+        locator = _normalized_locator(locator)
+        page, page_size = self._validate_page(page, page_size)
+        with self._snapshot(
             locator,
             SessionReferenceResource.STORY_MEMORIES,
-        )
-        page, page_size = self._validate_page(page, page_size)
-        result = self._scoped_call(
-            lambda: self._story_memories.list_reference_page(
+        ):
+            result = self._story_memories.list_reference_page(
                 locator,
                 page=page,
                 page_size=page_size,
             )
-        )
-        return _reference_page(
-            items=tuple(self._story_memory_summary(item) for item in result.items),
-            page=result.page,
-            page_size=result.page_size,
-            total=result.total,
-        )
+            return _reference_page(
+                items=tuple(
+                    self._story_memory_summary(item)
+                    for item in result.items
+                ),
+                page=result.page,
+                page_size=result.page_size,
+                total=result.total,
+            )
 
     def get_story_memory(
         self,
         locator: SessionReferenceLocator,
         memory_id: int,
     ) -> StoryMemoryDetail:
-        self._require_resource(
+        locator = _normalized_locator(locator)
+        normalized_id = _positive_id(memory_id, "memory_id")
+        with self._snapshot(
             locator,
             SessionReferenceResource.STORY_MEMORIES,
-        )
-        normalized_id = _positive_id(memory_id, "memory_id")
-        memory = self._scoped_call(
-            lambda: self._story_memories.get_reference(
+        ):
+            memory = self._story_memories.get_reference(
                 locator,
                 normalized_id,
             )
-        )
-        if memory is None:
-            raise SessionReferenceNotFoundError(
-                f"Story Memory is no longer available: {normalized_id}"
-            )
-        return self._story_memory_detail(memory)
+            if memory is None:
+                raise SessionReferenceNotFoundError(
+                    f"Story Memory is no longer available: {normalized_id}"
+                )
+            return self._story_memory_detail(memory)
 
     def list_persistent_memories(
         self,
@@ -375,78 +392,71 @@ class SessionReferenceApplicationService:
         page: int = 1,
         page_size: int = 8,
     ) -> ReferencePage[PersistentMemorySummary]:
-        self._require_resource(
+        locator = _normalized_locator(locator)
+        page, page_size = self._validate_page(page, page_size)
+        with self._snapshot(
             locator,
             SessionReferenceResource.PERSISTENT_MEMORIES,
-        )
-        page, page_size = self._validate_page(page, page_size)
-        memories = self._scoped_call(
-            lambda: self._persistent_memories.list_memories(locator)
-        )
-        return _sequence_page(
-            memories,
-            page=page,
-            page_size=page_size,
-            project=self._persistent_memory_summary,
-        )
+        ):
+            memories = self._persistent_memories.list_memories(locator)
+            return _sequence_page(
+                memories,
+                page=page,
+                page_size=page_size,
+                project=self._persistent_memory_summary,
+            )
 
     def get_persistent_memory(
         self,
         locator: SessionReferenceLocator,
         memory_id: str,
     ) -> PersistentMemoryDetail:
-        self._require_resource(
-            locator,
-            SessionReferenceResource.PERSISTENT_MEMORIES,
-        )
+        locator = _normalized_locator(locator)
         normalized_id = str(memory_id or "").strip()
         if not normalized_id:
             raise SessionReferenceNotFoundError(
                 "Persistent Memory id must not be empty"
             )
-        memory = self._scoped_call(
-            lambda: self._persistent_memories.get_memory(
+        with self._snapshot(
+            locator,
+            SessionReferenceResource.PERSISTENT_MEMORIES,
+        ):
+            memory = self._persistent_memories.get_memory(
                 locator,
                 normalized_id,
             )
-        )
-        if memory is None:
-            raise SessionReferenceNotFoundError(
-                f"Persistent Memory is no longer available: {normalized_id}"
-            )
-        return self._persistent_memory_detail(memory)
+            if memory is None:
+                raise SessionReferenceNotFoundError(
+                    "Persistent Memory is no longer available: "
+                    f"{normalized_id}"
+                )
+            return self._persistent_memory_detail(memory)
 
-    def _require_scope(self, locator: SessionReferenceLocator):  # noqa: ANN202
+    @contextmanager
+    def _snapshot(
+        self,
+        locator: SessionReferenceLocator,
+        resource: SessionReferenceResource | None = None,
+    ) -> Iterator[DataSessionReferenceScope]:
         try:
-            scope = self._data.require_scope(locator)
+            with self._data.transaction():
+                scope = self._data.require_scope(locator)
+                if scope.lifecycle != SESSION_LIFECYCLE_READY:
+                    raise SessionReferenceUnavailableError(
+                        f"Session is not ready: {locator.session_id}"
+                    )
+                if (
+                    resource is not None
+                    and resource not in self._policy.enabled_resources
+                ):
+                    raise SessionReferenceResourceDisabledError(
+                        "Session reference resource is disabled: "
+                        f"{resource.value}"
+                    )
+                yield scope
         except FileNotFoundError as exc:
             raise SessionReferenceUnavailableError(
                 "Session is missing or does not match the requested scope"
-            ) from exc
-        if scope.lifecycle != SESSION_LIFECYCLE_READY:
-            raise SessionReferenceUnavailableError(
-                f"Session is not ready: {locator.session_id}"
-            )
-        return scope
-
-    def _require_resource(
-        self,
-        locator: SessionReferenceLocator,
-        resource: SessionReferenceResource,
-    ):
-        scope = self._require_scope(locator)
-        if resource not in self._policy.enabled_resources:
-            raise SessionReferenceResourceDisabledError(
-                f"Session reference resource is disabled: {resource.value}"
-            )
-        return scope
-
-    def _scoped_call(self, operation: Callable[[], T]) -> T:
-        try:
-            return operation()
-        except FileNotFoundError as exc:
-            raise SessionReferenceUnavailableError(
-                "Session disappeared or no longer matches the requested scope"
             ) from exc
 
     def _validate_page(self, page: int, page_size: int) -> tuple[int, int]:
@@ -469,9 +479,7 @@ class SessionReferenceApplicationService:
     ) -> SessionReferenceStatusOrder:
         return SessionReferenceStatusOrder(
             status_kind_order=("scene", "normal"),
-            ordered_character_ids=self._scoped_call(
-                lambda: self._data.list_character_order_ids(locator)
-            ),
+            ordered_character_ids=self._data.list_character_order_ids(locator),
             associated_first=True,
         )
 
@@ -605,7 +613,10 @@ def _summary_detail(
     return SummaryDetail(**summary.__dict__, text=document.text)
 
 
-def _data_page(result, project: Callable[[object], U]) -> ReferencePage[U]:  # noqa: ANN001
+def _data_page(  # noqa: ANN001
+    result,
+    project: Callable[[object], U],
+) -> ReferencePage[U]:
     return _reference_page(
         items=tuple(project(item) for item in result.items),
         page=result.page,
@@ -654,6 +665,25 @@ def _reference_page(
         page_size=page_size,
         total=total,
         total_pages=total_pages,
+    )
+
+
+def _normalized_locator(
+    locator: SessionReferenceLocator,
+) -> SessionReferenceLocator:
+    if not isinstance(locator, SessionReferenceLocator):
+        raise TypeError("locator must be a SessionReferenceLocator")
+    session_id = str(locator.session_id or "").strip()
+    workspace_id = str(locator.workspace_id or "").strip()
+    if not session_id:
+        raise ValueError("locator.session_id must not be empty")
+    if not workspace_id:
+        raise ValueError("locator.workspace_id must not be empty")
+    story_id = _positive_id(locator.story_id, "locator.story_id")
+    return SessionReferenceLocator(
+        session_id=session_id,
+        workspace_id=workspace_id,
+        story_id=story_id,
     )
 
 

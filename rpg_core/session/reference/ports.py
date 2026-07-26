@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import ContextManager, Protocol
 
 from rpg_core.summary.reference import ResolvedSummaryDocument
 from rpg_data.model import memory as memory_models
@@ -40,6 +40,8 @@ from rpg_core.session.reference.models import (
 
 class SessionReferenceDataPort(Protocol):
     """Business-neutral, Session-scoped read models supplied by ``rpg_data``."""
+
+    def transaction(self) -> ContextManager[None]: ...
 
     def require_scope(
         self,

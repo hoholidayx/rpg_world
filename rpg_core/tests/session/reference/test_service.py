@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 
 import pytest
@@ -56,6 +57,8 @@ def _page(items, *, page: int, page_size: int):  # noqa: ANN001, ANN202
 
 class FakeData:
     def __init__(self, *, lifecycle: str = "ready") -> None:
+        self.transaction_depth = 0
+        self.transaction_entries = 0
         self.scope = SessionReferenceScope(
             locator=LOCATOR,
             lifecycle=lifecycle,
@@ -142,7 +145,17 @@ class FakeData:
         )
         self.last_status_order: SessionReferenceStatusOrder | None = None
 
+    @contextmanager
+    def transaction(self):  # noqa: ANN201
+        self.transaction_entries += 1
+        self.transaction_depth += 1
+        try:
+            yield
+        finally:
+            self.transaction_depth -= 1
+
     def require_scope(self, locator):  # noqa: ANN001, ANN201
+        assert self.transaction_depth > 0
         if locator != LOCATOR:
             raise FileNotFoundError
         return self.scope
@@ -531,25 +544,139 @@ def test_provider_failure_does_not_poison_other_resource_reads() -> None:
         def list_memories(self, _locator):  # noqa: ANN001, ANN201
             raise RuntimeError("persistent memory unavailable")
 
-    summary_failure = _service(summaries=FailingSummaries())
+    summary_data = FakeData()
+    summary_failure = _service(summary_data, summaries=FailingSummaries())
     with pytest.raises(RuntimeError, match="summary unavailable"):
         summary_failure.list_summaries(LOCATOR)
+    assert summary_data.transaction_depth == 0
     assert summary_failure.list_characters(LOCATOR).total == 2
     assert summary_failure.list_story_memories(LOCATOR).total == 1
 
-    story_failure = _service(story_memories=FailingStoryMemories())
+    story_data = FakeData()
+    story_failure = _service(
+        story_data,
+        story_memories=FailingStoryMemories(),
+    )
     with pytest.raises(RuntimeError, match="story memory unavailable"):
         story_failure.list_story_memories(LOCATOR)
+    assert story_data.transaction_depth == 0
     assert story_failure.list_summaries(LOCATOR).total == 2
     assert story_failure.list_persistent_memories(LOCATOR).total == 1
 
+    persistent_data = FakeData()
     persistent_failure = _service(
+        persistent_data,
         persistent_memories=FailingPersistentMemories()
     )
     with pytest.raises(RuntimeError, match="persistent memory unavailable"):
         persistent_failure.list_persistent_memories(LOCATOR)
+    assert persistent_data.transaction_depth == 0
     assert persistent_failure.list_status_tables(LOCATOR).total == 2
     assert persistent_failure.list_summaries(LOCATOR).total == 2
+
+
+def test_ready_state_is_fixed_at_snapshot_start() -> None:
+    class SnapshotData(FakeData):
+        def __init__(self) -> None:
+            super().__init__()
+            self._snapshot_scope = None
+
+        @contextmanager
+        def transaction(self):  # noqa: ANN201
+            self.transaction_entries += 1
+            self.transaction_depth += 1
+            self._snapshot_scope = self.scope
+            try:
+                yield
+            finally:
+                self._snapshot_scope = None
+                self.transaction_depth -= 1
+
+        def require_scope(self, locator):  # noqa: ANN001, ANN201
+            assert self.transaction_depth > 0
+            if locator != LOCATOR:
+                raise FileNotFoundError
+            return self._snapshot_scope
+
+        def list_characters(
+            self,
+            locator,
+            *,
+            page,
+            page_size,
+        ):  # noqa: ANN001, ANN201
+            self.scope = replace(self.scope, lifecycle="deleting")
+            return super().list_characters(
+                locator,
+                page=page,
+                page_size=page_size,
+            )
+
+    data = SnapshotData()
+    service = _service(data)
+
+    current = service.list_characters(LOCATOR)
+
+    assert current.total == 2
+    assert data.transaction_depth == 0
+    with pytest.raises(SessionReferenceUnavailableError):
+        service.list_characters(LOCATOR)
+
+
+def test_external_providers_execute_inside_the_reference_snapshot() -> None:
+    data = FakeData()
+
+    class TransactionAwareSummaries(FakeSummaries):
+        def list_summaries(self, locator):  # noqa: ANN001, ANN201
+            assert data.transaction_depth == 1
+            return super().list_summaries(locator)
+
+        def get_summary(self, locator, summary_id):  # noqa: ANN001, ANN201
+            assert data.transaction_depth == 1
+            return super().get_summary(locator, summary_id)
+
+    class TransactionAwareStoryMemories(FakeStoryMemories):
+        def list_reference_page(  # noqa: ANN002, ANN003, ANN201
+            self,
+            *args,
+            **kwargs,
+        ):
+            assert data.transaction_depth == 1
+            return super().list_reference_page(*args, **kwargs)
+
+        def get_reference(  # noqa: ANN002, ANN003, ANN201
+            self,
+            *args,
+            **kwargs,
+        ):
+            assert data.transaction_depth == 1
+            return super().get_reference(*args, **kwargs)
+
+    class TransactionAwarePersistentMemories(FakePersistentMemories):
+        def list_memories(self, locator):  # noqa: ANN001, ANN201
+            assert data.transaction_depth == 1
+            return super().list_memories(locator)
+
+        def get_memory(self, locator, memory_id):  # noqa: ANN001, ANN201
+            assert data.transaction_depth == 1
+            return super().get_memory(locator, memory_id)
+
+    service = _service(
+        data,
+        summaries=TransactionAwareSummaries(),
+        story_memories=TransactionAwareStoryMemories(),
+        persistent_memories=TransactionAwarePersistentMemories(),
+    )
+
+    service.list_summaries(LOCATOR)
+    service.get_summary(LOCATOR, "overall")
+    service.list_story_memories(LOCATOR)
+    service.get_story_memory(LOCATOR, 40)
+    service.list_persistent_memories(LOCATOR)
+    service.get_persistent_memory(LOCATOR, "persistent-1")
+
+    assert data.transaction_depth == 0
+    assert data.transaction_entries == 6
 
 
 def test_immutable_policy_can_replace_resource_profile() -> None:

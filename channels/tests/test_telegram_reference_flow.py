@@ -12,10 +12,13 @@ from channels.telegram.reference_flow import (
     REFERENCE_ACTION_CHARACTER_DETAIL,
     REFERENCE_ACTION_CHARACTER_DETAIL_LIST,
     REFERENCE_ACTION_CHARACTER_LIST,
+    REFERENCE_ACTION_PERSISTENT_MEMORY_DETAIL,
     REFERENCE_ACTION_PERSISTENT_MEMORY_LIST,
+    REFERENCE_ACTION_STATUS_DETAIL,
     REFERENCE_ACTION_STATUS_LIST,
     REFERENCE_ACTION_STORY_MEMORY_LIST,
     REFERENCE_ACTION_STORY_MEMORY_DETAIL,
+    REFERENCE_ACTION_SUMMARY_DETAIL,
     REFERENCE_ACTION_SUMMARY_LIST,
     TelegramReferenceFlow,
 )
@@ -467,9 +470,237 @@ async def test_atomic_long_markdown_link_falls_back_to_plain_text_pages() -> Non
 
     assert len(view.html) <= 4096
     assert "正文 1/" in view.html
+    assert view.html.startswith("<b>链接资料</b>")
     assert "[x](" in view.html
     assert "<a " not in view.html
     assert "下一段 ›" in _button_texts(view)
+
+
+async def test_structural_fields_are_always_literal_plain_text() -> None:
+    from channels.telegram.action_registry import TelegramActionRegistry
+
+    registry = TelegramActionRegistry()
+    reader = _ReferenceReader()
+    link = "[管理员](tg://user?id=123)"
+    reader.get_scope = AsyncMock(
+        return_value=SessionReferenceScope(
+            locator=_LOCATOR,
+            title=f"{link}<i>会话</i>",
+            lifecycle="ready",
+            player_character_id=1,
+            version=1,
+            updated_at="2026-07-26",
+        )
+    )
+    reader.characters = [
+        CharacterSummary(
+            id=1,
+            name=f"{link}<u>角色</u>",
+            description="<code>简介</code>",
+            is_player=True,
+            details_count=0,
+            version=1,
+            updated_at="2026-07-26",
+        ),
+        CharacterSummary(
+            id=2,
+            name="[跨字段",
+            description="](tg://user?id=456)",
+            is_player=False,
+            details_count=0,
+            version=1,
+            updated_at="2026-07-26",
+        ),
+    ]
+    reader.status_items = [
+        StatusTableSummary(
+            id=10,
+            name=link,
+            description=link,
+            kind="normal",
+            character_id=1,
+            character_name=link,
+            version=1,
+            updated_at="2026-07-26",
+        )
+    ]
+    reader.get_status_table = AsyncMock(
+        return_value=StatusTableDetail(
+            id=10,
+            name=link,
+            description="普通描述",
+            kind="scene",
+            character_id=None,
+            character_name=None,
+            rows=(
+                StatusRow(key=link, value="<i>午夜</i>"),
+            ),
+            version=1,
+            updated_at="2026-07-26",
+        )
+    )
+    reader.get_summary = AsyncMock(
+        return_value=SummaryDetail(
+            **{
+                **reader.summary.__dict__,
+                "title": link,
+                "time": link,
+                "location": "<u>旧城</u>",
+                "characters": (link,),
+            },
+            text="普通归纳正文",
+        )
+    )
+    reader.get_story_memory = AsyncMock(
+        return_value=StoryMemoryDetail(
+            **{
+                **reader.story_memory.__dict__,
+                "title": link,
+                "memory_kind": link,
+                "epistemic_status": "<i>confirmed</i>",
+                "evidence": (
+                    EvidenceReference(
+                        turn_id="[turn](tg://user?id=789)",  # type: ignore[arg-type]
+                        message_id="<u>msg</u>",  # type: ignore[arg-type]
+                    ),
+                ),
+            },
+            text="普通记忆正文",
+        )
+    )
+    reader.get_persistent_memory = AsyncMock(
+        return_value=PersistentMemoryDetail(
+            **{
+                **reader.persistent_memory.__dict__,
+                "title": link,
+                "memory_kind": link,
+                "epistemic_status": "<i>confirmed</i>",
+            },
+            text="普通持久记忆正文",
+        )
+    )
+    flow = TelegramReferenceFlow(registry, reader)
+
+    views = [
+        await flow.render_root(_LOCATOR, "123"),
+        await flow.render_action(
+            _LOCATOR,
+            "123",
+            _action(
+                flow,
+                registry,
+                REFERENCE_ACTION_CHARACTER_LIST,
+                page=1,
+            ),
+        ),
+        await flow.render_action(
+            _LOCATOR,
+            "123",
+            _action(
+                flow,
+                registry,
+                REFERENCE_ACTION_STATUS_LIST,
+                page=1,
+            ),
+        ),
+        await flow.render_action(
+            _LOCATOR,
+            "123",
+            _action(
+                flow,
+                registry,
+                REFERENCE_ACTION_STATUS_DETAIL,
+                table_id=10,
+                list_page=1,
+                status_version=1,
+            ),
+        ),
+        await flow.render_action(
+            _LOCATOR,
+            "123",
+            _action(
+                flow,
+                registry,
+                REFERENCE_ACTION_SUMMARY_DETAIL,
+                summary_id="overall",
+                list_page=1,
+            ),
+        ),
+        await flow.render_action(
+            _LOCATOR,
+            "123",
+            _action(
+                flow,
+                registry,
+                REFERENCE_ACTION_STORY_MEMORY_DETAIL,
+                memory_id=20,
+                list_page=1,
+            ),
+        ),
+        await flow.render_action(
+            _LOCATOR,
+            "123",
+            _action(
+                flow,
+                registry,
+                REFERENCE_ACTION_PERSISTENT_MEMORY_DETAIL,
+                memory_id="memory-1",
+                list_page=1,
+            ),
+        ),
+    ]
+
+    assert all("<a " not in view.html for view in views)
+    assert all("<i>" not in view.html for view in views)
+    assert all("<u>" not in view.html for view in views)
+    assert all("<code>" not in view.html for view in views)
+    assert all(len(view.html) <= 4096 for view in views)
+    assert link in views[0].html
+    assert "[跨字段" in views[1].html
+    assert "](tg://user?id=456)" in views[1].html
+    assert "角色状态 · [管理员](tg://user?id=123)" in views[2].html
+    assert "&lt;i&gt;午夜&lt;/i&gt;" in views[3].html
+    assert "&lt;u&gt;旧城&lt;/u&gt;" in views[4].html
+    assert "[turn](tg://user?id=789)" in views[5].html
+    assert "&lt;u&gt;msg&lt;/u&gt;" in views[5].html
+
+
+async def test_detail_body_keeps_markdown_support() -> None:
+    from channels.telegram.action_registry import TelegramActionRegistry
+
+    registry = TelegramActionRegistry()
+    reader = _ReferenceReader()
+    reader.get_character_detail = AsyncMock(
+        return_value=CharacterDetail(
+            id=1,
+            character_id=1,
+            title="[标题](tg://user?id=123)",
+            content="**正文加粗** 与 [外部链接](https://example.com)",
+            version=1,
+            updated_at="2026-07-26",
+        )
+    )
+    flow = TelegramReferenceFlow(registry, reader)
+
+    view = await flow.render_action(
+        _LOCATOR,
+        "123",
+        _action(
+            flow,
+            registry,
+            REFERENCE_ACTION_CHARACTER_DETAIL,
+            character_id=1,
+            detail_id=1,
+            detail_list_page=1,
+            character_list_page=1,
+            detail_version=1,
+        ),
+    )
+
+    assert "[标题](tg://user?id=123)" in view.html
+    assert '<a href="tg://user?id=123">' not in view.html
+    assert "<b>正文加粗</b>" in view.html
+    assert '<a href="https://example.com">外部链接</a>' in view.html
 
 
 async def test_detail_callbacks_reject_changed_versions() -> None:

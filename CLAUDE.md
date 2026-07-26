@@ -369,7 +369,10 @@ Telegram 例外：入口卡、角色按钮、`/sessions`、无参数 `/session_s
 现有 `/session_switch <id>` 命令切换，确认 active session 后才 pin 当前 chat。
 `/info` 与资料菜单也是渠道只读交互：Adapter 只依赖异步 `SessionReferenceReader`，每次查询携带
 完整 `session_id + workspace_id + story_id` locator。公共业务层负责玩家可见投影，`rpg_data`
-负责归属、分页和批量关联；Telegram 只负责按钮、HTML、分页和错误文案。
+负责归属、分页和批量关联；Telegram 只负责按钮、HTML、分页和错误文案。每次资料读取以首次
+scope 查询建立的 ready 数据库快照为准，当前快照完成后才观察 lifecycle 变化；下一次读取必须拒绝
+非 ready Session。菜单标题、资源名称、列表简介、分组、metadata、状态 key/value 和 Evidence
+一律作为纯文本转义，只有详情正文允许 Markdown。
 
 ### Telegram 渠道当前能力
 

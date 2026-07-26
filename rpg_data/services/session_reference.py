@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from peewee import JOIN, Case, Database, fn
@@ -22,6 +24,7 @@ from rpg_data.settings import (
     resolve_workspace_relative_path,
     resolve_workspace_root,
 )
+from rpg_data.transaction import DataTransactionMode
 
 __all__ = ["SessionReferenceDataService"]
 
@@ -38,6 +41,13 @@ class SessionReferenceDataService:
     def __init__(self, database: Database) -> None:
         self._database = database
         bind_database(database)
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Open a read snapshot; nested calls use Peewee savepoints."""
+
+        with self._database.atomic(DataTransactionMode.DEFERRED.value):
+            yield
 
     def require_scope(
         self,
@@ -82,46 +92,48 @@ class SessionReferenceDataService:
         page_size: int,
     ) -> models.ReferenceDataPage[models.SessionReferenceCharacter]:
         page, page_size = _validated_page(page, page_size)
-        self.require_scope(locator)
-        where_clause = _character_scope_clause(locator)
-        total = (
-            StoryCharacterRecord.select(StoryCharacterRecord.id)
-            .join(
-                SessionRecord,
-                on=_character_session_join_clause(),
+        with self.transaction():
+            self.require_scope(locator)
+            where_clause = _character_scope_clause(locator)
+            total = (
+                StoryCharacterRecord.select(StoryCharacterRecord.id)
+                .join(
+                    SessionRecord,
+                    on=_character_session_join_clause(),
+                )
+                .where(where_clause)
+                .count()
             )
-            .where(where_clause)
-            .count()
-        )
-        rows = (
-            _character_rows_query(locator)
-            .order_by(
-                StoryCharacterRecord.sort_order,
-                StoryCharacterRecord.id,
+            rows = tuple(
+                _character_rows_query(locator)
+                .order_by(
+                    StoryCharacterRecord.sort_order,
+                    StoryCharacterRecord.id,
+                )
+                .paginate(page, page_size)
+                .dicts()
             )
-            .paginate(page, page_size)
-            .dicts()
-        )
-        return models.ReferenceDataPage(
-            items=tuple(_character_from_row(row) for row in rows),
-            page=page,
-            page_size=page_size,
-            total=total,
-        )
+            return models.ReferenceDataPage(
+                items=tuple(_character_from_row(row) for row in rows),
+                page=page,
+                page_size=page_size,
+                total=total,
+            )
 
     def get_character(
         self,
         locator: models.SessionReferenceLocator,
         character_id: int,
     ) -> models.SessionReferenceCharacter | None:
-        self.require_scope(locator)
-        row = (
-            _character_rows_query(locator)
-            .where(StoryCharacterRecord.id == int(character_id))
-            .dicts()
-            .first()
-        )
-        return _character_from_row(row) if row is not None else None
+        with self.transaction():
+            self.require_scope(locator)
+            row = (
+                _character_rows_query(locator)
+                .where(StoryCharacterRecord.id == int(character_id))
+                .dicts()
+                .first()
+            )
+            return _character_from_row(row) if row is not None else None
 
     def list_character_order_ids(
         self,
@@ -129,21 +141,24 @@ class SessionReferenceDataService:
     ) -> tuple[int, ...]:
         """Return every scoped character ID in persisted card order."""
 
-        self.require_scope(locator)
-        rows = (
-            StoryCharacterRecord.select(StoryCharacterRecord.id.alias("_id"))
-            .join(
-                SessionRecord,
-                on=_character_session_join_clause(),
+        with self.transaction():
+            self.require_scope(locator)
+            rows = tuple(
+                StoryCharacterRecord.select(
+                    StoryCharacterRecord.id.alias("_id")
+                )
+                .join(
+                    SessionRecord,
+                    on=_character_session_join_clause(),
+                )
+                .where(_character_scope_clause(locator))
+                .order_by(
+                    StoryCharacterRecord.sort_order,
+                    StoryCharacterRecord.id,
+                )
+                .dicts()
             )
-            .where(_character_scope_clause(locator))
-            .order_by(
-                StoryCharacterRecord.sort_order,
-                StoryCharacterRecord.id,
-            )
-            .dicts()
-        )
-        return tuple(int(row["_id"]) for row in rows)
+            return tuple(int(row["_id"]) for row in rows)
 
     def list_character_details(
         self,
@@ -154,34 +169,42 @@ class SessionReferenceDataService:
         page_size: int,
     ) -> models.ReferenceDataPage[models.SessionReferenceCharacterDetailItem]:
         page, page_size = _validated_page(page, page_size)
-        self.require_scope(locator)
-        where_clause = _character_detail_scope_clause(locator, character_id)
-        total = (
-            StoryCharacterDetailRecord.select(StoryCharacterDetailRecord.id)
-            .join(StoryCharacterRecord)
-            .switch(StoryCharacterRecord)
-            .join(
-                SessionRecord,
-                on=_character_session_join_clause(),
+        with self.transaction():
+            self.require_scope(locator)
+            where_clause = _character_detail_scope_clause(
+                locator,
+                character_id,
             )
-            .where(where_clause)
-            .count()
-        )
-        rows = (
-            _character_detail_item_rows_query(locator, character_id)
-            .order_by(
-                StoryCharacterDetailRecord.sort_order,
-                StoryCharacterDetailRecord.id,
+            total = (
+                StoryCharacterDetailRecord.select(
+                    StoryCharacterDetailRecord.id
+                )
+                .join(StoryCharacterRecord)
+                .switch(StoryCharacterRecord)
+                .join(
+                    SessionRecord,
+                    on=_character_session_join_clause(),
+                )
+                .where(where_clause)
+                .count()
             )
-            .paginate(page, page_size)
-            .dicts()
-        )
-        return models.ReferenceDataPage(
-            items=tuple(_character_detail_item_from_row(row) for row in rows),
-            page=page,
-            page_size=page_size,
-            total=total,
-        )
+            rows = tuple(
+                _character_detail_item_rows_query(locator, character_id)
+                .order_by(
+                    StoryCharacterDetailRecord.sort_order,
+                    StoryCharacterDetailRecord.id,
+                )
+                .paginate(page, page_size)
+                .dicts()
+            )
+            return models.ReferenceDataPage(
+                items=tuple(
+                    _character_detail_item_from_row(row) for row in rows
+                ),
+                page=page,
+                page_size=page_size,
+                total=total,
+            )
 
     def get_character_detail(
         self,
@@ -189,14 +212,17 @@ class SessionReferenceDataService:
         character_id: int,
         detail_id: int,
     ) -> models.SessionReferenceCharacterDetail | None:
-        self.require_scope(locator)
-        row = (
-            _character_detail_rows_query(locator, character_id)
-            .where(StoryCharacterDetailRecord.id == int(detail_id))
-            .dicts()
-            .first()
-        )
-        return _character_detail_from_row(row) if row is not None else None
+        with self.transaction():
+            self.require_scope(locator)
+            row = (
+                _character_detail_rows_query(locator, character_id)
+                .where(StoryCharacterDetailRecord.id == int(detail_id))
+                .dicts()
+                .first()
+            )
+            return (
+                _character_detail_from_row(row) if row is not None else None
+            )
 
     def list_status_tables(
         self,
@@ -208,105 +234,119 @@ class SessionReferenceDataService:
         order: models.SessionReferenceStatusOrder | None = None,
     ) -> models.ReferenceDataPage[models.SessionReferenceStatusTableItem]:
         page, page_size = _validated_page(page, page_size)
-        self.require_scope(locator)
-        where_clause = _status_scope_clause(locator)
-        if character_id is not None:
-            where_clause &= _status_character_id_expression() == int(character_id)
-        total = (
-            SessionStatusTableRecord.select(SessionStatusTableRecord.id)
-            .join(
-                SessionRecord,
-                on=SessionStatusTableRecord.session == SessionRecord.id,
+        with self.transaction():
+            self.require_scope(locator)
+            where_clause = _status_scope_clause(locator)
+            if character_id is not None:
+                where_clause &= _status_character_id_expression() == int(
+                    character_id
+                )
+            total = (
+                SessionStatusTableRecord.select(SessionStatusTableRecord.id)
+                .join(
+                    SessionRecord,
+                    on=SessionStatusTableRecord.session == SessionRecord.id,
+                )
+                .where(where_clause)
+                .count()
             )
-            .where(where_clause)
-            .count()
-        )
-        rows_query = _status_rows_query(locator, include_document=False)
-        if character_id is not None:
-            rows_query = rows_query.where(
-                _status_character_id_expression() == int(character_id)
+            rows_query = _status_rows_query(
+                locator,
+                include_document=False,
             )
-        order_by = _status_order_by(order)
-        rows = (
-            rows_query
-            .order_by(*order_by)
-            .paginate(page, page_size)
-            .dicts()
-        )
-        return models.ReferenceDataPage(
-            items=tuple(_status_item_from_row(row) for row in rows),
-            page=page,
-            page_size=page_size,
-            total=total,
-        )
+            if character_id is not None:
+                rows_query = rows_query.where(
+                    _status_character_id_expression() == int(character_id)
+                )
+            order_by = _status_order_by(order)
+            rows = tuple(
+                rows_query.order_by(*order_by)
+                .paginate(page, page_size)
+                .dicts()
+            )
+            return models.ReferenceDataPage(
+                items=tuple(_status_item_from_row(row) for row in rows),
+                page=page,
+                page_size=page_size,
+                total=total,
+            )
 
     def get_status_table(
         self,
         locator: models.SessionReferenceLocator,
         table_id: int,
     ) -> models.SessionReferenceStatusTableDetail | None:
-        self.require_scope(locator)
-        row = (
-            _status_rows_query(locator, include_document=True)
-            .where(SessionStatusTableRecord.id == int(table_id))
-            .dicts()
-            .first()
-        )
-        return _status_detail_from_row(row) if row is not None else None
+        with self.transaction():
+            self.require_scope(locator)
+            row = (
+                _status_rows_query(locator, include_document=True)
+                .where(SessionStatusTableRecord.id == int(table_id))
+                .dicts()
+                .first()
+            )
+            return _status_detail_from_row(row) if row is not None else None
 
     def get_summary_source(
         self,
         locator: models.SessionReferenceLocator,
     ) -> models.SessionReferenceSummarySource:
-        self.require_scope(locator)
-        workspace_row = (
-            SessionRecord.select(WorkspaceRecord.root_path.alias("_root_path"))
-            .join(WorkspaceRecord)
-            .where(_session_scope_clause(locator))
-            .dicts()
-            .first()
-        )
-        if workspace_row is None:
-            raise FileNotFoundError(
-                "Session reference scope not found: "
-                f"{locator.workspace_id}/{locator.story_id}/{locator.session_id}"
-            )
-        workspace_root = resolve_workspace_root(str(workspace_row["_root_path"]))
-        runtime_dir = resolve_workspace_relative_path(
-            workspace_root,
-            Path("stories") / str(locator.story_id) / locator.session_id,
-        )
-        range_rows = (
-            SessionMessageRecord.select(
-                SessionMessageRecord.summary_batch_id.alias("_batch_id"),
-                fn.MIN(SessionMessageRecord.turn_id).alias("_turn_start"),
-                fn.MAX(SessionMessageRecord.turn_id).alias("_turn_end"),
-            )
-            .join(
-                SessionRecord,
-                on=SessionMessageRecord.session == SessionRecord.id,
-            )
-            .where(
-                _session_scope_clause(locator)
-                & (SessionMessageRecord.session == locator.session_id)
-                & (SessionMessageRecord.summary_processed == 1)
-                & SessionMessageRecord.summary_batch_id.is_null(False)
-            )
-            .group_by(SessionMessageRecord.summary_batch_id)
-            .order_by(SessionMessageRecord.summary_batch_id)
-            .dicts()
-        )
-        return models.SessionReferenceSummarySource(
-            runtime_dir=runtime_dir,
-            batch_turn_ranges=tuple(
-                models.SummaryBatchTurnRange(
-                    batch_id=int(row["_batch_id"]),
-                    turn_start=int(row["_turn_start"]),
-                    turn_end=int(row["_turn_end"]),
+        with self.transaction():
+            self.require_scope(locator)
+            workspace_row = (
+                SessionRecord.select(
+                    WorkspaceRecord.root_path.alias("_root_path")
                 )
-                for row in range_rows
-            ),
-        )
+                .join(WorkspaceRecord)
+                .where(_session_scope_clause(locator))
+                .dicts()
+                .first()
+            )
+            if workspace_row is None:
+                raise FileNotFoundError(
+                    "Session reference scope not found: "
+                    f"{locator.workspace_id}/"
+                    f"{locator.story_id}/{locator.session_id}"
+                )
+            workspace_root = resolve_workspace_root(
+                str(workspace_row["_root_path"])
+            )
+            runtime_dir = resolve_workspace_relative_path(
+                workspace_root,
+                Path("stories") / str(locator.story_id) / locator.session_id,
+            )
+            range_rows = tuple(
+                SessionMessageRecord.select(
+                    SessionMessageRecord.summary_batch_id.alias("_batch_id"),
+                    fn.MIN(SessionMessageRecord.turn_id).alias(
+                        "_turn_start"
+                    ),
+                    fn.MAX(SessionMessageRecord.turn_id).alias("_turn_end"),
+                )
+                .join(
+                    SessionRecord,
+                    on=SessionMessageRecord.session == SessionRecord.id,
+                )
+                .where(
+                    _session_scope_clause(locator)
+                    & (SessionMessageRecord.session == locator.session_id)
+                    & (SessionMessageRecord.summary_processed == 1)
+                    & SessionMessageRecord.summary_batch_id.is_null(False)
+                )
+                .group_by(SessionMessageRecord.summary_batch_id)
+                .order_by(SessionMessageRecord.summary_batch_id)
+                .dicts()
+            )
+            return models.SessionReferenceSummarySource(
+                runtime_dir=runtime_dir,
+                batch_turn_ranges=tuple(
+                    models.SummaryBatchTurnRange(
+                        batch_id=int(row["_batch_id"]),
+                        turn_start=int(row["_turn_start"]),
+                        turn_end=int(row["_turn_end"]),
+                    )
+                    for row in range_rows
+                ),
+            )
 
 
 def _session_scope_clause(locator: models.SessionReferenceLocator):

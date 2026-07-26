@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -167,6 +168,92 @@ def test_character_reference_reads_are_lightweight_paginated_and_scoped(
         data.list_characters(locator, page=0, page_size=8)
     with pytest.raises(ValueError, match="page_size"):
         data.list_characters(locator, page=1, page_size=101)
+
+
+def test_character_count_and_rows_share_one_read_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "character-snapshot.sqlite3"
+    gateway = get_data_service_gateway(database_path)
+    data = gateway.session_reference
+    locator = _locator()
+    writer = sqlite3.connect(database_path)
+    writer.execute("PRAGMA foreign_keys = ON")
+    writer.execute("PRAGMA journal_mode = WAL")
+    original_execute_sql = gateway.database.execute_sql
+    mutation_done = False
+
+    def _mutate_after_count(
+        sql: str,
+        *args: object,
+        **kwargs: object,
+    ):
+        nonlocal mutation_done
+        cursor = original_execute_sql(sql, *args, **kwargs)
+        if (
+            not mutation_done
+            and "COUNT" in sql.upper()
+            and "rpg_story_characters" in sql
+        ):
+            mutation_done = True
+            writer.execute(
+                """
+                DELETE FROM rpg_story_characters
+                WHERE workspace_id = ? AND story_id = ? AND name = ?
+                """,
+                ("demo_workspace", 1, "Alice"),
+            )
+            writer.commit()
+        return cursor
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                gateway.database,
+                "execute_sql",
+                _mutate_after_count,
+            )
+            current = data.list_characters(
+                locator,
+                page=1,
+                page_size=8,
+            )
+    finally:
+        writer.close()
+
+    assert mutation_done is True
+    assert current.total == 2
+    assert [item.name for item in current.items] == ["Bob", "Alice"]
+
+    next_snapshot = data.list_characters(locator, page=1, page_size=8)
+    assert next_snapshot.total == 1
+    assert [item.name for item in next_snapshot.items] == ["Bob"]
+
+
+def test_scope_lifecycle_is_stable_until_the_next_transaction(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "lifecycle-snapshot.sqlite3"
+    gateway = get_data_service_gateway(database_path)
+    data = gateway.session_reference
+    locator = _locator()
+    writer = sqlite3.connect(database_path)
+    writer.execute("PRAGMA journal_mode = WAL")
+
+    try:
+        with data.transaction():
+            assert data.require_scope(locator).lifecycle == "ready"
+            writer.execute(
+                "UPDATE rpg_sessions SET lifecycle = ? WHERE id = ?",
+                ("provisioning", locator.session_id),
+            )
+            writer.commit()
+            assert data.require_scope(locator).lifecycle == "ready"
+    finally:
+        writer.close()
+
+    assert data.require_scope(locator).lifecycle == "provisioning"
 
 
 def test_status_reference_reads_preserve_association_and_scope_document(
