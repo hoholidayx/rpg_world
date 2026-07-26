@@ -32,6 +32,16 @@ class BaseTool(ABC):
         """Run the tool and return a text result for the LLM."""
         ...
 
+    def render_invalid_arguments_error(self, message: str) -> str | None:
+        """Optionally render a tool-specific error for pre-dispatch JSON failures.
+
+        The registry calls this hook when arguments are malformed JSON or do
+        not decode to a named-argument object. Returning ``None`` preserves the
+        registry's legacy plain-text error behavior.
+        """
+        del message
+        return None
+
     def to_openai_schema(self) -> dict[str, object]:
         """Return the full OpenAI-compatible tool schema dict."""
         return {

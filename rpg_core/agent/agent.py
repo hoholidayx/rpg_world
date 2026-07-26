@@ -13,6 +13,7 @@ from rpg_core.agent.runtime.derivation import (
     AgentDerivationService,
     SessionDerivationPreparationResult,
 )
+from rpg_core.agent.tools.history_query import HistoryQueryService
 from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
 from rpg_core.agent.mailbox.service import AgentMailbox
 from rpg_core.agent.runtime.model import MainModelRuntime
@@ -115,9 +116,12 @@ class RPGGameAgent:
             role_snapshot_reader=role_service,
         )
         self._tool_service = AgentToolService(
-            session_id=lambda: self._lifecycle.session_id,
             resources=lambda: self._lifecycle.resources,
-            data=session_data,
+            history_query=HistoryQueryService(
+                session_id=lambda: self._lifecycle.session_id,
+                data=gateway.messages,
+                close_worker_connection=gateway.close_thread_connection,
+            ),
             extra_tools=tools,
         )
         self._session_service = AgentSessionService(

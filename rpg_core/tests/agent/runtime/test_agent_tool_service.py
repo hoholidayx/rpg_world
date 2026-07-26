@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.runtime.tools import AgentToolService
+from rpg_core.agent.tools.file_tools import FileToolSandbox, ReadFileTool, WriteFileTool
 from rpg_core.tooling.base import BaseTool
 from rpg_core.agent.turn import (
     TurnExecutionPolicy,
@@ -50,6 +53,10 @@ class _RPRuntime:
         return [self.outcome]
 
 
+class _HistoryQuery:
+    pass
+
+
 def _execution(mode: TurnMode) -> TurnExecutionSnapshot:
     request = TurnRequest.create("test", mode=mode)
     return TurnExecutionSnapshot(
@@ -61,9 +68,7 @@ def _execution(mode: TurnMode) -> TurnExecutionSnapshot:
     )
 
 
-def test_tool_service_removes_hidden_rp_tool_from_registry_and_schema(
-    tmp_path,
-) -> None:
+def test_tool_service_removes_hidden_rp_tool_from_registry_and_schema() -> None:
     scene = _Scene()
     resources = AgentContextResources(
         builder=SimpleNamespace(),
@@ -73,11 +78,9 @@ def test_tool_service_removes_hidden_rp_tool_from_registry_and_schema(
         scene_tracker=scene,
         memory_manager=None,
     )
-    data = SimpleNamespace(resolve_session_runtime_dir=lambda _sid: tmp_path)
     service = AgentToolService(
-        session_id=lambda: "s1",
         resources=lambda: resources,
-        data=data,
+        history_query=_HistoryQuery(),
         extra_tools=[_Tool("custom_read")],
     )
     service.refresh_base_registry()
@@ -109,12 +112,13 @@ def test_ooc_tool_policy_hides_state_rp_and_write_tools(tmp_path) -> None:
         scene_tracker=scene,
         memory_manager=None,
     )
-    data = SimpleNamespace(resolve_session_runtime_dir=lambda _sid: tmp_path)
     service = AgentToolService(
-        session_id=lambda: "s1",
         resources=lambda: resources,
-        data=data,
-        extra_tools=[_Tool("custom_read")],
+        history_query=_HistoryQuery(),
+        extra_tools=[
+            _Tool("custom_read"),
+            WriteFileTool(FileToolSandbox(tmp_path)),
+        ],
     )
     service.refresh_base_registry()
 
@@ -131,17 +135,10 @@ def test_ooc_tool_policy_hides_state_rp_and_write_tools(tmp_path) -> None:
     assert "rp_story_outcome" not in names
     assert "rp_visible" not in names
     assert "custom_read" in names
+    assert {"history_search", "history_read"} <= names
 
 
-async def test_tool_service_refreshes_sandbox_for_current_session(tmp_path) -> None:
-    session_id = "first"
-    roots = {
-        "first": tmp_path / "first",
-        "second": tmp_path / "second",
-    }
-    data = SimpleNamespace(
-        resolve_session_runtime_dir=lambda current: roots[current]
-    )
+def test_tool_service_replaces_default_file_tools_with_history_tools() -> None:
     resources = AgentContextResources(
         builder=SimpleNamespace(),
         character_manager=None,
@@ -151,30 +148,81 @@ async def test_tool_service_refreshes_sandbox_for_current_session(tmp_path) -> N
         memory_manager=None,
     )
     service = AgentToolService(
-        session_id=lambda: session_id,
         resources=lambda: resources,
-        data=data,
+        history_query=_HistoryQuery(),
     )
 
     service.refresh_base_registry()
-    first_registry = service.base_registry
-    assert first_registry is not None
-    await first_registry.execute(
-        "write_file",
-        '{"path":"sandbox.txt","content":"first"}',
-    )
+    registry = service.base_registry
+    assert registry is not None
+    names = {tool.name for tool in registry}
+    assert {"history_search", "history_read"} <= names
+    assert {"list_files", "read_file", "write_file", "grep"}.isdisjoint(names)
 
-    session_id = "second"
+
+@pytest.mark.parametrize("mode", list(TurnMode))
+def test_history_tools_are_exposed_in_every_turn_mode(mode: TurnMode) -> None:
+    resources = AgentContextResources(
+        builder=SimpleNamespace(),
+        character_manager=None,
+        lorebook_manager=None,
+        status_manager=None,
+        scene_tracker=None,
+        memory_manager=None,
+    )
+    service = AgentToolService(
+        resources=lambda: resources,
+        history_query=_HistoryQuery(),
+    )
     service.refresh_base_registry()
-    second_registry = service.base_registry
-    assert second_registry is not None
-    await second_registry.execute(
-        "write_file",
-        '{"path":"sandbox.txt","content":"second"}',
-    )
 
-    assert (roots["first"] / "sandbox.txt").read_text(encoding="utf-8") == "first"
-    assert (roots["second"] / "sandbox.txt").read_text(encoding="utf-8") == "second"
+    registry = service.registry_for_turn(
+        None,
+        None,
+        turn_execution=_execution(mode),
+    )
+    assert registry is not None
+    assert {"history_search", "history_read"} <= {
+        tool.name for tool in registry
+    }
+
+
+def test_explicit_file_tools_remain_available_under_existing_mode_policy(
+    tmp_path,
+) -> None:
+    resources = AgentContextResources(
+        builder=SimpleNamespace(),
+        character_manager=None,
+        lorebook_manager=None,
+        status_manager=None,
+        scene_tracker=None,
+        memory_manager=None,
+    )
+    sandbox = FileToolSandbox(tmp_path)
+    service = AgentToolService(
+        resources=lambda: resources,
+        history_query=_HistoryQuery(),
+        extra_tools=[ReadFileTool(sandbox), WriteFileTool(sandbox)],
+    )
+    service.refresh_base_registry()
+
+    ic_registry = service.registry_for_turn(
+        None,
+        None,
+        turn_execution=_execution(TurnMode.IC),
+    )
+    assert ic_registry is not None
+    assert {"read_file", "write_file"} <= {tool.name for tool in ic_registry}
+
+    ooc_registry = service.registry_for_turn(
+        None,
+        None,
+        turn_execution=_execution(TurnMode.OOC),
+    )
+    assert ooc_registry is not None
+    ooc_names = {tool.name for tool in ooc_registry}
+    assert "read_file" in ooc_names
+    assert "write_file" not in ooc_names
 
 
 def test_state_tool_set_reports_exact_runtime_capabilities() -> None:

@@ -1,4 +1,4 @@
-"""Agent tools — file operations and tool registry for RPGGameAgent."""
+"""Main-Agent tool adapters, query services, and compatibility exports."""
 
 from rpg_core.tooling.base import BaseTool
 from rpg_core.tooling.registry import ToolRegistry
@@ -9,6 +9,17 @@ from rpg_core.agent.tools.file_tools import (
     WriteFileTool,
     GrepTool,
 )
+from rpg_core.agent.tools.history import (
+    HISTORY_READ_TOOL_NAME,
+    HISTORY_SEARCH_TOOL_NAME,
+    SENSITIVE_HISTORY_TOOL_NAMES,
+    HistoryReadTool,
+    HistorySearchTool,
+)
+from rpg_core.agent.tools.history_query import (
+    HistoryQueryDataPort,
+    HistoryQueryService,
+)
 
 __all__ = [
     "BaseTool",
@@ -18,4 +29,11 @@ __all__ = [
     "ReadFileTool",
     "WriteFileTool",
     "GrepTool",
+    "HISTORY_READ_TOOL_NAME",
+    "HISTORY_SEARCH_TOOL_NAME",
+    "SENSITIVE_HISTORY_TOOL_NAMES",
+    "HistoryReadTool",
+    "HistorySearchTool",
+    "HistoryQueryDataPort",
+    "HistoryQueryService",
 ]

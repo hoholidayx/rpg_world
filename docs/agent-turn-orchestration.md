@@ -160,7 +160,7 @@ Story、Session 或模型配置在生成中的修改只影响下一 turn，不�
 
 `ooc` 仍是普通正文 turn，会进入主 Context 门禁、事务、主 runner 和 commit；它只是通过 `TurnExecutionPolicy` 关闭世界事实 RP Modules、状态写入和后置事实提取。显式传入的 style ID 仍会被校验。为保持四种 mode 的 Fixed Layer 字节稳定，叙事风格 section 不再因 OOC 被移除，而是由 Hot History 后的 OOC 动态指令要求直接讨论、不使用 RP 正文标签。
 
-该 policy 不移除 scene 和普通状态表的只读 Context 投影，因此 OOC 主 Agent 仍可理解当前世界状态，但不能通过 scene/status 工具写回；基础工具中的 `WriteFileTool` 也会隐藏，其它只读基础工具可继续存在。
+该 policy 不移除 scene 和普通状态表的只读 Context 投影，因此 OOC 主 Agent 仍可理解当前世界状态，但不能通过 scene/status 工具写回。SQL 历史查询是只读基础能力，`history_search` 与 `history_read` 在四种 mode 中都保留。遗留 `list_files / read_file / write_file / grep` 不再默认注册；若通过 `extra_tools` 显式注入，OOC 仍按既有策略隐藏 `WriteFileTool`。
 
 斜杠命令不属于上述普通正文 mode pipeline，始终在门禁和事务之前分流。
 
@@ -331,6 +331,8 @@ Provider 请求，使模型延续当前工具链推理。最终正文完成后�
 工具 transcript 写入主历史；它们只进入现有 SSE/telemetry/tool record。下一玩家
 turn 仍由正式剧情历史重建 Context，并开始新的 Provider 推理链。
 
+`verbose_logging` 保留其它工具既有的 arguments 与 200 字符结果预览，但 `history_search` / `history_read` 是敏感工具：同步与流式 runner 都只记录工具名以及 arguments/result 各自的 `<redacted chars=N>`，不得把搜索词、excerpt 或历史正文写入日志。
+
 ### 主 Agent 的补判与状态修正
 
 Status preflight 的结果决定主 Agent 能看到什么：
@@ -421,6 +423,15 @@ Fixed Layer
 ```
 
 实际 provider wire messages 与上述结构化顺序一致：Fixed、Persistent Memory、Summary 分别作为 system message，Hot History 的 user/assistant/tool/system role 全部原位保留，之后 Story Memory、`STATUS_TABLES`、Recalled Memory、`RP_MODULES` 分别作为 system message，最后发送当前 User Message。Story Memory 作为低频累积信息放在 Summary 后、状态表前；当前状态表位于每轮召回之前。`message_mode` 的非 neutral 指令、GM 托管详情和 Narrative Outcome 运行态只出现在这个后置 `RP_MODULES` message 中，因此频繁切换 mode 不会改变 Fixed Layer 或截断更早的稳定前缀；历史窗口滑动时共同前缀仍可能缩短。Recall 块同时声明冲突时以当前 scene、普通状态表、玩家角色绑定和更新事实为准，不能仅凭历史召回回滚状态。
+
+### SQL 历史查询工具
+
+主 Agent 需要核对已归纳或已移出 Hot History 的原始上下文时，使用固定的两阶段只读链路：
+
+1. `history_search` 接受具体词项，仅在当前 Session 已提交的 SQL 主消息表中搜索 user/assistant 消息，返回去重后的候选 turn、代表消息和短 excerpt。
+2. `history_read` 接受候选 `turn_id`，按数据库中实际存在的 turn 读取 anchor 及有限的前后窗口，不假设 turn ID 连续。
+
+查询包含已标记 `summary_processed` 的消息以及 `neutral | ic | ooc | gm` 四种 mode，因而历史编辑、删除、truncate 或 clear 会立即反映 SQL 真源。它不读取 append-only 冷备、本轮尚未 commit 的 scratch、Summary/Story/Persistent Memory 或 Memory recall 索引，也不把临时 tool transcript 持久化回消息表。旧文件工具仍保留实现和直接测试，但不属于默认 registry。
 
 Plot Scheduler 是例外 placement：实际触发的至多两条事件不进入 `RP_MODULES`，而由 `ContextRenderer` 以 `[engine_plot_directive]` 追加到当前 user message 最后，晚于原始输入和普通 user suffix。载荷只含按序事件标题与 directive。它可覆盖玩家对世界/NPC 结果的冲突要求，但不能覆盖系统契约、已暂存 Outcome、实际工具边界或非 GM turn 的玩家角色主权。这个 suffix 只供当前 LLM 请求使用；事务中已暂存的 user message 不含它，因此历史、Summary、Memory、Dream 和正文 SSE 都不会看到它。
 

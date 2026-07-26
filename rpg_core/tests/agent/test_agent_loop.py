@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import random
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from llm_client.types import LLMResponse, ProviderChunk
+import rpg_core.agent.turn.runner as runner_module
 from rpg_core.agent.protocol import StreamEventKind
 from rpg_core.agent.turn.runner import run_chat_loop, run_chat_loop_stream
-from rpg_core.tooling.registry import ToolRegistry
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.dice.tools import DiceCheckDCTool, DiceRoller
 from rpg_core.settings import DiceModuleSettings
+from rpg_core.tooling.base import BaseTool
+from rpg_core.tooling.registry import ToolRegistry
 
 
 class _MissingToolPayloadProvider:
@@ -155,6 +159,80 @@ class _ReasoningDiceThenNarrateStreamProvider:
         yield ProviderChunk(finish_reason="stop", model=self.get_default_model())
 
 
+class _LoggingTool(BaseTool):
+    description = "Test verbose tool logging."
+
+    def __init__(self, name: str, result: str) -> None:
+        self.name = name
+        self._result = result
+
+    def parameters(self) -> dict[str, object]:
+        return {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+        }
+
+    async def execute(self, **kwargs: object) -> str:
+        del kwargs
+        return self._result
+
+
+class _ToolThenNarrateProvider:
+    def __init__(self, tool_name: str, arguments: str) -> None:
+        self._tool_name = tool_name
+        self._arguments = arguments
+        self.calls = 0
+
+    def get_default_model(self) -> str:
+        return "tool-logging"
+
+    async def chat(self, messages, tools=None):  # noqa: ANN001
+        del messages, tools
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[{
+                    "id": "call_logging",
+                    "function": {
+                        "name": self._tool_name,
+                        "arguments": self._arguments,
+                    },
+                }],
+                finish_reason="tool_calls",
+                model=self.get_default_model(),
+            )
+        return LLMResponse(
+            content="done",
+            tool_calls=None,
+            finish_reason="stop",
+            model=self.get_default_model(),
+        )
+
+    async def chat_stream(self, messages, tools=None):  # noqa: ANN001
+        del messages, tools
+        self.calls += 1
+        if self.calls == 1:
+            yield ProviderChunk(
+                tool_calls=[{
+                    "id": "call_logging_stream",
+                    "function": {
+                        "name": self._tool_name,
+                        "arguments": self._arguments,
+                    },
+                }],
+                finish_reason="tool_calls",
+                model=self.get_default_model(),
+            )
+            return
+        yield ProviderChunk(content="done")
+        yield ProviderChunk(
+            finish_reason="stop",
+            model=self.get_default_model(),
+        )
+
+
 def _reasoning_dice_registry() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(
@@ -284,3 +362,93 @@ async def test_stream_loop_returns_reasoning_within_tool_chain_only():
     assert messages[1].reasoning_content == "先进行检定。"
     assert "reasoning_content" not in messages[1].to_persistence_dict()
     assert events[-1].content == "你找到了线索。"
+
+
+@pytest.mark.parametrize("tool_name", ["history_search", "history_read"])
+@pytest.mark.parametrize("stream", [False, True], ids=["sync", "stream"])
+async def test_history_tool_verbose_logs_redact_arguments_and_results(
+    monkeypatch,
+    tool_name: str,
+    stream: bool,
+) -> None:
+    secret_argument = "绝密搜索词"
+    secret_result = "绝密历史正文"
+    arguments = f'{{"value":"{secret_argument}"}}'
+    result = f'{{"ok":true,"content":"{secret_result}"}}'
+    provider = _ToolThenNarrateProvider(tool_name, arguments)
+    registry = ToolRegistry()
+    registry.register(_LoggingTool(tool_name, result))
+    info = MagicMock()
+    monkeypatch.setattr(
+        runner_module,
+        "settings",
+        SimpleNamespace(verbose_logging=True, max_tool_calls=3),
+    )
+    monkeypatch.setattr(runner_module.logger, "info", info)
+
+    if stream:
+        _ = [
+            event
+            async for event in run_chat_loop_stream(
+                provider=provider,
+                tool_registry=registry,
+                messages=[Message(Role.USER, "查询")],
+                schemas=registry.get_openai_schemas(),
+            )
+        ]
+    else:
+        await run_chat_loop(
+            provider=provider,
+            tool_registry=registry,
+            messages=[Message(Role.USER, "查询")],
+            schemas=registry.get_openai_schemas(),
+        )
+
+    logged = repr(info.call_args_list)
+    assert secret_argument not in logged
+    assert secret_result not in logged
+    assert f"<redacted chars={len(arguments)}>" in logged
+    assert f"<redacted chars={len(result)}>" in logged
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["sync", "stream"])
+async def test_non_history_tool_verbose_logs_remain_unchanged(
+    monkeypatch,
+    stream: bool,
+) -> None:
+    tool_name = "ordinary_tool"
+    arguments = '{"value":"visible argument"}'
+    result = "visible result"
+    provider = _ToolThenNarrateProvider(tool_name, arguments)
+    registry = ToolRegistry()
+    registry.register(_LoggingTool(tool_name, result))
+    info = MagicMock()
+    monkeypatch.setattr(
+        runner_module,
+        "settings",
+        SimpleNamespace(verbose_logging=True, max_tool_calls=3),
+    )
+    monkeypatch.setattr(runner_module.logger, "info", info)
+
+    if stream:
+        _ = [
+            event
+            async for event in run_chat_loop_stream(
+                provider=provider,
+                tool_registry=registry,
+                messages=[Message(Role.USER, "查询")],
+                schemas=registry.get_openai_schemas(),
+            )
+        ]
+    else:
+        await run_chat_loop(
+            provider=provider,
+            tool_registry=registry,
+            messages=[Message(Role.USER, "查询")],
+            schemas=registry.get_openai_schemas(),
+        )
+
+    logged = repr(info.call_args_list)
+    assert arguments in logged
+    assert result in logged
+    assert "<redacted" not in logged

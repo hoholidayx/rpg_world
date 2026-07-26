@@ -782,12 +782,27 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
     assert len(scripted_llm_manager.status.calls) == status_calls_before
     assert "COMPOSER_STYLE_PROMPT" in ooc_content
     assert "本轮是 OOC（场外讨论）" in ooc_content
-    assert not ({"rp_story_outcome", "status_table_set_values", "write_file"} & ooc_tool_names)
+    assert {"history_search", "history_read"} <= ooc_tool_names
+    assert not (
+        {
+            "rp_story_outcome",
+            "status_table_set_values",
+            "list_files",
+            "read_file",
+            "write_file",
+            "grep",
+        }
+        & ooc_tool_names
+    )
     assert not any(name.startswith("scene_") for name in ooc_tool_names)
 
     gm_reply = await agent.send("推进场景", mode="gm", narrative_style_id=style.id)
     gm_call = scripted_llm_manager.main_provider().calls[-1]
     gm_content = "\n".join(str(message.get("content") or "") for message in gm_call.messages)
+    gm_tool_names = {
+        str(schema.get("function", {}).get("name", ""))
+        for schema in (gm_call.tools or [])
+    }
     assert gm_reply.committed_turn_id == 2
     assert len(scripted_llm_manager.status.calls) == status_calls_before + 2
     assert [
@@ -800,6 +815,10 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
         {"rp_story_outcome"},
         {"select_status_targets"},
     ]
+    assert {"history_search", "history_read"} <= gm_tool_names
+    assert {"list_files", "read_file", "write_file", "grep"}.isdisjoint(
+        gm_tool_names
+    )
     assert "COMPOSER_STYLE_PROMPT" in gm_content
     rows = integration_data_gateway.messages.list(session_id)
     assert [row.mode for row in rows] == ["ooc", "ooc", "gm", "gm"]

@@ -69,7 +69,19 @@ class ToolRegistry:
         try:
             kwargs = json.loads(arguments_json)
         except json.JSONDecodeError as exc:
+            rendered = tool.render_invalid_arguments_error(
+                "arguments 必须是有效的 JSON 对象"
+            )
+            if rendered is not None:
+                return rendered
             return f"Error: invalid arguments JSON for {name!r}: {exc}"
+
+        if not isinstance(kwargs, dict):
+            rendered = tool.render_invalid_arguments_error(
+                "arguments 必须解码为 JSON 对象"
+            )
+            if rendered is not None:
+                return rendered
 
         try:
             return await tool.execute(**kwargs)

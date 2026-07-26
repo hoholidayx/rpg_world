@@ -225,6 +225,554 @@ def test_message_service_turn_window_pagination(tmp_path: Path) -> None:
         database.close()
 
 
+def test_message_history_search_groups_ranks_and_scopes_turns(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageDataService(database)
+        session_id = _create_test_session(database, "s_history_search")
+        other_session_id = _create_test_session(database, "s_history_search_other")
+
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "艾琳独自等待。",
+            mode=models.TURN_MODE_OOC,
+            turn_id=10,
+            seq_in_turn=1,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "钟楼敲响，约定会合。",
+            mode=models.TURN_MODE_OOC,
+            turn_id=10,
+            seq_in_turn=2,
+        )
+        turn_20_user = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "艾琳将在钟楼等待。",
+            mode=models.TURN_MODE_GM,
+            turn_id=20,
+            seq_in_turn=1,
+        )
+        turn_20_assistant = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "他们随后会合。",
+            mode=models.TURN_MODE_GM,
+            turn_id=20,
+            seq_in_turn=2,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "艾琳",
+            mode=models.TURN_MODE_IC,
+            turn_id=30,
+            seq_in_turn=1,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_SYSTEM,
+            "艾琳 钟楼 会合",
+            turn_id=40,
+            seq_in_turn=1,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_TOOL,
+            "艾琳 钟楼 会合",
+            turn_id=40,
+            seq_in_turn=2,
+        )
+        messages.append(
+            other_session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "艾琳 钟楼 会合",
+            turn_id=99,
+            seq_in_turn=1,
+        )
+
+        assert messages.mark_summary_processed(
+            session_id,
+            [turn_20_user.id, turn_20_assistant.id],
+            batch_id=3,
+        ) == 2
+        assert messages.mark_story_memory_processed(
+            session_id,
+            [turn_20_user.id, turn_20_assistant.id],
+        ) == 2
+
+        hits = messages.search_history_turns(
+            session_id,
+            (" 艾琳 ", "钟楼", "会合", "艾琳", ""),
+            limit=9,
+        )
+
+        assert [hit.turn_id for hit in hits] == [20, 10, 30]
+        assert hits[0] == models.SessionHistorySearchHit(
+            turn_id=20,
+            message_id=turn_20_user.id,
+            seq_in_turn=1,
+            role=models.MESSAGE_ROLE_USER,
+            mode=models.TURN_MODE_GM,
+            content="艾琳将在钟楼等待。",
+            matched_terms=("艾琳", "钟楼", "会合"),
+        )
+        assert hits[1].matched_terms == ("艾琳", "钟楼", "会合")
+        assert hits[1].content == "钟楼敲响，约定会合。"
+        assert [hit.turn_id for hit in messages.search_history_turns(
+            session_id,
+            ("艾琳", "钟楼", "会合"),
+            limit=2,
+        )] == [20, 10]
+    finally:
+        database.close()
+
+
+def test_message_history_search_uses_literal_ascii_folded_terms(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageDataService(database)
+        session_id = _create_test_session(database, "s_history_search_literals")
+
+        special = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "进度 100%_CLOCK；代号 ÉLAN。",
+            turn_id=1,
+            seq_in_turn=1,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "只有普通的 CLOCK 文本",
+            turn_id=2,
+            seq_in_turn=1,
+        )
+
+        literal_hits = messages.search_history_turns(
+            session_id,
+            ("clock", "%", "_"),
+            limit=9,
+        )
+        assert [hit.turn_id for hit in literal_hits] == [1, 2]
+        assert literal_hits[0].message_id == special.id
+        assert literal_hits[0].matched_terms == ("clock", "%", "_")
+        assert literal_hits[1].matched_terms == ("clock",)
+
+        ascii_duplicate_hits = messages.search_history_turns(
+            session_id,
+            ("CLOCK", "clock"),
+            limit=9,
+        )
+        assert all(hit.matched_terms == ("CLOCK",) for hit in ascii_duplicate_hits)
+
+        unicode_hits = messages.search_history_turns(
+            session_id,
+            ("ÉLAN", "élan"),
+            limit=9,
+        )
+        assert [hit.turn_id for hit in unicode_hits] == [1]
+        assert unicode_hits[0].matched_terms == ("ÉLAN",)
+    finally:
+        database.close()
+
+
+def test_message_history_search_uses_term_length_then_message_sequence_ties(
+    tmp_path: Path,
+) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageDataService(database)
+        session_id = _create_test_session(database, "s_history_search_ties")
+        newer_short = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "x appears in the newer turn",
+            turn_id=20,
+            seq_in_turn=1,
+        )
+        older_long_first = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "longterm appears first",
+            turn_id=10,
+            seq_in_turn=1,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "longterm appears again",
+            turn_id=10,
+            seq_in_turn=2,
+        )
+
+        hits = messages.search_history_turns(
+            session_id,
+            ("x", "longterm"),
+            limit=9,
+        )
+
+        assert [hit.turn_id for hit in hits] == [10, 20]
+        assert hits[0].message_id == older_long_first.id
+        assert hits[0].matched_terms == ("longterm",)
+        assert hits[1].message_id == newer_short.id
+        assert hits[1].matched_terms == ("x",)
+    finally:
+        database.close()
+
+
+def test_message_history_search_bounds_content_fetch_to_ranked_candidates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageDataService(database)
+        session_id = _create_test_session(database, "s_history_search_bounded")
+        for turn_id in range(1, 31):
+            messages.append(
+                session_id,
+                models.MESSAGE_ROLE_USER,
+                f"common marker from turn {turn_id}",
+                turn_id=turn_id,
+                seq_in_turn=1,
+            )
+
+        executed_selects: list[tuple[str, tuple[object, ...], tuple[str, ...]]] = []
+        original_execute_sql = database.execute_sql
+
+        def capture_execute_sql(sql: str, params=None):
+            cursor = original_execute_sql(sql, params)
+            if (
+                sql.lstrip().upper().startswith("SELECT")
+                and 'FROM "rpg_session_messages"' in sql
+            ):
+                columns = tuple(
+                    str(description[0])
+                    for description in (cursor.description or ())
+                )
+                executed_selects.append((sql, tuple(params or ()), columns))
+            return cursor
+
+        monkeypatch.setattr(database, "execute_sql", capture_execute_sql)
+
+        hits = messages.search_history_turns(
+            session_id,
+            ("common",),
+            limit=2,
+        )
+
+        assert [hit.turn_id for hit in hits] == [30, 29]
+        assert len(executed_selects) == 2
+        candidate_sql, candidate_params, candidate_columns = executed_selects[0]
+        content_sql, _, content_columns = executed_selects[1]
+        assert candidate_columns == ("turn_id", "term_match_0")
+        assert " LIMIT ?" in candidate_sql.upper()
+        assert candidate_params[-1] == 2
+        assert "common" not in candidate_sql
+        assert "common" in candidate_params
+        assert content_columns == (
+            "id",
+            "turn_id",
+            "seq_in_turn",
+            "role",
+            "mode",
+            "content",
+        )
+        assert " IN (?, ?)" in content_sql.upper()
+    finally:
+        database.close()
+
+
+def test_message_history_search_validates_query_shape(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageDataService(database)
+        session_id = _create_test_session(database, "s_history_search_validation")
+
+        for terms in (
+            (),
+            (" ",),
+            "term",
+            ("x" * 65,),
+            tuple(str(index) for index in range(9)),
+            ("valid", 1),
+        ):
+            with pytest.raises(ValueError):
+                messages.search_history_turns(session_id, terms, limit=1)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="limit must be positive"):
+            messages.search_history_turns(session_id, ("term",), limit=0)
+    finally:
+        database.close()
+
+
+def test_message_history_turn_window_uses_actual_turns_and_boundaries(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageDataService(database)
+        session_id = _create_test_session(database, "s_history_window")
+        other_session_id = _create_test_session(database, "s_history_window_other")
+
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "turn 2",
+            turn_id=2,
+            seq_in_turn=1,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_SYSTEM,
+            "turn 5 system",
+            turn_id=5,
+            seq_in_turn=1,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "turn 5 user",
+            mode=models.TURN_MODE_OOC,
+            turn_id=5,
+            seq_in_turn=2,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "turn 5 assistant",
+            mode=models.TURN_MODE_OOC,
+            turn_id=5,
+            seq_in_turn=3,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_SYSTEM,
+            "turn 7 system only",
+            turn_id=7,
+            seq_in_turn=1,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_TOOL,
+            "turn 7 tool only",
+            turn_id=7,
+            seq_in_turn=2,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "turn 9",
+            turn_id=9,
+            seq_in_turn=1,
+        )
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "turn 20",
+            turn_id=20,
+            seq_in_turn=1,
+        )
+        messages.append(
+            other_session_id,
+            models.MESSAGE_ROLE_USER,
+            "other turn 7",
+            turn_id=7,
+            seq_in_turn=1,
+        )
+
+        window = messages.read_history_turn_window(
+            session_id,
+            anchor_turn_id=5,
+            before_turns=2,
+            after_turns=1,
+        )
+        assert window is not None
+        assert window.anchor_turn_id == 5
+        assert window.turn_ids == (2, 5, 9)
+        assert [(row.turn_id, row.seq_in_turn, row.content) for row in window.messages] == [
+            (2, 1, "turn 2"),
+            (5, 2, "turn 5 user"),
+            (5, 3, "turn 5 assistant"),
+            (9, 1, "turn 9"),
+        ]
+        assert window.has_before is False
+        assert window.has_after is True
+
+        later_window = messages.read_history_turn_window(
+            session_id,
+            anchor_turn_id=9,
+            before_turns=1,
+            after_turns=2,
+        )
+        assert later_window is not None
+        assert later_window.turn_ids == (5, 9, 20)
+        assert later_window.has_before is True
+        assert later_window.has_after is False
+
+        anchor_only = messages.read_history_turn_window(
+            session_id,
+            anchor_turn_id=9,
+            before_turns=0,
+            after_turns=0,
+        )
+        assert anchor_only is not None
+        assert anchor_only.turn_ids == (9,)
+        assert anchor_only.has_before is True
+        assert anchor_only.has_after is True
+
+        assert messages.read_history_turn_window(
+            session_id,
+            anchor_turn_id=7,
+            before_turns=1,
+            after_turns=1,
+        ) is None
+    finally:
+        database.close()
+
+
+def test_message_history_turn_window_validates_bounds(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageDataService(database)
+        session_id = _create_test_session(database, "s_history_window_validation")
+
+        for kwargs in (
+            {"anchor_turn_id": 0, "before_turns": 0, "after_turns": 0},
+            {"anchor_turn_id": 1, "before_turns": -1, "after_turns": 0},
+            {"anchor_turn_id": 1, "before_turns": 3, "after_turns": 0},
+            {"anchor_turn_id": 1, "before_turns": 0, "after_turns": -1},
+            {"anchor_turn_id": 1, "before_turns": 0, "after_turns": 3},
+        ):
+            with pytest.raises(ValueError):
+                messages.read_history_turn_window(session_id, **kwargs)
+    finally:
+        database.close()
+
+
+def test_message_history_queries_follow_mutable_main_history_only(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageDataService(database)
+        backup = BackupService(database)
+        session_id = _create_test_session(database, "s_history_mutations")
+
+        main = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "旧线索",
+            turn_id=1,
+            seq_in_turn=1,
+        )
+        backup.messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "冷备秘密",
+            turn_id=1,
+            seq_in_turn=1,
+        )
+        assert messages.mark_summary_processed(
+            session_id,
+            [main.id],
+            batch_id=1,
+        ) == 1
+        assert messages.mark_story_memory_processed(session_id, [main.id]) == 1
+        assert [hit.turn_id for hit in messages.search_history_turns(
+            session_id,
+            ("旧线索",),
+            limit=9,
+        )] == [1]
+        assert messages.search_history_turns(
+            session_id,
+            ("冷备秘密",),
+            limit=9,
+        ) == []
+        initial_window = messages.read_history_turn_window(
+            session_id,
+            anchor_turn_id=1,
+            before_turns=0,
+            after_turns=0,
+        )
+        assert initial_window is not None
+        assert [row.content for row in initial_window.messages] == ["旧线索"]
+
+        updated = messages.update(main.id, content="新线索")
+        assert updated is not None
+        assert messages.search_history_turns(session_id, ("旧线索",), limit=9) == []
+        assert [hit.turn_id for hit in messages.search_history_turns(
+            session_id,
+            ("新线索",),
+            limit=9,
+        )] == [1]
+        updated_window = messages.read_history_turn_window(
+            session_id,
+            anchor_turn_id=1,
+            before_turns=0,
+            after_turns=0,
+        )
+        assert updated_window is not None
+        assert [row.content for row in updated_window.messages] == ["新线索"]
+
+        assert messages.delete(main.id)
+        assert messages.search_history_turns(session_id, ("新线索",), limit=9) == []
+        assert messages.read_history_turn_window(
+            session_id,
+            anchor_turn_id=1,
+            before_turns=0,
+            after_turns=0,
+        ) is None
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "截断目标",
+            turn_id=2,
+            seq_in_turn=1,
+        )
+        backup.messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "截断目标",
+            turn_id=2,
+            seq_in_turn=1,
+        )
+        assert messages.truncate_from_turn(session_id, 2) == 1
+        assert messages.search_history_turns(
+            session_id,
+            ("截断目标",),
+            limit=9,
+        ) == []
+        assert messages.read_history_turn_window(
+            session_id,
+            anchor_turn_id=2,
+            before_turns=0,
+            after_turns=0,
+        ) is None
+
+        messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "清空目标",
+            turn_id=3,
+            seq_in_turn=1,
+        )
+        assert messages.clear(session_id) == 1
+        assert messages.search_history_turns(
+            session_id,
+            ("清空目标",),
+            limit=9,
+        ) == []
+        assert messages.read_history_turn_window(
+            session_id,
+            anchor_turn_id=3,
+            before_turns=0,
+            after_turns=0,
+        ) is None
+        assert backup.messages.count(session_id) == 2
+    finally:
+        database.close()
+
+
 def test_message_service_requires_valid_turn_metadata(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:

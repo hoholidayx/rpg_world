@@ -14,11 +14,26 @@ from loguru import logger
 from llm_client.types import LLMProvider, LLMResponse, LLMUsage
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.telemetry import CallRecord, TurnStats
+from rpg_core.agent.tools.history import SENSITIVE_HISTORY_TOOL_NAMES
 from rpg_core.context.models import Message, Role
-from rpg_core.tooling.registry import ToolRegistry
 from rpg_core.settings import settings
+from rpg_core.tooling.registry import ToolRegistry
 
 _TAG = "[MainAgent]"
+_TOOL_RESULT_LOG_LIMIT = 200
+
+
+def _tool_log_value(
+    tool_name: str,
+    value: object,
+    *,
+    limit: int | None = None,
+) -> str:
+    """Render a tool payload for verbose logs without leaking history."""
+    text = str(value)
+    if tool_name in SENSITIVE_HISTORY_TOOL_NAMES:
+        return f"<redacted chars={len(text)}>"
+    return text if limit is None else text[:limit]
 
 
 class ToolCallRecord:
@@ -230,14 +245,23 @@ async def run_chat_loop(
             name = tc["function"]["name"]
             args = tc["function"]["arguments"]
             if settings.verbose_logging:
-                logger.info(_TAG + " calling tool: {}({})", name, args)
+                logger.info(
+                    _TAG + " calling tool: {}({})",
+                    name,
+                    _tool_log_value(name, args),
+                )
 
             tool_result = await tool_registry.execute(name, args)
 
             if settings.verbose_logging:
                 logger.info(
                     _TAG + " tool result {}: {}",
-                    name, str(tool_result)[:200],
+                    name,
+                    _tool_log_value(
+                        name,
+                        tool_result,
+                        limit=_TOOL_RESULT_LOG_LIMIT,
+                    ),
                 )
 
             tool_msg_obj = Message(role=Role.TOOL, content=str(tool_result), tool_call_id=tc["id"])
@@ -444,12 +468,24 @@ async def run_chat_loop_stream(
             name = tc["function"]["name"]
             args = tc["function"]["arguments"]
             if settings.verbose_logging:
-                logger.info(_TAG + " calling tool: {}({})", name, args)
+                logger.info(
+                    _TAG + " calling tool: {}({})",
+                    name,
+                    _tool_log_value(name, args),
+                )
 
             tool_result = await tool_registry.execute(name, args)
 
             if settings.verbose_logging:
-                logger.info(_TAG + " tool result {}: {}", name, str(tool_result)[:200])
+                logger.info(
+                    _TAG + " tool result {}: {}",
+                    name,
+                    _tool_log_value(
+                        name,
+                        tool_result,
+                        limit=_TOOL_RESULT_LOG_LIMIT,
+                    ),
+                )
 
             result_str = str(tool_result)
             tool_msg_obj = Message(role=Role.TOOL, content=result_str, tool_call_id=tc["id"])

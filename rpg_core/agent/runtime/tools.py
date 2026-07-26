@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from rpg_core.agent.runtime.resources import AgentContextResources
-from rpg_core.agent.tools.file_tools import (
-    GrepTool,
-    ListFilesTool,
-    ReadFileTool,
-    WriteFileTool,
+from rpg_core.agent.tools.file_tools import WriteFileTool
+from rpg_core.agent.tools.history import (
+    HistoryReadTool,
+    HistorySearchTool,
 )
+from rpg_core.agent.tools.history_query import HistoryQueryService
 from rpg_core.agent.tools.state import StateToolSet, resolve_state_tool_set
 from rpg_core.agent.turn import TurnExecutionPolicy, TurnExecutionSnapshot, TurnMode
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
@@ -34,26 +33,18 @@ if TYPE_CHECKING:
 _TAG = "[AgentToolService]"
 
 
-class AgentToolDataPort(Protocol):
-    """Resolve the runtime directory for the currently active Session."""
-
-    def resolve_session_runtime_dir(self, session_id: str) -> Path: ...
-
-
 class AgentToolService:
     """Build the main Agent's turn-local executable tools and schemas."""
 
     def __init__(
         self,
         *,
-        session_id: Callable[[], str],
         resources: Callable[[], AgentContextResources],
-        data: AgentToolDataPort,
+        history_query: HistoryQueryService,
         extra_tools: list[BaseTool] | None = None,
     ) -> None:
-        self._session_id = session_id
         self._resources = resources
-        self._data = data
+        self._history_query = history_query
         self._extra_tools = list(extra_tools or [])
         self._base_registry: ToolRegistry | None = None
 
@@ -62,17 +53,11 @@ class AgentToolService:
         return self._base_registry
 
     def refresh_base_registry(self) -> None:
-        from rpg_core.agent.tools.file_tools import FileToolSandbox
-
-        session_root = self._data.resolve_session_runtime_dir(self._session_id())
-        sandbox = FileToolSandbox(session_root=session_root)
         registry = ToolRegistry()
         registry.register_all(
             [
-                ListFilesTool(sandbox),
-                ReadFileTool(sandbox),
-                WriteFileTool(sandbox),
-                GrepTool(sandbox),
+                HistorySearchTool(self._history_query),
+                HistoryReadTool(self._history_query),
             ]
         )
         scene_tracker = self._resources().scene_tracker

@@ -199,6 +199,30 @@ class SessionMessage:
         return data
 
 
+@dataclass(frozen=True)
+class SessionHistorySearchHit:
+    """One representative message for a matching Session history turn."""
+
+    turn_id: int
+    message_id: int
+    seq_in_turn: int
+    role: str
+    mode: str
+    content: str
+    matched_terms: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SessionHistoryTurnWindow:
+    """An ordered, Session-scoped window around one committed history turn."""
+
+    anchor_turn_id: int
+    turn_ids: tuple[int, ...]
+    messages: tuple[SessionMessage, ...]
+    has_before: bool
+    has_after: bool
+
+
 __all__ = [
     "MESSAGE_ROLES",
     "MESSAGE_ROLE_ASSISTANT",
@@ -218,6 +242,8 @@ __all__ = [
     "SessionCharacterOption",
     "SessionDerivationJob",
     "SessionDerivationJobUpdate",
+    "SessionHistorySearchHit",
+    "SessionHistoryTurnWindow",
     "SessionMessage",
     "SessionPlayerCharacterSnapshot",
     "SessionProfile",

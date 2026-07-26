@@ -24,7 +24,13 @@ from rpg_data.model.rp_modules import (
     SessionRPModuleSelectionRows,
     StoryRPModule,
 )
-from rpg_data.model.session import Session, SessionDerivationJob, SessionMessage
+from rpg_data.model.session import (
+    Session,
+    SessionDerivationJob,
+    SessionHistorySearchHit,
+    SessionHistoryTurnWindow,
+    SessionMessage,
+)
 from rpg_data.model.status import (
     SessionStatusTable,
     StatusTableDocument,
@@ -322,6 +328,8 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
 def test_legacy_models_module_reexports_canonical_aggregate_types() -> None:
     assert models.Session is Session
     assert models.SessionMessage is SessionMessage
+    assert models.SessionHistorySearchHit is SessionHistorySearchHit
+    assert models.SessionHistoryTurnWindow is SessionHistoryTurnWindow
     assert models.SessionDerivationJob is SessionDerivationJob
     assert models.DreamProposal is DreamProposal
     assert models.PersistentMemoryBundle is PersistentMemoryBundle

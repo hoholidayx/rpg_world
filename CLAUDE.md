@@ -96,7 +96,7 @@ rpg_world/
 │   │   ├── command/              #     dispatcher、handlers 与 AgentCommandTarget
 │   │   ├── turn/                 #     plan/runtime、runner、固定 hooks、transaction、orchestrator
 │   │   ├── sub_agents/           #     BaseSubAgent / SubAgentContext + memory/status 领域包
-│   │   └── tools/                #     Agent state/file tool 适配
+│   │   └── tools/                #     Agent state/history tool 适配（遗留 file tools 不默认注册）
 │   ├── scene/                    # 场景状态（时间/地点/属性）
 │   ├── context/                  # models、builder、fixed layer、渲染边界和诊断
 │   ├── session/                  # SessionManager 门面 + history/progress/grouping
@@ -414,6 +414,8 @@ RPGGameAgent（composition root + public facade）
 
 `AgentContextResources` 是不可变的 session-scoped 引用集合，包含 builder、角色、世界书、状态、scene 与 memory manager。初始化、reload 或 switch 只能整体构建/替换该集合，再由 `AgentRuntimeLifecycle` 按顺序重绑 SubAgent context/tool providers、memory stores、compressor、RP registry 与 base tools；不要恢复 `_rpg_ctx` 字典或在 Agent 上散落 manager/store 字段。
 
+主 Agent 的默认基础查询能力是两阶段 SQL 会话历史工具：先用 `history_search` 在当前 Session 已提交的主消息表中按具体词项定位候选 turn，再用 `history_read` 读取目标 turn 及相邻的实际 turn。两者在 `neutral | ic | ooc | gm` 中均可用，只读取正 `turn_id` 的 user/assistant 主历史；不读取 append-only 冷备、本轮尚未提交的 scratch、Summary/Story/Persistent Memory 或在线 Memory 索引。`list_files / read_file / write_file / grep` 只保留源码、显式注入能力和直接测试，不再由 `AgentToolService` 默认注册；显式注入的 `WriteFileTool` 在 OOC 仍按既有策略隐藏。历史工具的 arguments、excerpt 和正文属于敏感内容，`verbose_logging` 只能记录工具名与 `<redacted chars=N>`，不得输出原文。
+
 ### Agent Turn 分层
 
 `AgentTurnService` 处理命令/角色旁路和公开协议适配，`rpg_core/agent/turn/` 负责同步/流式共享业务模板：
@@ -707,7 +709,7 @@ agent.send(user_input)
   → TurnPreparation → AgentContextService + AgentToolService → messages/tools/schemas
   → sync/stream runner → run_chat_loop(provider, tool_registry, messages)
     → 主 Agent 在漏判时可补判 outcome；已预裁定时不再获得重复调用选项，真实持久变化先修正状态，再输出 RP 正文
-    → LLM 也可调用其它 RP module tools / file tools
+    → LLM 也可调用其它 RP module tools，或先 history_search 再 history_read 查询 SQL 主历史
     → 每轮记录 TurnStats + CallRecord
   → TurnRuntime.commit() 短事务写入主/backup 消息、Narrative Outcome、Plot decisions 与状态表
   → 同步适配为 AgentReply；流式仅在 commit 成功后发送带 usage/turn_id 的 DONE
@@ -789,7 +791,7 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 - `rpg_summaries.json` / `summaries/` — 对话摘要文件
 - `memory_vectors.db*` — memory SQLite / WAL / SHM 索引文件
 
-会话层以 `SessionManager` 作为稳定公开门面：`session/history.py` 负责有序消息、turn 分配、主表/冷备共同写入，以及历史修改对 Outcome/Plot ledger 的联动；`session/progress.py` 负责 summary/story-memory 候选分组、保留窗口和消息级处理进度；`session/grouping.py` 提供纯 turn 算法，`session/models.py` 保存快照和共享运行态。它们只依赖自身声明的窄 Data Port，由 Agent composition root 注入 `SessionDataService`，不再回查 Gateway。`MessageDataService` 仅保留 CRUD、turn window/分页、processed flag 聚合和调用方指定的批量标记，不决定 Context 投影、候选范围或编辑重置。持久化消息必须有正数 `turn_id` 和 `seq_in_turn`：主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一，冷备份表保持 append-only 但同样要求正数 turn metadata。非法 turn metadata 在写入或加载边界失败，不再为 summary、剧情记忆或 history pagination 做 legacy 降级分组。summary 和故事记忆续提进度按主消息表行标记持久化，进程重启后从 rpg_data 继续。历史删除、清空、编辑回滚和 turn truncate 只直接修改主历史，不清理摘要文件、不重置其它消息标记，也不自动重新归纳；主 Agent Context 下次构建时只按剩余行各自的 `summary_processed` 值重新投影。
+会话层以 `SessionManager` 作为稳定公开门面：`session/history.py` 负责有序消息、turn 分配、主表/冷备共同写入，以及历史修改对 Outcome/Plot ledger 的联动；`session/progress.py` 负责 summary/story-memory 候选分组、保留窗口和消息级处理进度；`session/grouping.py` 提供纯 turn 算法，`session/models.py` 保存快照和共享运行态。它们只依赖自身声明的窄 Data Port，由 Agent composition root 注入 `SessionDataService`，不再回查 Gateway。`MessageDataService` 仅保留 CRUD、turn window/分页、SQL 词项候选搜索、相邻 turn read model、processed flag 聚合和调用方指定的批量标记，不决定 Context 投影、候选范围或编辑重置。持久化消息必须有正数 `turn_id` 和 `seq_in_turn`：主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一，冷备份表保持 append-only 但同样要求正数 turn metadata。非法 turn metadata 在写入或加载边界失败，不再为 summary、剧情记忆或 history pagination 做 legacy 降级分组。summary 和故事记忆续提进度按主消息表行标记持久化，进程重启后从 rpg_data 继续。历史删除、清空、编辑回滚和 turn truncate 只直接修改主历史，不清理摘要文件、不重置其它消息标记，也不自动重新归纳；主 Agent Context 下次构建时只按剩余行各自的 `summary_processed` 值重新投影。
 
 Agent runtime 会话消息、剧情记忆和 Dream Persistent Memory 账本均由 `rpg_data` 管理；只有摘要和在线 memory 索引文件集中在
 `CatalogService.get_session_runtime_dir(session_id)` 返回的 `{workspace_root}/stories/{story_id}/{session_id}/` 下。旧 `persistent_memory.json` 不再读取或创建，升级时也不会自动删除已有遗留文件。
