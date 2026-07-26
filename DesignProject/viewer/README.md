@@ -19,6 +19,13 @@ Story Pack schemas, and lists generated Story Packs. It uses a local SSE
 connection to refresh when the revision head, managed authoring assets, or
 Story Pack archive changes.
 
+Plot Schedule uses a two-level read-only directory. The first page lists only
+plot outlines and event pools; outline nodes and pool events link to stable,
+refresh-safe detail URLs such as
+`#plot-schedule/outline/<stableId>`,
+`#plot-schedule/pool/<stableId>`, and
+`#plot-schedule/event/<stableId>`.
+
 The server exposes only `GET` and `HEAD`. It must never edit
 `design/current.json`, `design/revisions/`, checkpoints, schemas, Story Packs,
 or integration state. Confirmed design changes continue to use

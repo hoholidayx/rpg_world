@@ -1047,6 +1047,132 @@ pre {
   gap: clamp(18px, 1.4vw, 28px);
 }
 
+.plot-directory-section,
+.plot-detail-section {
+  display: grid;
+  gap: 18px;
+}
+
+.plot-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 4px 2px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.plot-section-header h3 {
+  margin: 5px 0 6px;
+  font-family: var(--serif);
+  font-size: clamp(1.28rem, 1.5vw, 1.72rem);
+}
+
+.plot-section-header p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--paper-dim);
+  font-size: 0.8rem;
+  line-height: 1.65;
+}
+
+.plot-section-count {
+  display: grid;
+  place-items: center;
+  min-width: 42px;
+  height: 34px;
+  padding: 0 11px;
+  color: var(--paper-soft);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.plot-directory-card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+a.plot-directory-card:hover,
+a.plot-directory-card:focus-visible {
+  border-color: rgba(219, 96, 93, 0.45);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.2);
+  transform: translateY(-2px);
+}
+
+a.plot-directory-card:focus-visible,
+a.plot-node:focus-visible,
+.plot-reference-card:focus-visible,
+.plot-breadcrumb a:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 3px;
+}
+
+.plot-card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.plot-card-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 19px;
+  padding-top: 15px;
+  color: var(--accent-bright);
+  border-top: 1px solid var(--line);
+  font-size: 0.75rem;
+}
+
+.plot-directory-card.is-unresolved,
+.plot-reference-card.is-unresolved,
+.plot-node.is-unresolved {
+  border-color: rgba(227, 175, 101, 0.35);
+}
+
+.plot-detail-card {
+  min-width: 0;
+}
+
+.plot-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 18px;
+  color: var(--paper-dim);
+  font-size: 0.75rem;
+}
+
+.plot-breadcrumb a {
+  color: var(--accent-bright);
+  text-decoration: none;
+}
+
+.plot-breadcrumb a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.plot-breadcrumb strong {
+  max-width: min(520px, 70vw);
+  overflow: hidden;
+  color: var(--paper-soft);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .plot-lane-header {
   display: flex;
   justify-content: space-between;
@@ -1065,6 +1191,11 @@ pre {
   list-style: none;
 }
 
+.plot-node-item {
+  min-width: 0;
+  list-style: none;
+}
+
 .plot-node {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1074,6 +1205,19 @@ pre {
   background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--line);
   border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    transform 150ms ease;
+}
+
+a.plot-node:hover,
+a.plot-node:focus-visible {
+  background: rgba(219, 96, 93, 0.06);
+  border-color: rgba(219, 96, 93, 0.35);
+  transform: translateX(2px);
 }
 
 .node-index {
@@ -1098,6 +1242,102 @@ pre {
   color: var(--paper-dim);
   font-size: 0.75rem;
   line-height: 1.5;
+}
+
+.plot-node-ref,
+.plot-node-warning {
+  display: block;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  line-height: 1.5;
+}
+
+.plot-node-ref {
+  color: var(--gold);
+}
+
+.plot-node-warning {
+  color: var(--warning);
+}
+
+.plot-event-detail {
+  padding: clamp(24px, 2.2vw, 48px);
+}
+
+.plot-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.plot-reference-grid h4 {
+  margin: 0 0 10px;
+  color: var(--paper-soft);
+  font-size: 0.82rem;
+}
+
+.plot-reference-list {
+  display: grid;
+  gap: 10px;
+}
+
+.plot-reference-card {
+  display: block;
+  min-width: 0;
+  padding: 16px;
+  color: inherit;
+  background: rgba(21, 24, 33, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  text-decoration: none;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+
+a.plot-reference-card:hover,
+a.plot-reference-card:focus-visible {
+  background: rgba(219, 96, 93, 0.05);
+  border-color: rgba(219, 96, 93, 0.35);
+}
+
+.plot-reference-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--paper-soft);
+  font-size: 0.82rem;
+}
+
+.plot-reference-card p {
+  margin: 6px 0;
+  color: var(--paper-dim);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.plot-reference-card .plot-node-warning {
+  color: var(--warning);
+}
+
+.plot-reference-card span {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 0.64rem;
+}
+
+.plot-lookup-error code {
+  color: var(--gold);
+  overflow-wrap: anywhere;
+}
+
+.plot-back-link {
+  display: inline-flex;
+  margin-top: 22px;
+  text-decoration: none;
 }
 
 .empty-state {
@@ -1908,8 +2148,24 @@ pre {
   .metric-grid,
   .two-column,
   .resource-grid,
-  .resource-grid.three-up {
+  .resource-grid.three-up,
+  .plot-reference-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plot-section-header,
+  .plot-lane-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .plot-node {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .plot-node > .status-pill {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .metric-card {

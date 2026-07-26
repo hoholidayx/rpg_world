@@ -43,7 +43,7 @@ const VIEW_DEFINITIONS = [
     id: "plot-schedule",
     label: "剧情调度",
     eyebrow: "PLOT SCHEDULE",
-    description: "大纲、事件池与动态事件的调度结构。",
+    description: "剧情线与事件池的分层导航，以及可寻址的事件详情。",
     countPath: ["resources", "plotSchedule"],
   },
   {
@@ -115,6 +115,8 @@ const PHASE_LABELS = {
   package_ready: "可构建",
   runtime_synced: "已同步",
 };
+
+const PLOT_DETAIL_KINDS = new Set(["outline", "pool", "event"]);
 
 const REVISION_CHANGE_COLLECTIONS = [
   {
@@ -226,6 +228,7 @@ const state = {
   headRevisionId: null,
   pendingHeadId: null,
   activeView: "overview",
+  plotSelection: null,
   schemaKind: "story-design",
   selectedPack: null,
   rawValue: null,
@@ -381,9 +384,9 @@ function bindStaticEvents() {
   });
 
   window.addEventListener("hashchange", () => {
-    const requested = window.location.hash.replace(/^#/, "");
-    if (VIEW_DEFINITIONS.some((item) => item.id === requested)) {
-      setActiveView(requested, { updateHash: false });
+    const route = parseViewerRoute(window.location.hash);
+    if (route.recognized) {
+      applyViewerRoute(route);
     }
   });
 
@@ -396,10 +399,9 @@ function bindStaticEvents() {
 
 async function initialize() {
   renderNavigation();
-  const requested = window.location.hash.replace(/^#/, "");
-  if (VIEW_DEFINITIONS.some((item) => item.id === requested)) {
-    state.activeView = requested;
-  }
+  const route = parseViewerRoute(window.location.hash);
+  state.activeView = route.viewId;
+  state.plotSelection = route.plotSelection;
   await refreshProject({ initial: true });
   connectRevisionStream();
 }
@@ -810,7 +812,7 @@ function getViewCount(definition, document) {
   }
   const value = getAtPath(document, definition.countPath);
   if (definition.id === "plot-schedule") {
-    return ["outlines", "pools", "events"].reduce(
+    return ["outlines", "pools"].reduce(
       (total, key) => total + safeArray(value?.[key]).length,
       0,
     );
@@ -851,7 +853,63 @@ function renderHistory() {
   }).join("");
 }
 
-function setActiveView(viewId, { updateHash = true } = {}) {
+function parseViewerRoute(hashValue) {
+  const requested = String(hashValue || "").replace(/^#/, "");
+  const segments = requested.split("/");
+  const requestedView = segments[0];
+  const hasKnownView = VIEW_DEFINITIONS.some(
+    (item) => item.id === requestedView,
+  );
+  const viewId = hasKnownView
+    ? requestedView
+    : "overview";
+  let plotSelection = null;
+  if (viewId === "plot-schedule" && segments.length > 1) {
+    if (
+      segments.length === 3
+      && PLOT_DETAIL_KINDS.has(segments[1])
+    ) {
+      try {
+        const stableId = decodeURIComponent(segments[2]);
+        if (stableId) {
+          plotSelection = {
+            kind: segments[1],
+            stableId,
+          };
+        } else {
+          plotSelection = {
+            kind: "invalid",
+            stableId: requested,
+          };
+        }
+      } catch {
+        plotSelection = {
+          kind: "invalid",
+          stableId: requested,
+        };
+      }
+    } else {
+      plotSelection = {
+        kind: "invalid",
+        stableId: requested,
+      };
+    }
+  }
+  return {
+    viewId,
+    plotSelection,
+    recognized: requested === "" || hasKnownView,
+  };
+}
+
+function plotDetailHref(kind, stableId) {
+  return `#plot-schedule/${kind}/${encodeURIComponent(stableId)}`;
+}
+
+function applyViewerRoute(
+  { viewId, plotSelection = null },
+  { scroll = true } = {},
+) {
   if (!VIEW_DEFINITIONS.some((item) => item.id === viewId)) {
     return;
   }
@@ -859,13 +917,26 @@ function setActiveView(viewId, { updateHash = true } = {}) {
     state.packRequestToken += 1;
   }
   state.activeView = viewId;
+  state.plotSelection = viewId === "plot-schedule" ? plotSelection : null;
   state.selectedPack = viewId === "story-packs" ? state.selectedPack : null;
+  renderNavigation();
+  renderActiveView();
+  if (scroll) {
+    const scrollOptions = { top: 0, behavior: "smooth" };
+    elements.mainContent?.focus?.({ preventScroll: true });
+    elements.mainContent?.scrollTo?.(scrollOptions);
+    window.scrollTo?.(scrollOptions);
+  }
+}
+
+function setActiveView(viewId, { updateHash = true } = {}) {
+  if (!VIEW_DEFINITIONS.some((item) => item.id === viewId)) {
+    return;
+  }
   if (updateHash) {
     history.replaceState(null, "", `#${viewId}`);
   }
-  renderNavigation();
-  renderActiveView();
-  elements.mainContent?.scrollTo?.({ top: 0, behavior: "smooth" });
+  applyViewerRoute({ viewId, plotSelection: null });
 }
 
 function renderActiveView() {
@@ -1578,9 +1649,52 @@ function renderStatusRows(value) {
 
 function renderPlotSchedule(value) {
   const plot = value || { outlines: [], pools: [], events: [] };
-  const outlines = sortedResources(plot.outlines, "priority");
-  const pools = sortedResources(plot.pools, "priority");
-  const events = sortedResources(plot.events, "position");
+  const plotIndex = createPlotScheduleIndex(plot);
+  if (state.plotSelection) {
+    return renderPlotSelection(plotIndex, state.plotSelection);
+  }
+  return renderPlotDirectory(plot, plotIndex);
+}
+
+function createPlotScheduleIndex(plot) {
+  return {
+    outlines: indexPlotResources(plot.outlines),
+    pools: indexPlotResources(plot.pools),
+    events: indexPlotResources(plot.events),
+  };
+}
+
+function indexPlotResources(value) {
+  const all = safeArray(value);
+  const byStableId = new Map();
+  all.forEach((resource, arrayIndex) => {
+    const stableId = String(resource?.stableId || "");
+    if (!stableId) {
+      return;
+    }
+    const entries = byStableId.get(stableId) || [];
+    entries.push({ resource, arrayIndex });
+    byStableId.set(stableId, entries);
+  });
+  return { all, byStableId };
+}
+
+function resolvePlotResource(index, stableId) {
+  const entries = index.byStableId.get(String(stableId || "")) || [];
+  if (entries.length === 1) {
+    return { status: "found", entry: entries[0], entries };
+  }
+  return {
+    status: entries.length ? "ambiguous" : "missing",
+    entry: null,
+    entries,
+  };
+}
+
+function renderPlotDirectory(plot, plotIndex) {
+  const outlines = sortedResources(plotIndex.outlines.all, "priority");
+  const pools = sortedResources(plotIndex.pools.all, "priority");
+  const events = plotIndex.events.all;
   if (!outlines.length && !pools.length && !events.length) {
     return emptyResult(
       "/resources/plotSchedule",
@@ -1589,69 +1703,255 @@ function renderPlotSchedule(value) {
       "大纲节点与事件池可以并存；确认后会在这里形成调度全景。",
     );
   }
-  const eventById = new Map(events.map((event) => [event.stableId, event]));
   return {
     path: "/resources/plotSchedule",
     raw: plot,
     html: `
       <div class="plot-layout">
-        <div class="metric-grid">
-          ${metricCard("大纲", outlines.length, "有序节点链")}
-          ${metricCard("事件池", pools.length, "随机或顺序调度")}
-          ${metricCard("事件", events.length, "可被池或大纲引用")}
-          ${metricCard(
-            "强制调度",
-            events.filter((event) => event.dispatchMode === "forced").length,
-            "达到时间直接注入",
-          )}
+        ${renderPlotDirectorySection(
+          "PLOT OUTLINES",
+          "剧情线",
+          "按优先级进入各条剧情线，再沿节点定位实际事件。",
+          outlines.length,
+          outlines.length
+            ? `<div class="resource-grid">${outlines.map((outline, index) => (
+              renderPlotOutlineSummary(outline, index)
+            )).join("")}</div>`
+            : emptyInline("当前没有剧情线。"),
+        )}
+        ${renderPlotDirectorySection(
+          "EVENT POOLS",
+          "事件池",
+          "进入事件池查看其候选事件与调度窗口。",
+          pools.length,
+          pools.length
+            ? `<div class="resource-grid">${pools.map((pool, index) => (
+              renderPlotPoolSummary(pool, events, index)
+            )).join("")}</div>`
+            : emptyInline("当前没有事件池。"),
+        )}
+      </div>
+    `,
+  };
+}
+
+function renderPlotDirectorySection(
+  eyebrow,
+  title,
+  description,
+  count,
+  content,
+) {
+  return `
+    <section class="plot-directory-section">
+      <header class="plot-section-header">
+        <div>
+          <p class="card-eyebrow">${escapeHtml(eyebrow)}</p>
+          <h3>${escapeHtml(title)}</h3>
+          <p>${escapeHtml(description)}</p>
         </div>
-        ${outlines.map((outline, index) => `
-          <article class="plot-lane${revisionChangeClass(
-            "plotOutlines",
-            outline.stableId || outline.name || index,
-          )}">
-            <div class="plot-lane-header">
-              <div>
-                <p class="card-eyebrow">${escapeHtml(outline.stableId || "OUTLINE")}</p>
-                <h3>${escapeHtml(outline.name || "未命名大纲")}</h3>
-                <p class="card-copy">${escapeHtml(outline.description || "")}</p>
-              </div>
-              ${statusPill(outline.enabled === false ? "停用" : "启用", outline.enabled === false ? "is-warning" : "is-positive")}
-            </div>
-            ${renderOutlineNodes(outline.nodes, eventById)}
-          </article>
-        `).join("")}
-        <div class="resource-grid">
-          ${pools.map((pool, index) => `
-            <article class="resource-card${revisionChangeClass(
-              "plotPools",
-              pool.stableId || pool.name || index,
-            )}">
-              <div class="card-heading">
-                <div>
-                  <p class="card-eyebrow">${escapeHtml(pool.stableId || "POOL")}</p>
-                  <h3>${escapeHtml(pool.name || "未命名事件池")}</h3>
-                </div>
-                ${statusPill(pool.selectionMode || "random", "is-accent")}
-              </div>
-              <p class="card-copy">${escapeHtml(pool.description || "")}</p>
-              ${metaGrid([
-                ["优先级", pool.priority ?? 0],
-                ["状态", pool.enabled === false ? "停用" : "启用"],
-                ["事件数", events.filter((event) => event.poolRef === pool.stableId).length],
-              ])}
-            </article>
-          `).join("")}
-        </div>
-        <div class="resource-grid">
-          ${events.map((event, index) => renderPlotEvent(event, index)).join("")}
+        <span class="plot-section-count">${escapeHtml(count)}</span>
+      </header>
+      ${content}
+    </section>
+  `;
+}
+
+function renderPlotOutlineSummary(outline, index) {
+  const stableId = String(outline.stableId || "");
+  const className = `resource-card plot-directory-card${revisionChangeClass(
+    "plotOutlines",
+    stableId || outline.name || index,
+  )}`;
+  const content = `
+    <div class="card-heading">
+      <div>
+        <p class="card-eyebrow">${escapeHtml(stableId || "OUTLINE")}</p>
+        <h3>${escapeHtml(outline.name || "未命名剧情线")}</h3>
+      </div>
+      ${statusPill(
+        outline.enabled === false ? "停用" : "启用",
+        outline.enabled === false ? "is-warning" : "is-positive",
+      )}
+    </div>
+    <p class="card-copy">${escapeHtml(outline.description || "暂无剧情线说明。")}</p>
+    ${metaGrid([
+      ["优先级", outline.priority ?? 0],
+      ["节点数", safeArray(outline.nodes).length],
+    ])}
+    <span class="plot-card-action">查看剧情线 <span aria-hidden="true">→</span></span>
+  `;
+  if (!stableId) {
+    return `<article class="${className} is-unresolved">${content}</article>`;
+  }
+  return `
+    <a
+      class="${className}"
+      href="${escapeHtml(plotDetailHref("outline", stableId))}"
+      aria-label="查看剧情线：${escapeHtml(outline.name || stableId)}"
+    >${content}</a>
+  `;
+}
+
+function renderPlotPoolSummary(pool, events, index) {
+  const stableId = String(pool.stableId || "");
+  const className = `resource-card plot-directory-card${revisionChangeClass(
+    "plotPools",
+    stableId || pool.name || index,
+  )}`;
+  const eventCount = events.filter(
+    (event) => event.poolRef === stableId,
+  ).length;
+  const content = `
+    <div class="card-heading">
+      <div>
+        <p class="card-eyebrow">${escapeHtml(stableId || "POOL")}</p>
+        <h3>${escapeHtml(pool.name || "未命名事件池")}</h3>
+      </div>
+      <span class="plot-card-pills">
+        ${statusPill(pool.selectionMode || "random", "is-accent")}
+        ${statusPill(
+          pool.enabled === false ? "停用" : "启用",
+          pool.enabled === false ? "is-warning" : "is-positive",
+        )}
+      </span>
+    </div>
+    <p class="card-copy">${escapeHtml(pool.description || "暂无事件池说明。")}</p>
+    ${metaGrid([
+      ["优先级", pool.priority ?? 0],
+      ["事件数", eventCount],
+    ])}
+    <span class="plot-card-action">展开事件池 <span aria-hidden="true">→</span></span>
+  `;
+  if (!stableId) {
+    return `<article class="${className} is-unresolved">${content}</article>`;
+  }
+  return `
+    <a
+      class="${className}"
+      href="${escapeHtml(plotDetailHref("pool", stableId))}"
+      aria-label="展开事件池：${escapeHtml(pool.name || stableId)}"
+    >${content}</a>
+  `;
+}
+
+function renderPlotSelection(plotIndex, selection) {
+  if (selection.kind === "invalid") {
+    return renderPlotInvalidRoute(selection.stableId);
+  }
+  const index = plotIndex[`${selection.kind}s`];
+  const resolution = resolvePlotResource(index, selection.stableId);
+  if (resolution.status !== "found") {
+    return renderPlotLookupError(
+      selection.kind,
+      selection.stableId,
+      resolution,
+    );
+  }
+  if (selection.kind === "outline") {
+    return renderPlotOutlineDetail(resolution.entry, plotIndex);
+  }
+  if (selection.kind === "pool") {
+    return renderPlotPoolDetail(resolution.entry, plotIndex);
+  }
+  return renderPlotEventDetail(resolution.entry, plotIndex);
+}
+
+function renderPlotInvalidRoute(routeValue) {
+  return {
+    path: "/resources/plotSchedule",
+    raw: undefined,
+    html: `
+      ${renderPlotBreadcrumb([], "详情链接无效")}
+      <div class="empty-state plot-lookup-error">
+        <div>
+          <strong>剧情调度详情链接无效</strong>
+          <p><code>${escapeHtml(routeValue)}</code></p>
+          <p>请从剧情线或事件池重新进入详情。</p>
+          <a class="primary-button plot-back-link" href="#plot-schedule">
+            返回剧情调度
+          </a>
         </div>
       </div>
     `,
   };
 }
 
-function renderOutlineNodes(value, eventById) {
+function renderPlotLookupError(kind, stableId, resolution) {
+  const labels = {
+    outline: "剧情线",
+    pool: "事件池",
+    event: "事件",
+  };
+  const label = labels[kind] || "剧情资源";
+  const reason = resolution.status === "ambiguous"
+    ? `发现 ${resolution.entries.length} 个相同 stableId，无法唯一定位。`
+    : "当前 revision 中没有这个 stableId。";
+  return {
+    path: "/resources/plotSchedule",
+    raw: undefined,
+    html: `
+      ${renderPlotBreadcrumb([], `${label}未找到`)}
+      <div class="empty-state plot-lookup-error">
+        <div>
+          <strong>${escapeHtml(label)}无法定位</strong>
+          <p><code>${escapeHtml(stableId)}</code></p>
+          <p>${escapeHtml(reason)}</p>
+          <a class="primary-button plot-back-link" href="#plot-schedule">
+            返回剧情调度
+          </a>
+        </div>
+      </div>
+    `,
+  };
+}
+
+function renderPlotOutlineDetail(entry, plotIndex) {
+  const outline = entry.resource;
+  const nodes = safeArray(outline.nodes);
+  return {
+    path: `/resources/plotSchedule/outlines/${entry.arrayIndex}`,
+    raw: outline,
+    html: `
+      ${renderPlotBreadcrumb([], outline.name || "未命名剧情线")}
+      <div class="plot-layout">
+        <article class="plot-lane plot-detail-card${revisionChangeClass(
+          "plotOutlines",
+          outline.stableId || outline.name || entry.arrayIndex,
+        )}">
+          <div class="plot-lane-header">
+            <div>
+              <p class="card-eyebrow">${escapeHtml(outline.stableId || "OUTLINE")}</p>
+              <h3>${escapeHtml(outline.name || "未命名剧情线")}</h3>
+              <p class="card-copy">${escapeHtml(outline.description || "暂无剧情线说明。")}</p>
+            </div>
+            ${statusPill(
+              outline.enabled === false ? "停用" : "启用",
+              outline.enabled === false ? "is-warning" : "is-positive",
+            )}
+          </div>
+          ${metaGrid([
+            ["优先级", outline.priority ?? 0],
+            ["节点数", nodes.length],
+          ])}
+        </article>
+        <section class="plot-detail-section">
+          <header class="plot-section-header">
+            <div>
+              <p class="card-eyebrow">ORDERED NODES</p>
+              <h3>剧情节点</h3>
+              <p>点击节点查看它通过 eventRef 引用的完整事件。</p>
+            </div>
+            <span class="plot-section-count">${escapeHtml(nodes.length)}</span>
+          </header>
+          ${renderOutlineNodes(nodes, plotIndex)}
+        </section>
+      </div>
+    `,
+  };
+}
+
+function renderOutlineNodes(value, plotIndex) {
   const nodes = sortedResources(value, "position");
   if (!nodes.length) {
     return emptyInline("该大纲还没有节点。");
@@ -1659,18 +1959,54 @@ function renderOutlineNodes(value, eventById) {
   return `
     <ol class="plot-node-list">
       ${nodes.map((node, index) => {
-        const event = eventById.get(node.eventRef);
+        const resolution = resolvePlotResource(
+          plotIndex.events,
+          node.eventRef,
+        );
+        const event = resolution.entry?.resource;
+        const className = `plot-node${revisionChangeClass(
+          "plotNodes",
+          node.stableId || node.eventRef || index,
+        )}`;
+        const content = `
+          <span class="node-index">${String(index + 1).padStart(2, "0")}</span>
+          <div>
+            <strong>${escapeHtml(event?.title || node.eventRef || "未绑定事件")}</strong>
+            <p>${escapeHtml(node.scheduledTime || "未设置时间")} · ${escapeHtml(node.dispatchMode || "soft")}</p>
+            <span class="plot-node-ref">${escapeHtml(node.eventRef || "缺少 eventRef")}</span>
+            ${
+              resolution.status === "found"
+                ? ""
+                : `<span class="plot-node-warning">${escapeHtml(
+                  resolution.status === "ambiguous"
+                    ? "eventRef 对应多个事件，无法唯一定位。"
+                    : "eventRef 没有对应事件。",
+                )}</span>`
+            }
+          </div>
+          ${statusPill(
+            resolution.status === "found"
+              ? (node.enabled === false ? "停用" : "启用")
+              : (resolution.status === "ambiguous" ? "引用不唯一" : "引用缺失"),
+            resolution.status === "found" && node.enabled !== false
+              ? "is-positive"
+              : "is-warning",
+          )}
+        `;
+        if (resolution.status !== "found") {
+          return `
+            <li class="${className} is-unresolved">
+              ${content}
+            </li>
+          `;
+        }
         return `
-          <li class="plot-node${revisionChangeClass(
-            "plotNodes",
-            node.stableId || node.eventRef || index,
-          )}">
-            <span class="node-index">${String(index + 1).padStart(2, "0")}</span>
-            <div>
-              <strong>${escapeHtml(event?.title || node.eventRef || "未绑定事件")}</strong>
-              <p>${escapeHtml(node.scheduledTime || "未设置时间")} · ${escapeHtml(node.dispatchMode || "soft")}</p>
-            </div>
-            ${statusPill(node.enabled === false ? "停用" : "启用", node.enabled === false ? "is-warning" : "is-positive")}
+          <li class="plot-node-item">
+            <a
+              class="${className}"
+              href="${escapeHtml(plotDetailHref("event", event.stableId))}"
+              aria-label="查看事件：${escapeHtml(event.title || event.stableId)}"
+            >${content}</a>
           </li>
         `;
       }).join("")}
@@ -1678,9 +2014,166 @@ function renderOutlineNodes(value, eventById) {
   `;
 }
 
-function renderPlotEvent(event, index) {
+function renderPlotPoolDetail(entry, plotIndex) {
+  const pool = entry.resource;
+  const events = sortedResources(
+    plotIndex.events.all.filter(
+      (event) => event.poolRef === pool.stableId,
+    ),
+    "position",
+  );
+  return {
+    path: `/resources/plotSchedule/pools/${entry.arrayIndex}`,
+    raw: pool,
+    html: `
+      ${renderPlotBreadcrumb([], pool.name || "未命名事件池")}
+      <div class="plot-layout">
+        <article class="resource-card plot-detail-card${revisionChangeClass(
+          "plotPools",
+          pool.stableId || pool.name || entry.arrayIndex,
+        )}">
+          <div class="card-heading">
+            <div>
+              <p class="card-eyebrow">${escapeHtml(pool.stableId || "POOL")}</p>
+              <h3>${escapeHtml(pool.name || "未命名事件池")}</h3>
+            </div>
+            <span class="plot-card-pills">
+              ${statusPill(pool.selectionMode || "random", "is-accent")}
+              ${statusPill(
+                pool.enabled === false ? "停用" : "启用",
+                pool.enabled === false ? "is-warning" : "is-positive",
+              )}
+            </span>
+          </div>
+          <p class="card-copy">${escapeHtml(pool.description || "暂无事件池说明。")}</p>
+          ${metaGrid([
+            ["优先级", pool.priority ?? 0],
+            ["事件数", events.length],
+          ])}
+        </article>
+        <section class="plot-detail-section">
+          <header class="plot-section-header">
+            <div>
+              <p class="card-eyebrow">POOL EVENTS</p>
+              <h3>池内事件</h3>
+              <p>事件按 position 排列；点击后查看完整指令与候选窗口。</p>
+            </div>
+            <span class="plot-section-count">${escapeHtml(events.length)}</span>
+          </header>
+          ${
+            events.length
+              ? `<div class="resource-grid">${events.map((event, index) => (
+                renderPlotEventSummary(event, plotIndex, index)
+              )).join("")}</div>`
+              : emptyInline("该事件池还没有事件。")
+          }
+        </section>
+      </div>
+    `,
+  };
+}
+
+function renderPlotEventSummary(event, plotIndex, index) {
+  const stableId = String(event.stableId || "");
+  const resolution = resolvePlotResource(plotIndex.events, stableId);
+  const className = `resource-card plot-directory-card plot-event-summary${revisionChangeClass(
+    "plotEvents",
+    stableId || event.title || index,
+  )}`;
+  const content = `
+    <div class="card-heading">
+      <div>
+        <p class="card-eyebrow">${escapeHtml(stableId || "EVENT")}</p>
+        <h3>${escapeHtml(event.title || "未命名事件")}</h3>
+      </div>
+      ${statusPill(
+        event.dispatchMode || "soft",
+        event.dispatchMode === "forced" ? "is-accent" : "",
+      )}
+    </div>
+    <p class="card-copy">${escapeHtml(event.description || "暂无事件摘要。")}</p>
+    ${metaGrid([
+      ["计划时间", event.scheduledTime || "可选"],
+      ["截止时间", event.deadlineTime || "无限制"],
+      ["状态", event.enabled === false ? "停用" : "启用"],
+      ["允许重复", event.allowRepeat ? "是" : "否"],
+    ])}
+    <span class="plot-card-action">查看完整事件 <span aria-hidden="true">→</span></span>
+  `;
+  if (!stableId || resolution.status !== "found") {
+    const issue = resolution.status === "ambiguous"
+      ? "stableId 重复，无法唯一定位。"
+      : "缺少可定位的 stableId。";
+    return `
+      <article class="${className} is-unresolved">
+        ${content}
+        <span class="plot-node-warning">${escapeHtml(issue)}</span>
+      </article>
+    `;
+  }
   return `
-    <article class="resource-card${revisionChangeClass(
+    <a
+      class="${className}"
+      href="${escapeHtml(plotDetailHref("event", stableId))}"
+      aria-label="查看事件：${escapeHtml(event.title || stableId)}"
+    >${content}</a>
+  `;
+}
+
+function renderPlotEventDetail(entry, plotIndex) {
+  const event = entry.resource;
+  const poolResolution = resolvePlotResource(
+    plotIndex.pools,
+    event.poolRef,
+  );
+  const pool = poolResolution.entry?.resource;
+  const references = collectPlotEventReferences(
+    plotIndex.outlines.all,
+    event.stableId,
+  );
+  const breadcrumbLinks = pool
+    ? [{
+      label: pool.name || pool.stableId,
+      href: plotDetailHref("pool", pool.stableId),
+    }]
+    : [];
+  return {
+    path: `/resources/plotSchedule/events/${entry.arrayIndex}`,
+    raw: event,
+    html: `
+      ${renderPlotBreadcrumb(
+        breadcrumbLinks,
+        event.title || "未命名事件",
+      )}
+      <div class="plot-layout">
+        ${renderPlotEventDetailCard(event, entry.arrayIndex)}
+        <section class="plot-detail-section">
+          <header class="plot-section-header">
+            <div>
+              <p class="card-eyebrow">RELATIONSHIPS</p>
+              <h3>调度关系</h3>
+              <p>事件池归属与剧情线节点分别展示，不合并两套调度字段。</p>
+            </div>
+          </header>
+          <div class="plot-reference-grid">
+            <div>
+              <h4>所属事件池</h4>
+              ${renderPlotPoolReference(event.poolRef, poolResolution)}
+            </div>
+            <div>
+              <h4>剧情线引用</h4>
+              ${renderPlotOutlineReferences(references, plotIndex)}
+            </div>
+          </div>
+        </section>
+      </div>
+    `,
+  };
+}
+
+function renderPlotEventDetailCard(event, index) {
+  return `
+    <article class="resource-card plot-detail-card plot-event-detail${revisionChangeClass(
       "plotEvents",
       event.stableId || event.title || index,
     )}">
@@ -1693,7 +2186,7 @@ function renderPlotEvent(event, index) {
       </div>
       ${
         event.description
-          ? `<p class="card-copy">${escapeHtml(event.description)}</p>`
+          ? `<h4>管理摘要</h4><p class="card-copy">${escapeHtml(event.description)}</p>`
           : ""
       }
       <h4>动态指令</h4>
@@ -1709,9 +2202,103 @@ function renderPlotEvent(event, index) {
       ${
         event.suitabilityHint
           ? `<h4>适宜性提示</h4><p class="card-copy">${escapeHtml(event.suitabilityHint)}</p>`
-          : ""
+          : `<h4>适宜性提示</h4><p class="card-copy muted">未填写。</p>`
       }
     </article>
+  `;
+}
+
+function collectPlotEventReferences(outlines, eventStableId) {
+  const references = [];
+  sortedResources(outlines, "priority").forEach((outline) => {
+    sortedResources(outline.nodes, "position").forEach((node) => {
+      if (node.eventRef === eventStableId) {
+        references.push({ outline, node });
+      }
+    });
+  });
+  return references;
+}
+
+function renderPlotPoolReference(poolRef, resolution) {
+  if (resolution.status !== "found") {
+    const reason = resolution.status === "ambiguous"
+      ? "poolRef 对应多个事件池，无法唯一定位。"
+      : "poolRef 没有对应事件池。";
+    return `
+      <div class="plot-reference-card is-unresolved">
+        <strong>${escapeHtml(poolRef || "缺少 poolRef")}</strong>
+        <p>${escapeHtml(reason)}</p>
+      </div>
+    `;
+  }
+  const pool = resolution.entry.resource;
+  return `
+    <a
+      class="plot-reference-card"
+      href="${escapeHtml(plotDetailHref("pool", pool.stableId))}"
+    >
+      <strong>${escapeHtml(pool.name || pool.stableId)}</strong>
+      <p>${escapeHtml(pool.selectionMode || "random")} · 优先级 ${escapeHtml(pool.priority ?? 0)}</p>
+      <span>${escapeHtml(pool.stableId)}</span>
+    </a>
+  `;
+}
+
+function renderPlotOutlineReferences(references, plotIndex) {
+  if (!references.length) {
+    return emptyInline("该事件没有被剧情线节点引用，只通过事件池进入候选。");
+  }
+  return `
+    <div class="plot-reference-list">
+      ${references.map(({ outline, node }) => {
+        const stableId = String(outline.stableId || "");
+        const resolution = resolvePlotResource(
+          plotIndex.outlines,
+          stableId,
+        );
+        const className = `plot-reference-card${revisionChangeClass(
+          "plotNodes",
+          node.stableId || node.eventRef,
+        )}`;
+        const content = `
+          <strong>${escapeHtml(outline.name || outline.stableId)}</strong>
+          <p>${escapeHtml(node.scheduledTime || "未设置时间")} · ${escapeHtml(node.dispatchMode || "soft")}</p>
+          <span>${escapeHtml(node.stableId || node.eventRef)}</span>
+        `;
+        if (!stableId || resolution.status !== "found") {
+          const reason = resolution.status === "ambiguous"
+            ? "剧情线 stableId 重复，无法唯一定位。"
+            : "剧情线缺少可定位的 stableId。";
+          return `
+            <div class="${className} is-unresolved">
+              ${content}
+              <p class="plot-node-warning">${escapeHtml(reason)}</p>
+            </div>
+          `;
+        }
+        return `
+          <a
+            class="${className}"
+            href="${escapeHtml(plotDetailHref("outline", stableId))}"
+          >${content}</a>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderPlotBreadcrumb(links, currentLabel) {
+  return `
+    <nav class="plot-breadcrumb" aria-label="剧情调度层级">
+      <a href="#plot-schedule">剧情调度</a>
+      ${links.map((link) => `
+        <span aria-hidden="true">/</span>
+        <a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>
+      `).join("")}
+      <span aria-hidden="true">/</span>
+      <strong aria-current="page">${escapeHtml(currentLabel)}</strong>
+    </nav>
   `;
 }
 
