@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from commons.scene_time import SceneTime
 from play_api.main import app
-from rpg_data.services import reset_data_service_gateways
+from rpg_data import models
+from rpg_data.services import (
+    get_data_service_gateway,
+    reset_data_service_gateways,
+)
 
 
 def test_plot_scheduling_story_crud_and_session_runtime_contract(
@@ -171,5 +176,224 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
 
         referenced_delete = client.delete(f"{story_path}/events/{event_id}")
         assert referenced_delete.status_code == 409
+
+    reset_data_service_gateways()
+
+
+def test_session_plot_story_masks_spoilers_and_projects_triggered_sources(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "RPG_WORLD_DB_PATH",
+        str(tmp_path / "plot-story-api.sqlite3"),
+    )
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    story_path = (
+        "/play-api/v1/workspaces/demo_workspace/stories/1/plot-scheduling"
+    )
+    session_path = "/play-api/v1/sessions/s_forest001/plot-story"
+
+    with TestClient(app) as client:
+        empty = client.get(session_path)
+        assert empty.status_code == 200
+        assert empty.json() == {
+            "sessionId": "s_forest001",
+            "spoilerProtectionEnabled": True,
+            "outlines": [],
+            "pools": [],
+        }
+        assert client.get(
+            "/play-api/v1/sessions/missing/plot-story"
+        ).status_code == 404
+
+        pool_response = client.post(
+            f"{story_path}/pools",
+            json={
+                "name": "迷雾事件池",
+                "description": "沿途可能发生的插曲。",
+                "selectionMode": "sequential",
+            },
+        )
+        assert pool_response.status_code == 201
+        pool_id = pool_response.json()["id"]
+
+        def _create_event(
+            title: str,
+            directive: str,
+            *,
+            position: int,
+        ) -> int:
+            response = client.post(
+                f"{story_path}/events",
+                json={
+                    "poolId": pool_id,
+                    "title": title,
+                    "description": f"{title}的公开详情。",
+                    "directive": directive,
+                    "suitabilityHint": f"{title}的适宜条件。",
+                    "position": position,
+                },
+            )
+            assert response.status_code == 201
+            return int(response.json()["id"])
+
+        first_event_id = _create_event(
+            "公开起点",
+            "固定展示第一项。",
+            position=0,
+        )
+        repeated_event_id = _create_event(
+            "已触发事件",
+            "只展示已成功注入的事件。",
+            position=1,
+        )
+        hidden_event_id = _create_event(
+            "未来秘密",
+            "默认响应绝不能泄露这条指令。",
+            position=2,
+        )
+
+        outline_response = client.post(
+            f"{story_path}/outlines",
+            json={
+                "name": "主线",
+                "description": "依次推进的故事线。",
+            },
+        )
+        assert outline_response.status_code == 201
+        outline_id = outline_response.json()["id"]
+
+        node_ids: list[int] = []
+        for position, event_id in enumerate(
+            (first_event_id, repeated_event_id, hidden_event_id)
+        ):
+            response = client.post(
+                f"{story_path}/outlines/{outline_id}/nodes",
+                json={
+                    "eventId": event_id,
+                    "scheduledTime": {
+                        "year": 1,
+                        "month": 1,
+                        "day": 1,
+                        "hour": 8 + position,
+                        "minute": 0,
+                    },
+                    "position": position,
+                },
+            )
+            assert response.status_code == 201
+            node_ids.append(int(response.json()["id"]))
+
+        get_data_service_gateway().plot_scheduling.append_decisions(
+            "s_forest001",
+            7,
+            (
+                models.StagedPlotScheduleDecision(
+                    source_kind=models.PLOT_SOURCE_OUTLINE,
+                    source_id=node_ids[1],
+                    event_id=repeated_event_id,
+                    container_id=outline_id,
+                    decision_status=models.PLOT_DECISION_TRIGGERED,
+                    dispatch_mode=models.PLOT_DISPATCH_SOFT,
+                    scene_time=SceneTime(1, 1, 1, 9),
+                    event_snapshot={
+                        "eventTitle": "裁定时旧标题",
+                        "directive": "裁定账本内部快照不得公开。",
+                    },
+                    reason="内部裁定理由不得公开",
+                ),
+            ),
+        )
+        renamed = client.patch(
+            f"{story_path}/events/{repeated_event_id}",
+            json={"title": "编辑后的已触发事件"},
+        )
+        assert renamed.status_code == 200
+
+        masked_response = client.get(session_path)
+        assert masked_response.status_code == 200
+        masked = masked_response.json()
+        assert masked["spoilerProtectionEnabled"] is True
+
+        outline_nodes = masked["outlines"][0]["nodes"]
+        pool_nodes = masked["pools"][0]["nodes"]
+        assert outline_nodes[0]["eventDetail"]["title"] == "公开起点"
+        assert pool_nodes[0]["eventDetail"]["title"] == "公开起点"
+
+        repeated_outline = outline_nodes[1]
+        assert repeated_outline["eventInjected"] is True
+        assert repeated_outline["sourceInjected"] is True
+        assert repeated_outline["eventInjectionCount"] == 1
+        assert repeated_outline["sourceInjectionCount"] == 1
+        assert repeated_outline["lastEventInjectionTurnId"] == 7
+        assert repeated_outline["lastSourceInjectionTurnId"] == 7
+        assert (
+            repeated_outline["eventDetail"]["title"]
+            == "编辑后的已触发事件"
+        )
+
+        repeated_pool = pool_nodes[1]
+        assert repeated_pool["eventInjected"] is True
+        assert repeated_pool["sourceInjected"] is False
+        assert repeated_pool["eventDetail"]["eventId"] == repeated_event_id
+
+        expected_hidden_keys = {
+            "slotKey",
+            "position",
+            "revealed",
+            "enabled",
+            "sessionDisabled",
+            "eventInjected",
+            "eventInjectionCount",
+            "lastEventInjectionTurnId",
+            "sourceInjected",
+            "sourceInjectionCount",
+            "lastSourceInjectionTurnId",
+            "eventDetail",
+        }
+        for hidden in (outline_nodes[2], pool_nodes[2]):
+            assert set(hidden) == expected_hidden_keys
+            assert hidden["revealed"] is False
+            assert hidden["eventDetail"] is None
+
+        def _all_keys(value: object) -> set[str]:
+            if isinstance(value, dict):
+                return set(value).union(
+                    *(_all_keys(item) for item in value.values()),
+                )
+            if isinstance(value, list):
+                return set().union(*(_all_keys(item) for item in value))
+            return set()
+
+        assert _all_keys(masked).isdisjoint(
+            {
+                "decisionStatus",
+                "eventSnapshot",
+                "reason",
+                "errorCode",
+                "errorMessage",
+                "containerId",
+                "sceneTimeOrdinal",
+                "sourceId",
+                "createdAt",
+            }
+        )
+
+        revealed_response = client.get(
+            f"{session_path}?revealSpoilers=true"
+        )
+        assert revealed_response.status_code == 200
+        revealed = revealed_response.json()
+        assert revealed["spoilerProtectionEnabled"] is False
+        assert (
+            revealed["outlines"][0]["nodes"][2]["eventDetail"]["eventId"]
+            == hidden_event_id
+        )
+        assert (
+            revealed["pools"][0]["nodes"][2]["eventDetail"]["title"]
+            == "未来秘密"
+        )
 
     reset_data_service_gateways()

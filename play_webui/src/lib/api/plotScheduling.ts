@@ -11,6 +11,7 @@ import type {
   PlotPoolInput,
   PlotSchedule,
   SessionPlotSchedule,
+  SessionPlotStory,
 } from '@/types/plotScheduling'
 
 function storyPath(workspaceId: string, storyId: number) {
@@ -19,6 +20,10 @@ function storyPath(workspaceId: string, storyId: number) {
 
 function sessionPath(sessionId: string) {
   return `/sessions/${encodeURIComponent(sessionId)}/plot-scheduling`
+}
+
+function sessionPlotStoryPath(sessionId: string) {
+  return `/sessions/${encodeURIComponent(sessionId)}/plot-story`
 }
 
 export function getStoryPlotSchedule(workspaceId: string, storyId: number) {
@@ -107,6 +112,18 @@ export function getSessionPlotSchedule(sessionId: string, options: { beforeId?: 
   if (options.limit !== undefined) params.set('limit', String(options.limit))
   const query = params.toString()
   return playApiFetch<SessionPlotSchedule>(`${sessionPath(sessionId)}${query ? `?${query}` : ''}`)
+}
+
+export function getSessionPlotStory(
+  sessionId: string,
+  options: { revealSpoilers?: boolean } = {},
+) {
+  const params = new URLSearchParams()
+  if (options.revealSpoilers) params.set('revealSpoilers', 'true')
+  const query = params.toString()
+  return playApiFetch<SessionPlotStory>(
+    `${sessionPlotStoryPath(sessionId)}${query ? `?${query}` : ''}`,
+  )
 }
 
 export function setPlotEventOverride(sessionId: string, eventId: number, disabled: boolean) {

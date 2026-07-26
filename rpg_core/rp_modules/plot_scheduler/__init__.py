@@ -35,6 +35,16 @@ from rpg_core.rp_modules.plot_scheduler.models import (
 from rpg_core.rp_modules.plot_scheduler.module import PlotSchedulerModule
 from rpg_core.rp_modules.plot_scheduler.scheduler import PlotScheduleSelector
 from rpg_core.rp_modules.plot_scheduler.snapshot import PlotScheduleSnapshotResolver
+from rpg_core.rp_modules.plot_scheduler.story_projection import (
+    PLOT_STORY_LINE_OUTLINE,
+    PLOT_STORY_LINE_POOL,
+    PlotStoryEventDetail,
+    PlotStoryLine,
+    PlotStoryNode,
+    PlotStoryProjectionDataPort,
+    PlotStoryProjectionService,
+    SessionPlotStory,
+)
 
 __all__ = [
     "CreatePlotEventCommand",
@@ -43,6 +53,8 @@ __all__ = [
     "CreatePlotPoolCommand",
     "PLOT_DERIVATION_COPY_POLICY",
     "PLOT_PATCH_UNSET",
+    "PLOT_STORY_LINE_OUTLINE",
+    "PLOT_STORY_LINE_POOL",
     "PlotDefinitionInUseError",
     "PlotPatchUnset",
     "PlotScheduleCandidate",
@@ -59,6 +71,12 @@ __all__ = [
     "PlotScheduleSelector",
     "PlotSchedulerModule",
     "PlotScheduleSnapshotResolver",
+    "PlotStoryEventDetail",
+    "PlotStoryLine",
+    "PlotStoryNode",
+    "PlotStoryProjectionDataPort",
+    "PlotStoryProjectionService",
+    "SessionPlotStory",
     "UpdatePlotEventCommand",
     "UpdatePlotNodeCommand",
     "UpdatePlotOutlineCommand",

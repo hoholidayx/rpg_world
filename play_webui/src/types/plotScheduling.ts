@@ -121,6 +121,51 @@ export type SessionPlotSchedule = {
   nextBeforeId: number | null
 }
 
+export type PlotStoryEventDetail = {
+  eventId: number
+  title: string
+  description: string
+  directive: string
+  suitabilityHint: string
+  dispatchMode: PlotDispatchMode
+  scheduledTime: SceneTimeValue | null
+  deadlineTime: SceneTimeValue | null
+  allowRepeat: boolean
+  repeatCooldownMinutes: number
+  eventEnabled: boolean
+}
+
+export type PlotStoryNode = {
+  slotKey: string
+  position: number
+  revealed: boolean
+  enabled: boolean
+  sessionDisabled: boolean
+  eventInjected: boolean
+  eventInjectionCount: number
+  lastEventInjectionTurnId: number | null
+  sourceInjected: boolean
+  sourceInjectionCount: number
+  lastSourceInjectionTurnId: number | null
+  eventDetail: PlotStoryEventDetail | null
+}
+
+export type PlotStoryLine = {
+  kind: 'outline' | 'pool'
+  id: number
+  name: string
+  description: string
+  enabled: boolean
+  nodes: PlotStoryNode[]
+}
+
+export type SessionPlotStory = {
+  sessionId: string
+  spoilerProtectionEnabled: boolean
+  outlines: PlotStoryLine[]
+  pools: PlotStoryLine[]
+}
+
 export type PlotPoolInput = {
   name: string
   description: string

@@ -368,3 +368,99 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy(
         assert retained_overrides.disabled_event_ids == frozenset((event.id,))
     finally:
         gateway.close()
+
+
+def test_plot_data_aggregates_decisions_by_event_and_source(
+    monkeypatch,
+) -> None:
+    gateway = DataServiceGateway(":memory:")
+    try:
+        gateway.initialize()
+        service = gateway.plot_scheduling
+        scene_time = SceneTime(1, 1, 1, 12)
+        pool_trigger = models.StagedPlotScheduleDecision(
+            source_kind=models.PLOT_SOURCE_POOL,
+            source_id=101,
+            event_id=101,
+            container_id=10,
+            decision_status=models.PLOT_DECISION_TRIGGERED,
+            dispatch_mode=models.PLOT_DISPATCH_SOFT,
+            scene_time=scene_time,
+            event_snapshot={"eventTitle": "重复事件"},
+        )
+        outline_trigger = replace(
+            pool_trigger,
+            source_kind=models.PLOT_SOURCE_OUTLINE,
+            source_id=201,
+            container_id=20,
+        )
+        deferred = replace(
+            pool_trigger,
+            source_id=102,
+            event_id=102,
+            decision_status=models.PLOT_DECISION_DEFERRED,
+        )
+        service.append_decisions("s_forest001", 1, (pool_trigger,))
+        service.append_decisions("s_forest001", 4, (outline_trigger,))
+        service.append_decisions("s_forest001", 5, (deferred,))
+
+        decision_selects: list[str] = []
+        original_execute_sql = gateway.database.execute_sql
+
+        def _tracked_execute_sql(sql: str, *args: object, **kwargs: object):
+            if (
+                sql.lstrip().upper().startswith("SELECT")
+                and 'FROM "rpg_session_plot_schedule_decisions"' in sql
+            ):
+                decision_selects.append(sql)
+            return original_execute_sql(sql, *args, **kwargs)
+
+        monkeypatch.setattr(
+            gateway.database,
+            "execute_sql",
+            _tracked_execute_sql,
+        )
+        result = service.summarize_session_decisions(
+            "s_forest001",
+            decision_statuses=(models.PLOT_DECISION_TRIGGERED,),
+        )
+
+        assert result.events == (
+            models.SessionPlotEventDecisionAggregate(
+                event_id=101,
+                decision_count=2,
+                latest_turn_id=4,
+            ),
+        )
+        assert result.sources == (
+            models.SessionPlotSourceDecisionAggregate(
+                source_kind=models.PLOT_SOURCE_OUTLINE,
+                source_id=201,
+                decision_count=1,
+                latest_turn_id=4,
+            ),
+            models.SessionPlotSourceDecisionAggregate(
+                source_kind=models.PLOT_SOURCE_POOL,
+                source_id=101,
+                decision_count=1,
+                latest_turn_id=1,
+            ),
+        )
+        assert len(decision_selects) == 2
+
+        assert service.summarize_session_decisions(
+            "s_forest001",
+            decision_statuses=(),
+        ) == models.SessionPlotDecisionAggregates()
+        with pytest.raises(ValueError, match="unsupported plot decision statuses"):
+            service.summarize_session_decisions(
+                "s_forest001",
+                decision_statuses=("unknown",),
+            )
+        with pytest.raises(FileNotFoundError):
+            service.summarize_session_decisions(
+                "missing",
+                decision_statuses=(models.PLOT_DECISION_TRIGGERED,),
+            )
+    finally:
+        gateway.close()

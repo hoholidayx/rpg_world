@@ -132,6 +132,27 @@ class SessionPlotScheduleDecision:
 
 
 @dataclass(frozen=True)
+class SessionPlotEventDecisionAggregate:
+    event_id: int
+    decision_count: int
+    latest_turn_id: int
+
+
+@dataclass(frozen=True)
+class SessionPlotSourceDecisionAggregate:
+    source_kind: str
+    source_id: int
+    decision_count: int
+    latest_turn_id: int
+
+
+@dataclass(frozen=True)
+class SessionPlotDecisionAggregates:
+    events: tuple[SessionPlotEventDecisionAggregate, ...] = ()
+    sources: tuple[SessionPlotSourceDecisionAggregate, ...] = ()
+
+
+@dataclass(frozen=True)
 class StagedPlotScheduleDecision:
     source_kind: str
     source_id: int

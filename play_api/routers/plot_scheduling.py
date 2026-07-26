@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,6 +20,11 @@ from rpg_core.rp_modules.plot_scheduler import (
     PlotPatchUnset,
     PlotScheduleConflictError,
     PlotScheduleManagementService,
+    PlotStoryEventDetail,
+    PlotStoryLine,
+    PlotStoryNode,
+    PlotStoryProjectionService,
+    SessionPlotStory,
     UpdatePlotEventCommand,
     UpdatePlotNodeCommand,
     UpdatePlotOutlineCommand,
@@ -276,6 +281,63 @@ class SessionPlotScheduleResponse(BaseModel):
     next_before_id: int | None = Field(alias="nextBeforeId")
 
 
+class PlotStoryEventDetailResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_id: int = Field(alias="eventId")
+    title: str
+    description: str
+    directive: str
+    suitability_hint: str = Field(alias="suitabilityHint")
+    dispatch_mode: str = Field(alias="dispatchMode")
+    scheduled_time: SceneTimePayload | None = Field(alias="scheduledTime")
+    deadline_time: SceneTimePayload | None = Field(alias="deadlineTime")
+    allow_repeat: bool = Field(alias="allowRepeat")
+    repeat_cooldown_minutes: int = Field(alias="repeatCooldownMinutes")
+    event_enabled: bool = Field(alias="eventEnabled")
+
+
+class PlotStoryNodeResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    slot_key: str = Field(alias="slotKey")
+    position: int
+    revealed: bool
+    enabled: bool
+    session_disabled: bool = Field(alias="sessionDisabled")
+    event_injected: bool = Field(alias="eventInjected")
+    event_injection_count: int = Field(alias="eventInjectionCount")
+    last_event_injection_turn_id: int | None = Field(
+        alias="lastEventInjectionTurnId"
+    )
+    source_injected: bool = Field(alias="sourceInjected")
+    source_injection_count: int = Field(alias="sourceInjectionCount")
+    last_source_injection_turn_id: int | None = Field(
+        alias="lastSourceInjectionTurnId"
+    )
+    event_detail: PlotStoryEventDetailResponse | None = Field(alias="eventDetail")
+
+
+class PlotStoryLineResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: Literal["outline", "pool"]
+    id: int
+    name: str
+    description: str
+    enabled: bool
+    nodes: list[PlotStoryNodeResponse] = Field(default_factory=list)
+
+
+class SessionPlotStoryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(alias="sessionId")
+    spoiler_protection_enabled: bool = Field(alias="spoilerProtectionEnabled")
+    outlines: list[PlotStoryLineResponse] = Field(default_factory=list)
+    pools: list[PlotStoryLineResponse] = Field(default_factory=list)
+
+
 def _service_call(call: Callable[[], _T]) -> _T:
     try:
         return call()
@@ -291,6 +353,10 @@ def _service_call(call: Callable[[], _T]) -> _T:
 
 def _plot_management() -> PlotScheduleManagementService:
     return PlotScheduleManagementService(get_data_service_gateway().plot_scheduling)
+
+
+def _plot_story_projection() -> PlotStoryProjectionService:
+    return PlotStoryProjectionService(get_data_service_gateway().plot_scheduling)
 
 
 def _time_response(value: SceneTime | None) -> SceneTimePayload | None:
@@ -402,6 +468,71 @@ def _decision_response(
         errorCode=value.error_code,
         errorMessage=value.error_message,
         createdAt=value.created_at,
+    )
+
+
+def _plot_story_event_detail_response(
+    value: PlotStoryEventDetail,
+) -> PlotStoryEventDetailResponse:
+    return PlotStoryEventDetailResponse(
+        eventId=value.event_id,
+        title=value.title,
+        description=value.description,
+        directive=value.directive,
+        suitabilityHint=value.suitability_hint,
+        dispatchMode=value.dispatch_mode,
+        scheduledTime=_time_response(value.scheduled_time),
+        deadlineTime=_time_response(value.deadline_time),
+        allowRepeat=value.allow_repeat,
+        repeatCooldownMinutes=value.repeat_cooldown_minutes,
+        eventEnabled=value.event_enabled,
+    )
+
+
+def _plot_story_node_response(value: PlotStoryNode) -> PlotStoryNodeResponse:
+    return PlotStoryNodeResponse(
+        slotKey=value.slot_key,
+        position=value.position,
+        revealed=value.revealed,
+        enabled=value.enabled,
+        sessionDisabled=value.session_disabled,
+        eventInjected=value.event_injected,
+        eventInjectionCount=value.event_injection_count,
+        lastEventInjectionTurnId=value.last_event_injection_turn_id,
+        sourceInjected=value.source_injected,
+        sourceInjectionCount=value.source_injection_count,
+        lastSourceInjectionTurnId=value.last_source_injection_turn_id,
+        eventDetail=(
+            _plot_story_event_detail_response(value.event_detail)
+            if value.event_detail is not None
+            else None
+        ),
+    )
+
+
+def _plot_story_line_response(
+    value: PlotStoryLine,
+) -> PlotStoryLineResponse:
+    return PlotStoryLineResponse(
+        kind=value.kind,
+        id=value.id,
+        name=value.name,
+        description=value.description,
+        enabled=value.enabled,
+        nodes=[_plot_story_node_response(node) for node in value.nodes],
+    )
+
+
+def _plot_story_response(
+    value: SessionPlotStory,
+) -> SessionPlotStoryResponse:
+    return SessionPlotStoryResponse(
+        sessionId=value.session_id,
+        spoilerProtectionEnabled=value.spoiler_protection_enabled,
+        outlines=[
+            _plot_story_line_response(line) for line in value.outlines
+        ],
+        pools=[_plot_story_line_response(line) for line in value.pools],
     )
 
 
@@ -881,6 +1012,24 @@ async def reorder_plot_nodes(
         )
     )
     return [_node_response(value) for value in values]
+
+
+@router.get(
+    "/sessions/{session_id}/plot-story",
+    response_model=SessionPlotStoryResponse,
+)
+async def get_session_plot_story(
+    session_id: str,
+    reveal_spoilers: bool = Query(default=False, alias="revealSpoilers"),
+) -> SessionPlotStoryResponse:
+    await resolve_session_or_404(session_id)
+    value = _service_call(
+        lambda: _plot_story_projection().project(
+            session_id,
+            reveal_spoilers=reveal_spoilers,
+        )
+    )
+    return _plot_story_response(value)
 
 
 @router.get(

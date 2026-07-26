@@ -215,6 +215,9 @@ export function useSessionRoomData({
           queryKey: ['play-session-story-memories', sessionId],
           refetchType: 'none',
         }),
+        queryClient.invalidateQueries({
+          queryKey: ['play-session-plot-story', sessionId],
+        }),
         queryClient.invalidateQueries({ queryKey: ['play-session-context-preview', sessionId] }),
       ])
       if (!historyRefreshed) throw new Error('history page refresh failed')

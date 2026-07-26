@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Collection, Iterable, Mapping
 
-from peewee import Database, SQL
+from peewee import Database, SQL, fn
 
 from commons.scene_time import SceneTime
 from rpg_data import models
@@ -470,6 +470,95 @@ class PlotSchedulingRepository:
             )
         )
         return [_to_decision(row) for row in rows]
+
+    def summarize_decisions(
+        self,
+        session_id: str,
+        *,
+        decision_statuses: Collection[str],
+    ) -> models.SessionPlotDecisionAggregates:
+        statuses = tuple(sorted(set(decision_statuses)))
+        if not statuses:
+            return models.SessionPlotDecisionAggregates()
+
+        event_count = fn.COUNT(SessionPlotScheduleDecisionRecord.id).alias(
+            "decision_count"
+        )
+        event_latest_turn = fn.MAX(
+            SessionPlotScheduleDecisionRecord.turn_id
+        ).alias("latest_turn_id")
+        event_query = (
+            SessionPlotScheduleDecisionRecord
+            .select(
+                SessionPlotScheduleDecisionRecord.event_id,
+                event_count,
+                event_latest_turn,
+            )
+            .where(
+                (SessionPlotScheduleDecisionRecord.session == str(session_id))
+                & (
+                    SessionPlotScheduleDecisionRecord.decision_status.in_(
+                        statuses
+                    )
+                )
+            )
+            .group_by(SessionPlotScheduleDecisionRecord.event_id)
+            .order_by(SessionPlotScheduleDecisionRecord.event_id)
+        )
+
+        source_count = fn.COUNT(SessionPlotScheduleDecisionRecord.id).alias(
+            "decision_count"
+        )
+        source_latest_turn = fn.MAX(
+            SessionPlotScheduleDecisionRecord.turn_id
+        ).alias("latest_turn_id")
+        source_query = (
+            SessionPlotScheduleDecisionRecord
+            .select(
+                SessionPlotScheduleDecisionRecord.source_kind,
+                SessionPlotScheduleDecisionRecord.source_id,
+                source_count,
+                source_latest_turn,
+            )
+            .where(
+                (SessionPlotScheduleDecisionRecord.session == str(session_id))
+                & (
+                    SessionPlotScheduleDecisionRecord.decision_status.in_(
+                        statuses
+                    )
+                )
+            )
+            .group_by(
+                SessionPlotScheduleDecisionRecord.source_kind,
+                SessionPlotScheduleDecisionRecord.source_id,
+            )
+            .order_by(
+                SessionPlotScheduleDecisionRecord.source_kind,
+                SessionPlotScheduleDecisionRecord.source_id,
+            )
+        )
+        with self._database.atomic():
+            event_rows = list(event_query.dicts())
+            source_rows = list(source_query.dicts())
+        return models.SessionPlotDecisionAggregates(
+            events=tuple(
+                models.SessionPlotEventDecisionAggregate(
+                    event_id=int(row["event_id"]),
+                    decision_count=int(row["decision_count"]),
+                    latest_turn_id=int(row["latest_turn_id"]),
+                )
+                for row in event_rows
+            ),
+            sources=tuple(
+                models.SessionPlotSourceDecisionAggregate(
+                    source_kind=str(row["source_kind"]),
+                    source_id=int(row["source_id"]),
+                    decision_count=int(row["decision_count"]),
+                    latest_turn_id=int(row["latest_turn_id"]),
+                )
+                for row in source_rows
+            ),
+        )
 
     def create_decisions(
         self,

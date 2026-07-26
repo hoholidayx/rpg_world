@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { BookOpenText, Images, LogOut, UsersRound } from 'lucide-react'
+import { BookOpenText, Images, LogOut, Route, UsersRound } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { buildDreamPageHref } from '@/features/dream/dreamNavigation'
@@ -20,6 +20,7 @@ import { SessionSettingsMenu } from './SessionSettingsMenu'
 import { SessionMediaBackground } from './SessionMediaBackground'
 import { SessionMediaGallery } from './SessionMediaGallery'
 import { SessionRPModulesDialog } from './SessionRPModulesDialog'
+import { SessionPlotStoryPanel } from './SessionPlotStoryPanel'
 import { SessionStatusHud } from './SessionStatusHud'
 import { SessionStoryPanel, type SessionStoryTab } from './SessionStoryPanel'
 import { SessionTimeline } from './SessionTimeline'
@@ -50,6 +51,7 @@ import {
 
 type SessionWorkspaceState =
   | { kind: 'world'; tab: SessionWorldTab; focusTableId?: number }
+  | { kind: 'plot' }
   | { kind: 'story'; tab: SessionStoryTab }
   | null
 
@@ -519,6 +521,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       queryClient.removeQueries({ queryKey: ['play-session-summaries', sessionId] })
       queryClient.removeQueries({ queryKey: ['play-session-summary', sessionId] })
       queryClient.removeQueries({ queryKey: ['play-session-story-memories', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-plot-story', sessionId] })
       queryClient.removeQueries({ queryKey: ['play-session-context-preview', sessionId] })
       queryClient.removeQueries({ queryKey: ['session-main-llm', sessionId] })
       queryClient.removeQueries({ queryKey: ['session-rp-modules', sessionId] })
@@ -631,6 +634,23 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             >
               <UsersRound size={17} />
               <span className="hidden xl:inline">角色与状态</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                layout.setSettingsOpen(false)
+                setWorkspacePanel({ kind: 'plot' })
+              }}
+              className={cn(
+                'flex h-10 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-black shadow-sm transition dark:bg-slate-900',
+                workspacePanel?.kind === 'plot'
+                  ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/60 dark:bg-amber-500/15 dark:text-amber-200'
+                  : 'border-slate-200 text-slate-700 hover:border-amber-200 hover:bg-amber-50 hover:text-amber-800 dark:border-slate-700 dark:text-slate-300',
+              )}
+              aria-label="打开剧情故事面板"
+            >
+              <Route size={17} />
+              <span className="hidden xl:inline">剧情故事</span>
             </button>
             <button
               type="button"
@@ -797,6 +817,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           const returnTo = `/session/${encodeURIComponent(sessionId)}`
           router.push(buildDreamPageHref(sessionId, returnTo))
         }}
+      />
+      <SessionPlotStoryPanel
+        sessionId={sessionId}
+        open={workspacePanel?.kind === 'plot'}
+        onClose={() => setWorkspacePanel(null)}
       />
 
       <SessionDerivationDialog

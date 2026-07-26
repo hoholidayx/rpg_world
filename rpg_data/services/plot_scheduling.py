@@ -421,6 +421,25 @@ class PlotSchedulingDataService:
         self._require_session(session_id)
         return self._records.list_decisions_for_turns(session_id, turn_ids)
 
+    def summarize_session_decisions(
+        self,
+        session_id: str,
+        *,
+        decision_statuses: Collection[str],
+    ) -> models.SessionPlotDecisionAggregates:
+        self._require_session(session_id)
+        statuses = frozenset(str(status) for status in decision_statuses)
+        unsupported = statuses - models.PLOT_DECISION_STATUSES
+        if unsupported:
+            raise ValueError(
+                "unsupported plot decision statuses: "
+                + ", ".join(sorted(unsupported))
+            )
+        return self._records.summarize_decisions(
+            session_id,
+            decision_statuses=statuses,
+        )
+
     def set_session_event_disabled(
         self,
         session_id: str,
