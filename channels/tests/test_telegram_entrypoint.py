@@ -11,10 +11,16 @@ import pytest
 import run_telegram
 
 
-def _bot(*, enabled: bool = True, reference_menu_enabled: bool = False):
+def _bot(
+    *,
+    enabled: bool = True,
+    reference_menu_enabled: bool = False,
+    turn_annotation_cards_enabled: bool = True,
+):
     return SimpleNamespace(
         enabled=enabled,
         reference_menu_enabled=reference_menu_enabled,
+        turn_annotation_cards_enabled=turn_annotation_cards_enabled,
     )
 
 
@@ -25,18 +31,57 @@ def _settings(*bots):
     )
 
 
+def test_reference_runtime_is_requested_by_menu_or_turn_cards(monkeypatch):
+    monkeypatch.setattr(
+        run_telegram,
+        "channels_settings",
+        _settings(
+            _bot(
+                enabled=True,
+                reference_menu_enabled=False,
+                turn_annotation_cards_enabled=True,
+            ),
+        ),
+    )
+
+    assert run_telegram._reference_runtime_requested() is True
+
+    monkeypatch.setattr(
+        run_telegram,
+        "channels_settings",
+        _settings(
+            _bot(
+                enabled=True,
+                reference_menu_enabled=False,
+                turn_annotation_cards_enabled=False,
+            ),
+        ),
+    )
+    assert run_telegram._reference_runtime_requested() is False
+
+
 @pytest.mark.asyncio
 async def test_main_skips_gateway_when_no_enabled_bot_requests_references(
     monkeypatch,
 ):
     settings = _settings(
-        _bot(enabled=True, reference_menu_enabled=False),
-        _bot(enabled=False, reference_menu_enabled=True),
+        _bot(
+            enabled=True,
+            reference_menu_enabled=False,
+            turn_annotation_cards_enabled=False,
+        ),
+        _bot(
+            enabled=False,
+            reference_menu_enabled=True,
+            turn_annotation_cards_enabled=False,
+        ),
     )
     runner_calls = []
 
     def unexpected_gateway():
-        raise AssertionError("Gateway must not be created without a reference menu")
+        raise AssertionError(
+            "Gateway must not be created without a reference feature"
+        )
 
     async def fake_runner(*, reference_reader, configure_logging):
         runner_calls.append((reference_reader, configure_logging))

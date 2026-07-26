@@ -35,6 +35,7 @@ class TelegramBotSettings:
     allow_from: list[str] | None = None
     streaming: bool = True
     reference_menu_enabled: bool = False
+    turn_annotation_cards_enabled: bool = True
     proxy: str = ""
     stream_edit_interval_ms: int = 800
     stream_edit_min_chars: int = 24
@@ -215,6 +216,12 @@ class ChannelsSettings(ProfiledYamlSettings):
                 "channels.telegram.bots",
                 "reference_menu_enabled",
                 False,
+            ),
+            turn_annotation_cards_enabled=self._bool(
+                bot,
+                "channels.telegram.bots",
+                "turn_annotation_cards_enabled",
+                True,
             ),
             proxy=str(bot.get("proxy", "") or ""),
             stream_edit_interval_ms=self._int(bot, "channels.telegram.bots", "stream_edit_interval_ms", 800),

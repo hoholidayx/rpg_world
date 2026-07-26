@@ -24,9 +24,13 @@ if TYPE_CHECKING:
     from rpg_data.services import DataServiceGateway
 
 
-def _reference_menu_requested() -> bool:
+def _reference_runtime_requested() -> bool:
     return any(
-        bot.enabled and bot.reference_menu_enabled
+        bot.enabled
+        and (
+            bot.reference_menu_enabled
+            or bot.turn_annotation_cards_enabled
+        )
         for bot in channels_settings.telegram_bots
     )
 
@@ -94,7 +98,7 @@ async def main() -> int:
     gateway: DataServiceGateway | None = None
     reference_reader: SessionReferenceReader | None = None
     try:
-        if _reference_menu_requested():
+        if _reference_runtime_requested():
             try:
                 gateway = get_data_service_gateway()
                 reference_reader, initialization_cancellation = (
@@ -106,14 +110,16 @@ async def main() -> int:
                 raise
             except Exception:
                 logger.exception(
-                    "Telegram 资料查询初始化失败，将以仅聊天模式继续启动"
+                    "Telegram Session Reference 初始化失败，"
+                    "将以仅聊天模式继续启动"
                 )
                 if gateway is not None:
                     try:
                         gateway.close()
                     except Exception:
                         logger.exception(
-                            "Telegram 资料查询降级时关闭数据 Gateway 失败"
+                            "Telegram Session Reference 降级时关闭数据 "
+                            "Gateway 失败"
                         )
                 gateway = None
                 reference_reader = None
@@ -130,7 +136,9 @@ async def main() -> int:
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    logger.exception("Telegram 资料查询 runtime 关闭失败")
+                    logger.exception(
+                        "Telegram Session Reference runtime 关闭失败"
+                    )
         finally:
             if gateway is not None:
                 try:

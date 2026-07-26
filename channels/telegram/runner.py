@@ -1,7 +1,7 @@
 """Telegram 独立入口。
 
 在独立进程中启动所有 enabled=true 的 Telegram bot。
-写操作通过 ``AgentClient`` 访问独立 Agent 服务，可注入共享只读资料 Reader。
+写操作通过 ``AgentClient`` 访问独立 Agent 服务，可注入共享 Session Reference Reader。
 """
 
 from __future__ import annotations
@@ -91,6 +91,9 @@ async def _start_enabled_bots(
                 session_title=str(session.get("title") or bot.session_title),
                 agent_client=client,
                 reference_menu_enabled=bot.reference_menu_enabled,
+                turn_annotation_cards_enabled=(
+                    bot.turn_annotation_cards_enabled
+                ),
                 reference_reader=reference_reader,
             )
             start_task = asyncio.create_task(adapter.start(), name=f"telegram:{bot.name}")

@@ -180,16 +180,48 @@ class SessionReferenceSummarySource:
     batch_turn_ranges: tuple[SummaryBatchTurnRange, ...] = ()
 
 
+@dataclass(frozen=True)
+class SessionReferenceNarrativeOutcomeFact:
+    """Persisted Outcome fields needed by lightweight-channel projections."""
+
+    outcome_code: str
+    reason: str = ""
+    actor: str = ""
+
+
+@dataclass(frozen=True)
+class SessionReferencePlotDecisionFact:
+    """Persisted Plot decision fields without exposing the full ledger row."""
+
+    decision_id: int
+    source_kind: str
+    decision_status: str
+    event_title: str | None = None
+    directive: str | None = None
+
+
+@dataclass(frozen=True)
+class SessionReferenceTurnAnnotationFacts:
+    """One Session-scoped turn's persisted annotation facts."""
+
+    turn_id: int
+    outcome: SessionReferenceNarrativeOutcomeFact | None = None
+    plot_decisions: tuple[SessionReferencePlotDecisionFact, ...] = ()
+
+
 __all__ = [
     "ReferenceDataPage",
     "SessionReferenceCharacter",
     "SessionReferenceCharacterDetail",
     "SessionReferenceCharacterDetailItem",
     "SessionReferenceLocator",
+    "SessionReferenceNarrativeOutcomeFact",
+    "SessionReferencePlotDecisionFact",
     "SessionReferenceScope",
     "SessionReferenceStatusOrder",
     "SessionReferenceStatusTableDetail",
     "SessionReferenceStatusTableItem",
     "SessionReferenceSummarySource",
+    "SessionReferenceTurnAnnotationFacts",
     "SummaryBatchTurnRange",
 ]

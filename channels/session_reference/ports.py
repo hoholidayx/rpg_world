@@ -16,6 +16,7 @@ from rpg_data.model.session_reference import (
     SessionReferenceStatusTableItem,
     SessionReferenceStatusOrder,
     SessionReferenceSummarySource,
+    SessionReferenceTurnAnnotationFacts,
 )
 from rpg_memory.persistent.reference import PersistentMemoryReferenceItem
 
@@ -24,6 +25,7 @@ from channels.session_reference.models import (
     CharacterDetail,
     CharacterDetailSummary,
     CharacterSummary,
+    CommittedTurnAnnotations,
     PersistentMemoryDetail,
     PersistentMemorySummary,
     ReferencePage,
@@ -104,6 +106,12 @@ class SessionReferenceDataPort(Protocol):
         locator: SessionReferenceLocator,
     ) -> SessionReferenceSummarySource: ...
 
+    def get_turn_annotation_facts(
+        self,
+        locator: SessionReferenceLocator,
+        turn_id: int,
+    ) -> SessionReferenceTurnAnnotationFacts: ...
+
 
 class SummaryReferenceProvider(Protocol):
     def list_summaries(
@@ -161,6 +169,12 @@ class SessionReferenceReader(Protocol):
         self,
         locator: SessionReferenceLocator,
     ) -> SessionReferenceScope: ...
+
+    async def get_turn_annotations(
+        self,
+        locator: SessionReferenceLocator,
+        turn_id: int,
+    ) -> CommittedTurnAnnotations: ...
 
     async def list_characters(
         self,

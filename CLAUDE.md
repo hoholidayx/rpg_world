@@ -375,6 +375,10 @@ Telegram 例外：入口卡、角色按钮、`/sessions`、无参数 `/session_s
 scope 查询建立的 ready 数据库快照为准，当前快照完成后才观察 lifecycle 变化；下一次读取必须拒绝
 非 ready Session。菜单标题、资源名称、列表简介、分组、metadata、状态 key/value 和 Evidence
 一律作为纯文本转义，只有详情正文允许 Markdown。
+Outcome 与 Plot 注入卡片也使用同一 Reader：仅在 Agent `DONE` 携带正数 committed turn ID 且
+助手正文完整投递后，按原请求 Session 的 ready 快照读取 ledger。Outcome 只展示 canonical 标签、
+actor/reason；Plot 只展示 triggered 的 event title/directive。卡片读取或投递失败不得改变已提交
+回复的成功状态，Plot directive 不进入 Agent SSE。
 
 ### Telegram 渠道当前能力
 
@@ -390,6 +394,7 @@ Telegram 是轻量入口、推送通知、快速回复和兜底交互；新增�
 | 命令 | 轻量 Bot 菜单、本地动态 `/help`、后端斜杠命令和 Telegram 命令规范化 |
 | 入口 | `/start` 展示故事、会话短 ID、玩家角色及角色/会话/开始游玩按钮；invalid 角色先进入按钮选择 |
 | 资料 | 可选 `/info` 多段菜单只读查看角色、状态、剧情归纳、Story Memory 与主 Agent 可见 Persistent Memory；默认关闭 |
+| Turn 附注 | 正文成功投递后以独立气泡显示 Outcome 裁定及 triggered Plot 注入；每 Bot 独立配置，默认开启 |
 | 会话 | 每个 bot 启动时 ensure 默认 catalog session；会话菜单显示 title + 短 ID，支持按钮切换 |
 | 创建 | `/session_create <title>` 或“新建并进入”标题流程创建 session，成功执行 `/session_switch` 后固定切换 |
 | 二段状态 | `TelegramSessionFlow` 用进程内 pending 状态收集新会话标题，支持 `/cancel` 和超时 |
@@ -400,12 +405,13 @@ Telegram 是轻量入口、推送通知、快速回复和兜底交互；新增�
 `run_telegram.py` 是 Session Reference 的唯一数据库 composition root：进程级创建一次 Gateway，
 立即提取窄 Data Service 并组装共享 Reader；同步 SQLite/summary 文件读取通过有界
 `asyncio.to_thread()` 适配，worker 每次在 `finally` 关闭自己的 Peewee 连接。Reader 初始化失败只
-禁用资料能力，不阻塞 Agent 聊天。退出时先停止所有 Bot，再等待只读查询结束并关闭 Reader/Gateway。
+禁用资料菜单和 Turn 附注能力，不阻塞 Agent 聊天。退出时先停止所有 Bot，再等待只读查询结束并关闭 Reader/Gateway。
 
 后续涉及 Telegram 的修改应优先补 `channels/tests/test_telegram.py`，尤其是：
 会话菜单、命令规范化、stream 编辑节流、请求失败/超时、Markdown 渲染、长文本分块。
 Session Reference 应用层改动补 `channels/tests/session_reference/`，Telegram 资料菜单交互改动补
-`channels/tests/test_telegram_reference_flow.py`。
+`channels/tests/test_telegram_reference_flow.py`，Turn 附注卡片改动补
+`channels/tests/test_telegram_turn_annotation_flow.py` 与 `test_telegram_turn_flow.py`。
 
 ### Agent 组合式门面与消息队列
 

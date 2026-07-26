@@ -14,6 +14,7 @@ from channels.session_reference.models import (
     CharacterDetail,
     CharacterDetailSummary,
     CharacterSummary,
+    CommittedTurnAnnotations,
     PersistentMemoryDetail,
     PersistentMemorySummary,
     ReferencePage,
@@ -65,6 +66,17 @@ class ThreadedSessionReferenceReader:
         locator: SessionReferenceLocator,
     ) -> SessionReferenceScope:
         return await self._invoke(self._service.get_scope, locator)
+
+    async def get_turn_annotations(
+        self,
+        locator: SessionReferenceLocator,
+        turn_id: int,
+    ) -> CommittedTurnAnnotations:
+        return await self._invoke(
+            self._service.get_turn_annotations,
+            locator,
+            turn_id,
+        )
 
     async def list_characters(
         self,

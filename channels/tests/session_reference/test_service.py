@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 
 from channels.session_reference import (
+    PlotInjectionAnnotation,
     SessionReferenceApplicationService,
     SessionReferenceLocator,
     SessionReferenceNotFoundError,
@@ -26,10 +27,13 @@ from rpg_data.model.session_reference import (
     SessionReferenceCharacter,
     SessionReferenceCharacterDetail,
     SessionReferenceCharacterDetailItem,
+    SessionReferenceNarrativeOutcomeFact,
+    SessionReferencePlotDecisionFact,
     SessionReferenceScope,
     SessionReferenceStatusOrder,
     SessionReferenceStatusTableDetail,
     SessionReferenceStatusTableItem,
+    SessionReferenceTurnAnnotationFacts,
 )
 from rpg_data.model.status import StatusTableDocument, StatusTableRow
 from rpg_memory.persistent.reference import (
@@ -144,6 +148,37 @@ class FakeData:
             ),
         )
         self.last_status_order: SessionReferenceStatusOrder | None = None
+        self.turn_annotations = SessionReferenceTurnAnnotationFacts(
+            turn_id=9,
+            outcome=SessionReferenceNarrativeOutcomeFact(
+                outcome_code="success_with_cost",
+                reason="穿过吊桥",
+                actor="林晚",
+            ),
+            plot_decisions=(
+                SessionReferencePlotDecisionFact(
+                    decision_id=1,
+                    source_kind="outline",
+                    decision_status="triggered",
+                    event_title="封印异动",
+                    directive="描写封印首次异动。",
+                ),
+                SessionReferencePlotDecisionFact(
+                    decision_id=2,
+                    source_kind="pool",
+                    decision_status="deferred",
+                    event_title="暂缓事件",
+                    directive="不得展示。",
+                ),
+                SessionReferencePlotDecisionFact(
+                    decision_id=3,
+                    source_kind="pool",
+                    decision_status="triggered",
+                    event_title=None,
+                    directive="畸形快照不得展示。",
+                ),
+            ),
+        )
 
     @contextmanager
     def transaction(self):  # noqa: ANN201
@@ -228,6 +263,16 @@ class FakeData:
     def get_status_table(self, locator, table_id):  # noqa: ANN001, ANN201
         self.require_scope(locator)
         return self.status_detail if table_id == self.status_detail.id else None
+
+    def get_turn_annotation_facts(
+        self,
+        locator,
+        turn_id,
+    ):  # noqa: ANN001, ANN201
+        self.require_scope(locator)
+        if turn_id == self.turn_annotations.turn_id:
+            return self.turn_annotations
+        return SessionReferenceTurnAnnotationFacts(turn_id=turn_id)
 
 
 class FakeSummaries:
@@ -415,6 +460,51 @@ def test_scope_and_all_five_player_projections() -> None:
         LOCATOR,
         "persistent-1",
     ).text.startswith("钟楼")
+
+
+def test_turn_annotations_project_only_player_visible_committed_facts() -> None:
+    data = FakeData()
+    service = _service(data)
+
+    annotations = service.get_turn_annotations(LOCATOR, 9)
+
+    assert annotations.turn_id == 9
+    assert annotations.outcome is not None
+    assert annotations.outcome.outcome_code == "success_with_cost"
+    assert annotations.outcome.label == "成功但有代价"
+    assert annotations.outcome.reason == "穿过吊桥"
+    assert annotations.outcome.actor == "林晚"
+    assert annotations.plot_injections == (
+        PlotInjectionAnnotation(
+            event_title="封印异动",
+            directive="描写封印首次异动。",
+        ),
+    )
+    assert not hasattr(annotations.outcome, "sample_value")
+    assert not hasattr(annotations.outcome, "effective_weights")
+    assert not hasattr(annotations.plot_injections[0], "decision_id")
+    assert data.transaction_entries == 1
+    assert data.transaction_depth == 0
+
+
+def test_turn_annotations_obey_ready_gate_and_resource_policy() -> None:
+    with pytest.raises(SessionReferenceUnavailableError):
+        _service(FakeData(lifecycle="deleting")).get_turn_annotations(
+            LOCATOR,
+            9,
+        )
+
+    service = _service(
+        policy=SessionReferencePolicy(
+            enabled_resources=frozenset({
+                SessionReferenceResource.CHARACTERS,
+            }),
+        )
+    )
+    with pytest.raises(SessionReferenceResourceDisabledError):
+        service.get_turn_annotations(LOCATOR, 9)
+    with pytest.raises(ValueError, match="turn_id"):
+        _service().get_turn_annotations(LOCATOR, 0)
 
 
 def test_every_read_rejects_unready_or_wrong_scope() -> None:
@@ -621,6 +711,68 @@ def test_ready_state_is_fixed_at_snapshot_start() -> None:
     assert data.transaction_depth == 0
     with pytest.raises(SessionReferenceUnavailableError):
         service.list_characters(LOCATOR)
+
+
+def test_turn_annotations_use_ready_state_from_snapshot_start() -> None:
+    class SnapshotAnnotationData(FakeData):
+        def __init__(self) -> None:
+            super().__init__()
+            self._snapshot_scope = None
+
+        @contextmanager
+        def transaction(self):  # noqa: ANN201
+            self.transaction_entries += 1
+            self.transaction_depth += 1
+            self._snapshot_scope = self.scope
+            try:
+                yield
+            finally:
+                self._snapshot_scope = None
+                self.transaction_depth -= 1
+
+        def require_scope(self, locator):  # noqa: ANN001, ANN201
+            assert self.transaction_depth > 0
+            if locator != LOCATOR:
+                raise FileNotFoundError
+            return self._snapshot_scope
+
+        def get_turn_annotation_facts(
+            self,
+            locator,
+            turn_id,
+        ):  # noqa: ANN001, ANN201
+            assert locator == LOCATOR
+            assert self.transaction_depth == 1
+            self.scope = replace(self.scope, lifecycle="deleting")
+            return replace(self.turn_annotations, turn_id=turn_id)
+
+    data = SnapshotAnnotationData()
+    service = _service(data)
+
+    assert service.get_turn_annotations(LOCATOR, 9).outcome is not None
+    assert data.transaction_depth == 0
+    with pytest.raises(SessionReferenceUnavailableError):
+        service.get_turn_annotations(LOCATOR, 9)
+
+
+def test_turn_annotation_failure_exits_snapshot_without_poisoning_reads() -> None:
+    class FailingAnnotationData(FakeData):
+        def get_turn_annotation_facts(
+            self,
+            locator,
+            turn_id,
+        ):  # noqa: ANN001, ANN201
+            self.require_scope(locator)
+            del turn_id
+            raise RuntimeError("annotation unavailable")
+
+    data = FailingAnnotationData()
+    service = _service(data)
+
+    with pytest.raises(RuntimeError, match="annotation unavailable"):
+        service.get_turn_annotations(LOCATOR, 9)
+    assert data.transaction_depth == 0
+    assert service.list_characters(LOCATOR).total == 2
 
 
 def test_external_providers_execute_inside_the_reference_snapshot() -> None:

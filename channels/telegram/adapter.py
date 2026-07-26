@@ -73,6 +73,7 @@ from channels.telegram.turn_flow import (
     TelegramTurnBusyReason,
     TelegramTurnFlow,
 )
+from channels.telegram.turn_annotation_flow import TelegramTurnAnnotationFlow
 from rpg_core.agent.protocol import TurnCancelStatus
 
 if TYPE_CHECKING:
@@ -221,6 +222,7 @@ class TelegramAdapter(ChannelAdapter):
         session_id: str | None = None,
         session_title: str | None = None,
         reference_menu_enabled: bool = False,
+        turn_annotation_cards_enabled: bool = True,
         reference_reader: SessionReferenceReader | None = None,
     ) -> None:
         super().__init__()
@@ -239,6 +241,9 @@ class TelegramAdapter(ChannelAdapter):
         self._default_session_id = (session_id or "").strip()
         self._session_title = (session_title or bot_name or "Telegram").strip()
         self._reference_menu_enabled = bool(reference_menu_enabled)
+        self._turn_annotation_cards_enabled = bool(
+            turn_annotation_cards_enabled
+        )
         self._app: Application | None = None
         self._action_registry = TelegramActionRegistry()
         self._session_flow = TelegramSessionFlow(self._action_registry)
@@ -246,6 +251,19 @@ class TelegramAdapter(ChannelAdapter):
         self._reference_flow = (
             TelegramReferenceFlow(self._action_registry, reference_reader)
             if reference_reader is not None
+            else None
+        )
+        self._turn_annotation_flow = (
+            TelegramTurnAnnotationFlow(
+                reader=reference_reader,
+                presenter=self,
+                workspace_id=self._workspace_id,
+                story_id=self._story_id,
+            )
+            if (
+                self._turn_annotation_cards_enabled
+                and reference_reader is not None
+            )
             else None
         )
         self._turn_flow = TelegramTurnFlow(
@@ -256,6 +274,11 @@ class TelegramAdapter(ChannelAdapter):
             stop_markup_factory=self._build_stop_markup,
             terminal_cleanup=self._cleanup_turn_action,
             active_session_callback=self._sync_active_session,
+            turn_annotation_callback=(
+                self._present_turn_annotations
+                if self._turn_annotation_cards_enabled
+                else None
+            ),
             shutdown_grace_seconds=self._shutdown_grace,
         )
         if agent_client:
@@ -280,6 +303,13 @@ class TelegramAdapter(ChannelAdapter):
             self._action_registry,
             reader,
         )
+        if self._turn_annotation_cards_enabled:
+            self._turn_annotation_flow = TelegramTurnAnnotationFlow(
+                reader=reader,
+                presenter=self,
+                workspace_id=self._workspace_id,
+                story_id=self._story_id,
+            )
 
     # ── 生命周期 ────────────────────────────────────────────────────────
 
@@ -288,7 +318,8 @@ class TelegramAdapter(ChannelAdapter):
         logger.info(
             "telegram: preparing adapter bot={} "
             "(streaming={}, proxy={}, interval_ms={}, min_chars={}, "
-            "request_timeout_ms={}, shutdown_grace_ms={}, reference_menu={})",
+            "request_timeout_ms={}, shutdown_grace_ms={}, reference_menu={}, "
+            "turn_annotation_cards={})",
             self._bot_name,
             self._streaming,
             self._proxy or "<disabled>",
@@ -297,6 +328,7 @@ class TelegramAdapter(ChannelAdapter):
             int(self._request_timeout * 1000),
             int(self._shutdown_grace * 1000),
             self._reference_menu_enabled,
+            self._turn_annotation_cards_enabled,
         )
         if not self._is_valid_token(self._token):
             raise ValueError("telegram: bot_token is empty")
@@ -1388,6 +1420,20 @@ class TelegramAdapter(ChannelAdapter):
                 active.session_id,
                 session_id,
             )
+
+    async def _present_turn_annotations(
+        self,
+        active: ActiveTelegramTurn,
+        turn_id: int,
+    ) -> None:
+        flow = self._turn_annotation_flow
+        if flow is None:
+            return
+        await flow.present(
+            chat_id=active.chat_id,
+            session_id=active.session_id,
+            turn_id=turn_id,
+        )
 
     @staticmethod
     def _is_session_unavailable_error(exc: BaseException) -> bool:

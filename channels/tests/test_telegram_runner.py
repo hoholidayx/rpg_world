@@ -143,6 +143,7 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     assert created_adapters[0]["session_id"] == "resolved_main_workspace"
     assert created_adapters[0]["streaming"] is True
     assert created_adapters[0]["reference_menu_enabled"] is False
+    assert created_adapters[0]["turn_annotation_cards_enabled"] is True
     assert created_adapters[0]["reference_reader"] is reference_reader
     assert created_adapters[0]["shutdown_grace_ms"] == 15000
     assert created_adapters[1]["bot_name"] == "prod"

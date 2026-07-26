@@ -121,6 +121,7 @@ def _flow(
     shutdown_grace_seconds: float = 0.05,
     stop_registration_grace_seconds: float = 0.05,
     active_session_callback=None,  # noqa: ANN001
+    turn_annotation_callback=None,  # noqa: ANN001
 ) -> TelegramTurnFlow:
     return TelegramTurnFlow(
         presenter=presenter,
@@ -133,6 +134,7 @@ def _flow(
         shutdown_grace_seconds=shutdown_grace_seconds,
         stop_registration_grace_seconds=stop_registration_grace_seconds,
         active_session_callback=active_session_callback,
+        turn_annotation_callback=turn_annotation_callback,
     )
 
 
@@ -293,6 +295,121 @@ async def test_finalizing_remains_busy_until_delivery_finishes() -> None:
     edit_gate.set()
     await task
     assert flow.busy_reason("1", "s1") is None
+
+
+async def test_committed_annotations_run_after_reply_delivery_before_release() -> None:
+    presenter = _Presenter()
+    callback_started = asyncio.Event()
+    callback_release = asyncio.Event()
+    callback_calls: list[tuple[str, int]] = []
+    flow: TelegramTurnFlow
+
+    async def present_annotations(
+        active,
+        turn_id,
+    ):  # noqa: ANN001, ANN202
+        assert presenter.edited[-1][2] == "done"
+        assert flow.busy_reason("1", "s1") == TelegramTurnBusyReason.CHAT
+        callback_calls.append((active.session_id, turn_id))
+        callback_started.set()
+        await callback_release.wait()
+
+    flow = _flow(
+        presenter,
+        _Agent([
+            AgentStreamEvent(
+                kind=StreamEventKind.DONE,
+                content="done",
+                committed_turn_id=9,
+            )
+        ]),
+        turn_annotation_callback=present_annotations,
+    )
+    active = flow.reserve("1", "s1").active
+    assert active is not None
+    task = asyncio.create_task(flow.run(active, "go"))
+    flow.attach_task(active, task)
+
+    await callback_started.wait()
+    assert not task.done()
+    assert callback_calls == [("s1", 9)]
+    assert active.reply_delivered is True
+
+    callback_release.set()
+    await task
+    assert flow.busy_reason("1", "s1") is None
+
+
+async def test_annotations_require_positive_committed_turn_and_full_delivery() -> None:
+    callback_calls: list[int] = []
+
+    async def present_annotations(_active, turn_id):  # noqa: ANN001, ANN202
+        callback_calls.append(turn_id)
+
+    presenter = _Presenter()
+    flow = _flow(
+        presenter,
+        _Agent([
+            AgentStreamEvent(
+                kind=StreamEventKind.DONE,
+                content="done",
+                committed_turn_id=None,
+            )
+        ]),
+        turn_annotation_callback=present_annotations,
+    )
+    active = flow.reserve("1", "s1").active
+    assert active is not None
+    await flow.run(active, "go")
+
+    failing_presenter = _Presenter()
+    failing_presenter.fail_terminal_send_after = 0
+    failing_flow = _flow(
+        failing_presenter,
+        _Agent([
+            AgentStreamEvent(
+                kind=StreamEventKind.DONE,
+                content="x" * 5000,
+                committed_turn_id=10,
+            )
+        ]),
+        turn_annotation_callback=present_annotations,
+    )
+    failing_active = failing_flow.reserve("2", "s2").active
+    assert failing_active is not None
+    await failing_flow.run(failing_active, "go")
+
+    assert callback_calls == []
+    assert failing_active.reply_delivered is False
+
+
+async def test_annotation_callback_failure_does_not_relabel_committed_reply() -> None:
+    async def fail_annotations(_active, _turn_id):  # noqa: ANN001, ANN202
+        raise RuntimeError("annotation failed")
+
+    presenter = _Presenter()
+    flow = _flow(
+        presenter,
+        _Agent([
+            AgentStreamEvent(
+                kind=StreamEventKind.DONE,
+                content="done",
+                committed_turn_id=9,
+            )
+        ]),
+        turn_annotation_callback=fail_annotations,
+    )
+    active = flow.reserve("1", "s1").active
+    assert active is not None
+
+    await flow.run(active, "go")
+
+    assert active.reply_delivered is True
+    assert presenter.edited[-1][2] == "done"
+    assert all(
+        "Telegram 投递未完成" not in item[2]
+        for item in presenter.edited
+    )
 
 
 async def test_terminal_action_is_invalidated_before_markup_cleanup_await() -> None:
@@ -779,6 +896,44 @@ async def test_shutdown_timeout_marks_committed_delivery_incomplete() -> None:
 
     assert task.cancelled()
     assert "Telegram 投递未完成" in presenter.edited[-1][2]
+
+
+async def test_shutdown_during_annotations_keeps_delivered_reply_successful() -> None:
+    annotation_started = asyncio.Event()
+    annotation_gate = asyncio.Event()
+
+    async def blocked_annotations(_active, _turn_id):  # noqa: ANN001, ANN202
+        annotation_started.set()
+        await annotation_gate.wait()
+
+    presenter = _Presenter()
+    flow = _flow(
+        presenter,
+        _Agent([
+            AgentStreamEvent(
+                kind=StreamEventKind.DONE,
+                content="done",
+                committed_turn_id=9,
+            )
+        ]),
+        shutdown_grace_seconds=0.001,
+        turn_annotation_callback=blocked_annotations,
+    )
+    active = flow.reserve("1", "s1").active
+    assert active is not None
+    task = asyncio.create_task(flow.run(active, "go"))
+    flow.attach_task(active, task)
+    await annotation_started.wait()
+
+    await flow.shutdown()
+
+    assert task.cancelled()
+    assert active.reply_delivered is True
+    assert presenter.edited[-1][2] == "done"
+    assert all(
+        "Telegram 投递未完成" not in item[2]
+        for item in presenter.edited
+    )
 
 
 async def test_shutdown_grace_bounds_blocked_terminal_fallback() -> None:

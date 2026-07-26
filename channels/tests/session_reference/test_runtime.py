@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from channels.session_reference import (
+    CommittedTurnAnnotations,
     SessionReferenceLocator,
     SessionReferenceReaderClosedError,
     ThreadedSessionReferenceReader,
@@ -53,6 +54,26 @@ async def test_threaded_reader_bounds_workers_and_closes_each_connection() -> No
     await reader.aclose()
     with pytest.raises(SessionReferenceReaderClosedError):
         await reader.get_scope(LOCATOR)
+
+
+async def test_threaded_reader_exposes_turn_annotations_off_loop() -> None:
+    worker_thread_ids: list[int] = []
+    main_thread_id = threading.get_ident()
+    expected = CommittedTurnAnnotations(turn_id=12)
+
+    def get_turn_annotations(_locator, turn_id):  # noqa: ANN001, ANN202
+        worker_thread_ids.append(threading.get_ident())
+        assert turn_id == 12
+        return expected
+
+    reader = ThreadedSessionReferenceReader(
+        SimpleNamespace(get_turn_annotations=get_turn_annotations),
+    )
+
+    assert await reader.get_turn_annotations(LOCATOR, 12) is expected
+    assert worker_thread_ids
+    assert worker_thread_ids != [main_thread_id]
+    await reader.aclose()
 
 
 async def test_aclose_waits_for_worker_after_caller_cancellation() -> None:

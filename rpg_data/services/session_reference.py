@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from peewee import JOIN, Case, Database, fn
 
+from rpg_data.plot_models import PLOT_SOURCE_OUTLINE, PLOT_SOURCE_POOL
 from rpg_data.model import session_reference as models
 from rpg_data.model import status as status_models
 from rpg_data.repositories.records import (
     SessionMessageRecord,
+    SessionNarrativeOutcomeRecord,
+    SessionPlotScheduleDecisionRecord,
     SessionProfileRecord,
     SessionRecord,
     SessionStatusTableRecord,
@@ -348,12 +352,149 @@ class SessionReferenceDataService:
                 ),
             )
 
+    def get_turn_annotation_facts(
+        self,
+        locator: models.SessionReferenceLocator,
+        turn_id: int,
+    ) -> models.SessionReferenceTurnAnnotationFacts:
+        """Read one scoped turn's Outcome and Plot ledger facts."""
+
+        normalized_turn_id = _validated_turn_id(turn_id)
+        with self.transaction():
+            self.require_scope(locator)
+            outcome_row = (
+                SessionNarrativeOutcomeRecord.select(
+                    SessionNarrativeOutcomeRecord.outcome_code.alias(
+                        "_outcome_code"
+                    ),
+                    SessionNarrativeOutcomeRecord.reason.alias("_reason"),
+                    SessionNarrativeOutcomeRecord.actor.alias("_actor"),
+                )
+                .join(
+                    SessionRecord,
+                    on=(
+                        SessionNarrativeOutcomeRecord.session
+                        == SessionRecord.id
+                    ),
+                )
+                .where(
+                    _session_scope_clause(locator)
+                    & (
+                        SessionNarrativeOutcomeRecord.session
+                        == locator.session_id
+                    )
+                    & (
+                        SessionNarrativeOutcomeRecord.turn_id
+                        == normalized_turn_id
+                    )
+                )
+                .dicts()
+                .first()
+            )
+            outcome = (
+                models.SessionReferenceNarrativeOutcomeFact(
+                    outcome_code=str(outcome_row["_outcome_code"]),
+                    reason=str(outcome_row["_reason"] or ""),
+                    actor=str(outcome_row["_actor"] or ""),
+                )
+                if outcome_row is not None
+                else None
+            )
+
+            source_rank = Case(
+                SessionPlotScheduleDecisionRecord.source_kind,
+                (
+                    (PLOT_SOURCE_OUTLINE, 0),
+                    (PLOT_SOURCE_POOL, 1),
+                ),
+                2,
+            )
+            plot_rows = tuple(
+                SessionPlotScheduleDecisionRecord.select(
+                    SessionPlotScheduleDecisionRecord.id.alias("_decision_id"),
+                    SessionPlotScheduleDecisionRecord.source_kind.alias(
+                        "_source_kind"
+                    ),
+                    SessionPlotScheduleDecisionRecord.decision_status.alias(
+                        "_decision_status"
+                    ),
+                    SessionPlotScheduleDecisionRecord.event_snapshot_json.alias(
+                        "_event_snapshot_json"
+                    ),
+                )
+                .join(
+                    SessionRecord,
+                    on=(
+                        SessionPlotScheduleDecisionRecord.session
+                        == SessionRecord.id
+                    ),
+                )
+                .where(
+                    _session_scope_clause(locator)
+                    & (
+                        SessionPlotScheduleDecisionRecord.session
+                        == locator.session_id
+                    )
+                    & (
+                        SessionPlotScheduleDecisionRecord.turn_id
+                        == normalized_turn_id
+                    )
+                )
+                .order_by(
+                    source_rank,
+                    SessionPlotScheduleDecisionRecord.id,
+                )
+                .dicts()
+            )
+            return models.SessionReferenceTurnAnnotationFacts(
+                turn_id=normalized_turn_id,
+                outcome=outcome,
+                plot_decisions=tuple(
+                    _plot_decision_fact_from_row(row) for row in plot_rows
+                ),
+            )
+
 
 def _session_scope_clause(locator: models.SessionReferenceLocator):
     return (
         (SessionRecord.id == str(locator.session_id))
         & (SessionRecord.workspace == str(locator.workspace_id))
         & (SessionRecord.story == int(locator.story_id))
+    )
+
+
+def _validated_turn_id(turn_id: object) -> int:
+    if isinstance(turn_id, bool):
+        raise ValueError("turn_id must be a positive integer")
+    try:
+        normalized = int(turn_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("turn_id must be a positive integer") from exc
+    if normalized <= 0:
+        raise ValueError("turn_id must be a positive integer")
+    return normalized
+
+
+def _plot_decision_fact_from_row(
+    row: dict[str, object],
+) -> models.SessionReferencePlotDecisionFact:
+    event_title: str | None = None
+    directive: str | None = None
+    try:
+        snapshot = json.loads(str(row["_event_snapshot_json"] or ""))
+    except (TypeError, ValueError):
+        snapshot = None
+    if isinstance(snapshot, dict):
+        raw_title = snapshot.get("eventTitle")
+        raw_directive = snapshot.get("directive")
+        event_title = raw_title if isinstance(raw_title, str) else None
+        directive = raw_directive if isinstance(raw_directive, str) else None
+    return models.SessionReferencePlotDecisionFact(
+        decision_id=int(row["_decision_id"]),
+        source_kind=str(row["_source_kind"]),
+        decision_status=str(row["_decision_status"]),
+        event_title=event_title,
+        directive=directive,
     )
 
 

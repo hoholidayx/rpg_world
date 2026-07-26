@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from commons.scene_time import SceneTime
 from rpg_data import models
 from rpg_data.model.session_reference import (
     SessionReferenceLocator,
@@ -71,6 +72,104 @@ def test_reference_scope_requires_exact_catalog_ownership_but_reports_lifecycle(
         data.require_scope(_locator(story_id=2))
     with pytest.raises(FileNotFoundError, match="Session reference scope"):
         data.require_scope(_locator(session_id="missing_session"))
+
+
+def test_turn_annotation_facts_are_scoped_and_stably_ordered(
+    tmp_path: Path,
+) -> None:
+    gateway = get_data_service_gateway(tmp_path / "turn-annotations.sqlite3")
+    data = gateway.session_reference
+    locator = _locator()
+    gateway.narrative_outcomes.append(
+        models.NarrativeOutcomeCreate(
+            session_id=locator.session_id,
+            turn_id=77,
+            outcome_code="success_with_cost",
+            reason="穿过摇晃的吊桥",
+            actor="Bob",
+            sample_value=58,
+            effective_weights=models.NarrativeOutcomeWeights(),
+            effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
+        )
+    )
+    decisions = gateway.plot_scheduling.append_decisions(
+        locator.session_id,
+        77,
+        (
+            models.StagedPlotScheduleDecision(
+                source_kind=models.PLOT_SOURCE_POOL,
+                source_id=20,
+                event_id=20,
+                container_id=2,
+                decision_status=models.PLOT_DECISION_TRIGGERED,
+                dispatch_mode=models.PLOT_DISPATCH_SOFT,
+                scene_time=SceneTime(1, 1, 1, 12),
+                event_snapshot={
+                    "eventTitle": "林间钟声",
+                    "directive": "让钟声打断当前对话。",
+                },
+            ),
+            models.StagedPlotScheduleDecision(
+                source_kind=models.PLOT_SOURCE_OUTLINE,
+                source_id=10,
+                event_id=10,
+                container_id=1,
+                decision_status=models.PLOT_DECISION_TRIGGERED,
+                dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                scene_time=SceneTime(1, 1, 1, 12),
+                event_snapshot={
+                    "eventTitle": "封印异动",
+                    "directive": "描写祭坛封印出现异动。",
+                },
+            ),
+        ),
+    )
+
+    facts = data.get_turn_annotation_facts(locator, 77)
+
+    assert facts.turn_id == 77
+    assert facts.outcome is not None
+    assert facts.outcome.outcome_code == "success_with_cost"
+    assert facts.outcome.reason == "穿过摇晃的吊桥"
+    assert facts.outcome.actor == "Bob"
+    assert [item.source_kind for item in facts.plot_decisions] == [
+        models.PLOT_SOURCE_OUTLINE,
+        models.PLOT_SOURCE_POOL,
+    ]
+    assert [item.event_title for item in facts.plot_decisions] == [
+        "封印异动",
+        "林间钟声",
+    ]
+
+    empty = data.get_turn_annotation_facts(locator, 78)
+    assert empty.outcome is None
+    assert empty.plot_decisions == ()
+    with pytest.raises(FileNotFoundError, match="Session reference scope"):
+        data.get_turn_annotation_facts(
+            _locator(workspace_id="wrong_workspace"),
+            77,
+        )
+    with pytest.raises(FileNotFoundError, match="Session reference scope"):
+        data.get_turn_annotation_facts(_locator(story_id=2), 77)
+    with pytest.raises(ValueError, match="turn_id"):
+        data.get_turn_annotation_facts(locator, 0)
+
+    outline = next(
+        item
+        for item in decisions
+        if item.source_kind == models.PLOT_SOURCE_OUTLINE
+    )
+    gateway.database.execute_sql(
+        """
+        UPDATE rpg_session_plot_schedule_decisions
+        SET event_snapshot_json = ?
+        WHERE id = ?
+        """,
+        ('{"eventTitle":123,"directive":"仍为字符串"}', outline.id),
+    )
+    malformed = data.get_turn_annotation_facts(locator, 77)
+    assert malformed.plot_decisions[0].event_title is None
+    assert malformed.plot_decisions[0].directive == "仍为字符串"
 
 
 def test_character_reference_reads_are_lightweight_paginated_and_scoped(

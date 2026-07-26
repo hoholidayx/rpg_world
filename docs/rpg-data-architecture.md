@@ -146,11 +146,12 @@ Telegram composition root
 
 - `channels.session_reference` 决定 ready 门禁、轻量渠道玩家可见字段、资源分组和公共投影，公开不可变 DTO 与窄 Protocol；它不得持有 Gateway、Repository、Peewee、Telegram 类型或其它业务 runtime。
 - Play API 与 Play WebUI 保持面向 Web 主体验的独立富交互契约，不导入或复用 `channels.session_reference`；两条接入边界只共享下层领域能力和类型化数据事实。
-- `SessionReferenceDataService` 只决定如何用完整 `session_id + workspace_id + story_id` 安全、高效读取角色、状态和 Summary 数据事实。单项查询必须在 SQL 中验证资源归属，不能先按全局 ID 读取再由上层比较。
+- `SessionReferenceDataService` 只决定如何用完整 `session_id + workspace_id + story_id` 安全、高效读取角色、状态、Summary 和已提交 turn annotation 数据事实。单项查询必须在 SQL 中验证资源归属，不能先按全局 ID 读取再由上层比较。
 - 每次公共 Reference 读取都在一个 SQLite `DEFERRED` 快照内完成完整 scope、ready 门禁、Policy、Provider 查询和玩家投影；以快照首次 scope 读取时的 ready 状态为准。本次读取开始后发生的 lifecycle 变化不撕裂当前结果，下一次读取必须观察并拒绝非 ready 状态。
 - Story Memory 规范化和 Persistent Memory 的 active/Evidence-valid/current-revision 投影仍归 `rpg_memory`；Summary Markdown 解析仍归 `rpg_core.summary`。渠道和数据层不得复制这些规则。
 - Telegram Adapter 只接收异步 Reader；`run_telegram.py` 是唯一 Gateway composition root。同步数据库和文件 I/O 必须移出事件循环，并在每次 worker 调用后关闭该线程的连接。
 - Telegram Reference 的菜单标题、资源名称、列表简介、分组、metadata、状态 key/value 和 Evidence 都是结构字段，必须规范化后按纯文本转义；只有详情正文可以进入 Markdown renderer，正文降级不得改变受控标题和 metadata。
+- Telegram 的 Outcome/Plot 卡片只在 committed reply 完整投递后读取：Outcome 玩家投影与 triggered Plot 过滤归 `channels.session_reference`，卡片布局和纯文本 HTML 转义归 Telegram；读取或卡片发送失败不得回写或改判已提交 turn，Plot directive 不进入 Agent SSE。
 - 不同渠道需要不同业务时，通过替换窄 Provider、不可变 Policy、装饰 Reader 或实现完整 Reader Protocol 组合，不通过 Application Service 继承、全局可变 registry 或静默 fallback 扩展。
 
 Status 的产品策略由 Core 持有：`StatusTableAdministrationService` 决定 Story 定义与 Session 表管理规则，`SessionStatusLifecycleService` 决定何时按当前 Story 定义复制或 reset，`SceneStatusService` 决定 Scene 字段约束与 active Scene，`StatusContextService` 决定角色名修复和 Context 可见性，`StatusManager` 决定 Agent 当前 turn 的即时写入与 bootstrap 资格。上述服务只接收窄 Data Port；`StatusDataService` 不重新暴露这些业务入口。

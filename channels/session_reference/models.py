@@ -20,6 +20,7 @@ class SessionReferenceResource(StrEnum):
     SUMMARIES = "summaries"
     STORY_MEMORIES = "story_memories"
     PERSISTENT_MEMORIES = "persistent_memories"
+    TURN_ANNOTATIONS = "turn_annotations"
 
 
 ALL_SESSION_REFERENCE_RESOURCES = frozenset(SessionReferenceResource)
@@ -183,6 +184,27 @@ class EvidenceReference:
 
 
 @dataclass(frozen=True)
+class NarrativeOutcomeAnnotation:
+    outcome_code: str
+    label: str
+    reason: str
+    actor: str | None = None
+
+
+@dataclass(frozen=True)
+class PlotInjectionAnnotation:
+    event_title: str
+    directive: str
+
+
+@dataclass(frozen=True)
+class CommittedTurnAnnotations:
+    turn_id: int
+    outcome: NarrativeOutcomeAnnotation | None = None
+    plot_injections: tuple[PlotInjectionAnnotation, ...] = ()
+
+
+@dataclass(frozen=True)
 class StoryMemorySummary:
     id: int
     title: str
@@ -246,10 +268,13 @@ __all__ = [
     "CharacterDetail",
     "CharacterDetailSummary",
     "CharacterSummary",
+    "CommittedTurnAnnotations",
     "DEFAULT_SESSION_REFERENCE_POLICY",
     "EvidenceReference",
+    "NarrativeOutcomeAnnotation",
     "PersistentMemoryDetail",
     "PersistentMemorySummary",
+    "PlotInjectionAnnotation",
     "ReferencePage",
     "SessionReferenceLocator",
     "SessionReferencePolicy",

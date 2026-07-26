@@ -15,6 +15,11 @@ from telegram import BotCommand, InlineKeyboardMarkup
 from telegram.error import BadRequest, RetryAfter, TimedOut
 
 from agent_service.client import AgentClientError
+from channels.session_reference import (
+    CommittedTurnAnnotations,
+    NarrativeOutcomeAnnotation,
+    PlotInjectionAnnotation,
+)
 from channels.telegram.adapter import TelegramAdapter
 from channels.telegram.render import (
     chunk_rendered_text,
@@ -182,6 +187,76 @@ class TestTelegramAdapter:
         assert agent.calls[-1][0] == "stream"
         assert agent.calls[-1][1][:2] == ("tg_default", "hello")
         assert str(agent.calls[-1][1][2]).startswith("tg_")
+
+    async def test_committed_turn_sends_annotation_cards_from_original_session(
+        self,
+        adapter: TelegramAdapter,
+        mock_app: MagicMock,
+    ):
+        class CommittedAgent(FakeAgent):
+            async def stream(
+                self,
+                *args: str,
+                request_id: str | None = None,
+                **_kwargs: object,
+            ):
+                recorded_args = tuple(args) + (
+                    (request_id,) if request_id is not None else ()
+                )
+                self.calls.append(("stream", recorded_args))
+                yield AgentStreamEvent(
+                    kind=StreamEventKind.DONE,
+                    content="正文",
+                    committed_turn_id=9,
+                    active_session="session_after_done",
+                )
+
+        class AnnotationReader:
+            def __init__(self) -> None:
+                self.calls = []
+
+            async def get_turn_annotations(
+                self,
+                locator,
+                turn_id,
+            ):  # noqa: ANN001, ANN201
+                self.calls.append((locator, turn_id))
+                return CommittedTurnAnnotations(
+                    turn_id=turn_id,
+                    outcome=NarrativeOutcomeAnnotation(
+                        outcome_code="success",
+                        label="成功",
+                        reason="完成目标",
+                    ),
+                    plot_injections=(
+                        PlotInjectionAnnotation(
+                            event_title="封印异动",
+                            directive="描写封印异动。",
+                        ),
+                    ),
+                )
+
+        reader = AnnotationReader()
+        adapter.bind_reference_reader(reader)  # type: ignore[arg-type]
+        adapter.bind_agent_client(CommittedAgent())
+        update = _message_update(123, "继续")
+
+        await adapter._on_message(update, object())
+        await _drain_tasks(adapter._app)
+
+        assert len(reader.calls) == 1
+        locator, turn_id = reader.calls[0]
+        assert locator.session_id == "tg_default"
+        assert locator.workspace_id == "tg_workspace"
+        assert locator.story_id == 1
+        assert turn_id == 9
+        sent_texts = [
+            call.kwargs["text"]
+            for call in mock_app.bot.send_message.await_args_list
+        ]
+        assert any("🎲 剧情裁定" in text for text in sent_texts)
+        assert any("🧭 剧情注入" in text for text in sent_texts)
+        assert adapter.get_session_id("123") == "session_after_done"
 
     async def test_deleted_pinned_session_blocks_message_and_shows_picker(
         self,

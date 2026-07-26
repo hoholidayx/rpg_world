@@ -8,12 +8,16 @@ from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from typing import Iterator, TypeVar
 
+from rpg_core.rp_modules.narrative_outcome.models import (
+    NARRATIVE_OUTCOME_DEFINITION_BY_CODE,
+)
 from rpg_data.model import memory as memory_models
 from rpg_data.model.session import SESSION_LIFECYCLE_READY
 from rpg_data.model.session_reference import (
     SessionReferenceScope as DataSessionReferenceScope,
     SessionReferenceStatusOrder,
 )
+from rpg_data.plot_models import PLOT_DECISION_TRIGGERED
 from rpg_memory.persistent.reference import PersistentMemoryReferenceItem
 
 from channels.session_reference.errors import (
@@ -26,10 +30,13 @@ from channels.session_reference.models import (
     CharacterDetail,
     CharacterDetailSummary,
     CharacterSummary,
+    CommittedTurnAnnotations,
     DEFAULT_SESSION_REFERENCE_POLICY,
     EvidenceReference,
+    NarrativeOutcomeAnnotation,
     PersistentMemoryDetail,
     PersistentMemorySummary,
+    PlotInjectionAnnotation,
     ReferencePage,
     SessionReferenceLocator,
     SessionReferencePolicy,
@@ -101,6 +108,53 @@ class SessionReferenceApplicationService:
                 player_character_id=scope.player_character_id,
                 version=scope.session_version,
                 updated_at=scope.updated_at,
+            )
+
+    def get_turn_annotations(
+        self,
+        locator: SessionReferenceLocator,
+        turn_id: int,
+    ) -> CommittedTurnAnnotations:
+        locator = _normalized_locator(locator)
+        normalized_turn_id = _positive_id(turn_id, "turn_id")
+        with self._snapshot(
+            locator,
+            SessionReferenceResource.TURN_ANNOTATIONS,
+        ):
+            facts = self._data.get_turn_annotation_facts(
+                locator,
+                normalized_turn_id,
+            )
+            outcome = None
+            if facts.outcome is not None:
+                definition = NARRATIVE_OUTCOME_DEFINITION_BY_CODE.get(
+                    facts.outcome.outcome_code
+                )
+                if definition is not None:
+                    outcome = NarrativeOutcomeAnnotation(
+                        outcome_code=definition.code,
+                        label=definition.label,
+                        reason=facts.outcome.reason,
+                        actor=facts.outcome.actor or None,
+                    )
+            plot_injections = tuple(
+                PlotInjectionAnnotation(
+                    event_title=str(item.event_title).strip(),
+                    directive=str(item.directive).strip(),
+                )
+                for item in facts.plot_decisions
+                if (
+                    item.decision_status == PLOT_DECISION_TRIGGERED
+                    and isinstance(item.event_title, str)
+                    and item.event_title.strip()
+                    and isinstance(item.directive, str)
+                    and item.directive.strip()
+                )
+            )
+            return CommittedTurnAnnotations(
+                turn_id=normalized_turn_id,
+                outcome=outcome,
+                plot_injections=plot_injections,
             )
 
     def list_characters(

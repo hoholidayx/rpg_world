@@ -38,6 +38,8 @@ base:
           streaming: true
           # 是否开放只读资料菜单。已知 Telegram 访问控制问题修复前仅在可信环境开启。
           reference_menu_enabled: true
+          # 是否在已提交回复后显示 Outcome 裁定与 Plot 注入卡片。
+          turn_annotation_cards_enabled: true
           # Telegram HTTP 代理；留空表示不启用代理。
           proxy: http://127.0.0.1:7890
           # 流式编辑消息的最小间隔，单位毫秒。

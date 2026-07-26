@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
@@ -68,6 +68,7 @@ class ActiveTelegramTurn:
     terminal_received: bool = False
     stream_event_received: bool = False
     transport_finished: bool = False
+    reply_delivered: bool = False
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,9 @@ class TelegramTurnFlow:
         stop_markup_factory: Callable[[ActiveTelegramTurn], object | None] | None = None,
         terminal_cleanup: Callable[[ActiveTelegramTurn], None] | None = None,
         active_session_callback: Callable[[ActiveTelegramTurn, str], None] | None = None,
+        turn_annotation_callback: (
+            Callable[[ActiveTelegramTurn, int], Awaitable[None]] | None
+        ) = None,
         shutdown_grace_seconds: float = 15.0,
         stop_registration_grace_seconds: float = _STOP_REGISTRATION_GRACE_SECONDS,
     ) -> None:
@@ -135,6 +139,7 @@ class TelegramTurnFlow:
         self._stop_markup_factory = stop_markup_factory
         self._terminal_cleanup = terminal_cleanup
         self._active_session_callback = active_session_callback
+        self._turn_annotation_callback = turn_annotation_callback
         self._shutdown_grace_seconds = max(0.001, float(shutdown_grace_seconds))
         self._stop_registration_grace_seconds = max(
             0.001,
@@ -364,7 +369,16 @@ class TelegramTurnFlow:
                 self._request_preview(active.request_id),
             )
             active.phase = TelegramTurnPhase.FINALIZING
-            if active.terminal_received or active.committed_turn_id is not None:
+            if active.reply_delivered:
+                logger.warning(
+                    "telegram post-delivery finalization failed: "
+                    "chat_id={} session_id={} request_id={} committed_turn_id={}",
+                    active.chat_id,
+                    active.session_id,
+                    self._request_preview(active.request_id),
+                    active.committed_turn_id,
+                )
+            elif active.terminal_received or active.committed_turn_id is not None:
                 await self._render_delivery_incomplete(active)
             else:
                 await self._render_unknown(active)
@@ -453,6 +467,8 @@ class TelegramTurnFlow:
                     continue
                 if active.stop_status == TurnCancelStatus.CANCELLED.value:
                     notice = self._render_stopped(active)
+                elif active.reply_delivered:
+                    continue
                 elif active.terminal_received or active.committed_turn_id is not None:
                     notice = self._render_delivery_incomplete(active)
                 else:
@@ -533,11 +549,36 @@ class TelegramTurnFlow:
                     active.committed_turn_id = event.committed_turn_id
                     self._sync_active_session(active, event.active_session)
                     final_text = event.content or active.accumulated_text
-                    await self._render_success(
+                    delivered = await self._render_success(
                         active,
                         final_text,
                         committed_turn_id=event.committed_turn_id,
                     )
+                    active.reply_delivered = delivered
+                    if (
+                        delivered
+                        and isinstance(event.committed_turn_id, int)
+                        and not isinstance(event.committed_turn_id, bool)
+                        and event.committed_turn_id > 0
+                        and self._turn_annotation_callback is not None
+                    ):
+                        try:
+                            await self._turn_annotation_callback(
+                                active,
+                                event.committed_turn_id,
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            logger.exception(
+                                "telegram turn annotation callback failed: "
+                                "chat_id={} session_id={} request_id={} "
+                                "committed_turn_id={}",
+                                active.chat_id,
+                                active.session_id,
+                                self._request_preview(active.request_id),
+                                event.committed_turn_id,
+                            )
                     break
                 if event.kind == StreamEventKind.ERROR:
                     active.transport_finished = True
@@ -621,7 +662,7 @@ class TelegramTurnFlow:
         text: str,
         *,
         committed_turn_id: int | None = None,
-    ) -> None:
+    ) -> bool:
         display_text = project_rp_text(text, streaming=False) or _EMPTY_REPLY_TEXT
         rendered = render_markdown_to_telegram_html(display_text)
         await self._clear_terminal_controls(active)
@@ -636,6 +677,8 @@ class TelegramTurnFlow:
                 committed_turn_id,
             )
             await self._render_delivery_incomplete(active)
+            return False
+        return True
 
     async def _deliver_chunks(self, active: ActiveTelegramTurn, chunks: list[str]) -> bool:
         if not chunks:
