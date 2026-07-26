@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias, TypeVar
 
-from rpg_core.session.reference import (
+from channels.session_reference import (
     CharacterCard,
     CharacterDetail,
     CharacterDetailSummary,

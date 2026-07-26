@@ -1,4 +1,4 @@
-"""Stable errors returned by the Session reference boundary."""
+"""Stable errors returned by the lightweight-channel reference boundary."""
 
 from __future__ import annotations
 

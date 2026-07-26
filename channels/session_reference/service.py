@@ -1,4 +1,4 @@
-"""Channel-neutral Session reference application service."""
+"""Application service for lightweight-channel Session references."""
 
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from rpg_data.model.session_reference import (
 )
 from rpg_memory.persistent.reference import PersistentMemoryReferenceItem
 
-from rpg_core.session.reference.errors import (
+from channels.session_reference.errors import (
     SessionReferenceNotFoundError,
     SessionReferenceResourceDisabledError,
     SessionReferenceUnavailableError,
 )
-from rpg_core.session.reference.models import (
+from channels.session_reference.models import (
     CharacterCard,
     CharacterDetail,
     CharacterDetailSummary,
@@ -43,7 +43,7 @@ from rpg_core.session.reference.models import (
     SummaryDetail,
     SummarySummary,
 )
-from rpg_core.session.reference.ports import (
+from channels.session_reference.ports import (
     PersistentMemoryReferenceProvider,
     SessionReferenceDataPort,
     StoryMemoryReferenceProvider,

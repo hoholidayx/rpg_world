@@ -123,9 +123,9 @@ Repository 是 `rpg_data` 内部的 Peewee 实现细节，负责查询表达式�
 - `MessageDataService`：主历史 CRUD、turn window/分页、processed flag 聚合与调用方指定的批量标记；不决定 Context 投影或 Summary/Story Memory 候选。
 - `NarrativeOutcomeDataService`：调用方准备好的 Outcome ledger row 追加、按 turn 查询和删除；不判断 Outcome code、sample、权重来源或剧情语义。
 
-### 跨渠道 Session Reference 查询
+### 轻量渠道 Session Reference 查询
 
-已提交 Session 资料使用进程内的公共只读查询边界：
+Telegram 等轻量渠道读取已提交 Session 资料时使用进程内的公共只读查询边界：
 
 ```text
 Telegram composition root
@@ -135,7 +135,7 @@ Telegram composition root
         └── Async SessionReferenceReader
                     │
                     ▼
-          rpg_core.session.reference
+          channels.session_reference
              ├── Summary reader
              ├── Story/Persistent Memory provider
              └── narrow data ports
@@ -144,7 +144,8 @@ Telegram composition root
           rpg_data Data Services
 ```
 
-- `rpg_core.session.reference` 决定 ready 门禁、玩家可见字段、资源分组和公共投影，公开不可变 DTO 与窄 Protocol；它不得持有 Gateway、Repository、Peewee 或渠道类型。
+- `channels.session_reference` 决定 ready 门禁、轻量渠道玩家可见字段、资源分组和公共投影，公开不可变 DTO 与窄 Protocol；它不得持有 Gateway、Repository、Peewee、Telegram 类型或其它业务 runtime。
+- Play API 与 Play WebUI 保持面向 Web 主体验的独立富交互契约，不导入或复用 `channels.session_reference`；两条接入边界只共享下层领域能力和类型化数据事实。
 - `SessionReferenceDataService` 只决定如何用完整 `session_id + workspace_id + story_id` 安全、高效读取角色、状态和 Summary 数据事实。单项查询必须在 SQL 中验证资源归属，不能先按全局 ID 读取再由上层比较。
 - 每次公共 Reference 读取都在一个 SQLite `DEFERRED` 快照内完成完整 scope、ready 门禁、Policy、Provider 查询和玩家投影；以快照首次 scope 读取时的 ready 状态为准。本次读取开始后发生的 lifecycle 变化不撕裂当前结果，下一次读取必须观察并拒绝非 ready 状态。
 - Story Memory 规范化和 Persistent Memory 的 active/Evidence-valid/current-revision 投影仍归 `rpg_memory`；Summary Markdown 解析仍归 `rpg_core.summary`。渠道和数据层不得复制这些规则。

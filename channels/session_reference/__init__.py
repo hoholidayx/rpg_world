@@ -1,13 +1,13 @@
-"""Common, channel-neutral Session reference query boundary."""
+"""Public Session reference query boundary for lightweight channels."""
 
-from rpg_core.session.reference.errors import (
+from channels.session_reference.errors import (
     SessionReferenceError,
     SessionReferenceNotFoundError,
     SessionReferenceReaderClosedError,
     SessionReferenceResourceDisabledError,
     SessionReferenceUnavailableError,
 )
-from rpg_core.session.reference.models import (
+from channels.session_reference.models import (
     ALL_SESSION_REFERENCE_RESOURCES,
     CharacterCard,
     CharacterDetail,
@@ -30,9 +30,9 @@ from rpg_core.session.reference.models import (
     SummaryDetail,
     SummarySummary,
 )
-from rpg_core.session.reference.ports import SessionReferenceReader
-from rpg_core.session.reference.runtime import ThreadedSessionReferenceReader
-from rpg_core.session.reference.service import SessionReferenceApplicationService
+from channels.session_reference.ports import SessionReferenceReader
+from channels.session_reference.runtime import ThreadedSessionReferenceReader
+from channels.session_reference.service import SessionReferenceApplicationService
 
 __all__ = [
     "ALL_SESSION_REFERENCE_RESOURCES",

@@ -47,6 +47,7 @@ REMOVED_COMPATIBILITY_MODULES = {
     "rpg_core.context.rpg_context",
     "rpg_core.main_llm",
     "rpg_core.rp_module_constants",
+    "rpg_core.session.reference",
     "rpg_core.session.turns",
     "rpg_core.turns",
 }
@@ -54,6 +55,12 @@ REMOVED_COMPATIBILITY_MODULES = {
 REMOVED_COMPATIBILITY_FILES = tuple(
     ROOT / f"{module_name.replace('.', '/')}.py"
     for module_name in sorted(REMOVED_COMPATIBILITY_MODULES)
+)
+REMOVED_COMPATIBILITY_PACKAGE_ROOTS = (
+    ROOT / "rpg_core/session/reference",
+)
+REMOVED_COMPATIBILITY_MODULE_PREFIXES = (
+    "rpg_core.session.reference",
 )
 
 PRODUCTION_ROOTS = (
@@ -131,6 +138,16 @@ def test_removed_compatibility_modules_do_not_exist() -> None:
     assert present == []
 
 
+def test_removed_compatibility_packages_have_no_python_sources() -> None:
+    present = [
+        str(path.relative_to(ROOT))
+        for package_root in REMOVED_COMPATIBILITY_PACKAGE_ROOTS
+        for path in package_root.rglob("*.py")
+    ]
+
+    assert present == []
+
+
 def test_removed_rp_memory_package_does_not_exist() -> None:
     assert not (ROOT / "rp_memory").exists()
 
@@ -149,7 +166,13 @@ def test_production_code_does_not_import_removed_compatibility_modules() -> None
     violations: list[str] = []
     for path in _python_files(*PRODUCTION_ROOTS):
         for imported in _imports(path):
-            if imported in REMOVED_COMPATIBILITY_MODULES:
+            if (
+                imported in REMOVED_COMPATIBILITY_MODULES
+                or any(
+                    imported.startswith(f"{prefix}.")
+                    for prefix in REMOVED_COMPATIBILITY_MODULE_PREFIXES
+                )
+            ):
                 violations.append(f"{path.relative_to(ROOT)}: {imported}")
 
     assert violations == []

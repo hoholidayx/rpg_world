@@ -100,8 +100,8 @@ RECENT_APPLICATION_SERVICE_FILES = (
     "rpg_core/session/history.py",
     "rpg_core/session/manager.py",
     "rpg_core/session/progress.py",
-    "rpg_core/session/reference/service.py",
-    "rpg_core/session/reference/runtime.py",
+    "channels/session_reference/service.py",
+    "channels/session_reference/runtime.py",
     "rpg_core/rp_modules/application.py",
     "rpg_core/rp_modules/narrative_outcome/ledger.py",
     "rpg_core/rp_modules/plot_scheduler/management.py",
@@ -368,19 +368,68 @@ def test_composer_application_service_uses_narrow_data_port() -> None:
     assert "rpg_data.services.session_composer" not in imports
 
 
-def test_session_reference_application_uses_only_narrow_data_ports() -> None:
+def test_rpg_core_does_not_depend_on_channel_packages() -> None:
+    violations: list[str] = []
+    for path in _python_files(ROOT / "rpg_core"):
+        for imported in _imports(path):
+            if imported == "channels" or imported.startswith("channels."):
+                violations.append(
+                    f"{path.relative_to(ROOT)}: {imported}"
+                )
+
+    assert violations == []
+
+
+def test_channel_session_reference_uses_only_narrow_data_ports() -> None:
     forbidden_prefixes = (
-        "channels",
+        "agent_service",
+        "dream_service",
+        "llm_client",
+        "llm_service",
+        "media_service",
         "peewee",
         "play_api",
+        "rpg_core.agent",
         "rpg_data.repositories",
         "rpg_data.services",
+        "rpg_media",
+        "rpg_memory.dream",
+        "rpg_tts",
+        "tts_service",
     )
     violations: list[str] = []
-    reference_root = ROOT / "rpg_core/session/reference"
+    reference_root = ROOT / "channels/session_reference"
     for path in _python_files(reference_root):
         for imported in _imports(path):
-            if imported.startswith(forbidden_prefixes):
+            imports_other_channel_code = (
+                imported == "channels"
+                or (
+                    imported.startswith("channels.")
+                    and imported != "channels.session_reference"
+                    and not imported.startswith(
+                        "channels.session_reference."
+                    )
+                )
+            )
+            if (
+                imports_other_channel_code
+                or imported.startswith(forbidden_prefixes)
+            ):
+                violations.append(
+                    f"{path.relative_to(ROOT)}: {imported}"
+                )
+
+    assert violations == []
+
+
+def test_play_api_does_not_depend_on_lightweight_channel_reference() -> None:
+    violations: list[str] = []
+    for path in _python_files(ROOT / "play_api"):
+        for imported in _imports(path):
+            if (
+                imported == "channels.session_reference"
+                or imported.startswith("channels.session_reference.")
+            ):
                 violations.append(
                     f"{path.relative_to(ROOT)}: {imported}"
                 )
@@ -402,6 +451,41 @@ def test_telegram_reference_handlers_do_not_import_persistence_or_source_policy(
                 violations.append(
                     f"{path.relative_to(ROOT)}: {imported}"
                 )
+
+    assert violations == []
+
+
+def test_telegram_handlers_use_the_public_reference_package() -> None:
+    violations: list[str] = []
+    concrete_types = {
+        "SessionReferenceApplicationService",
+        "ThreadedSessionReferenceReader",
+    }
+    for path in _python_files(ROOT / "channels/telegram"):
+        tree = ast.parse(
+            path.read_text(encoding="utf-8"),
+            filename=str(path),
+        )
+        for imported in _imports(path):
+            if imported.startswith("channels.session_reference."):
+                violations.append(
+                    f"{path.relative_to(ROOT)}: {imported}"
+                )
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "channels.session_reference"
+            ):
+                leaked = sorted(
+                    alias.name
+                    for alias in node.names
+                    if alias.name in concrete_types
+                )
+                if leaked:
+                    violations.append(
+                        f"{path.relative_to(ROOT)}: "
+                        f"{', '.join(leaked)}"
+                    )
 
     assert violations == []
 

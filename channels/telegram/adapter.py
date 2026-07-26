@@ -34,6 +34,12 @@ from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filt
 
 from agent_service.client import AgentClientError
 from channels.base import ChannelAdapter
+from channels.session_reference import (
+    SessionReferenceLocator,
+    SessionReferenceNotFoundError,
+    SessionReferenceResourceDisabledError,
+    SessionReferenceUnavailableError,
+)
 from channels.telegram.action_registry import (
     TelegramActionRegistry,
     TelegramCallbackAction,
@@ -68,17 +74,11 @@ from channels.telegram.turn_flow import (
     TelegramTurnFlow,
 )
 from rpg_core.agent.protocol import TurnCancelStatus
-from rpg_core.session.reference import (
-    SessionReferenceLocator,
-    SessionReferenceNotFoundError,
-    SessionReferenceResourceDisabledError,
-    SessionReferenceUnavailableError,
-)
 
 if TYPE_CHECKING:
     from agent_service.client import AgentClient
     from agent_service.schemas import AgentSessionOverviewPayload
-    from rpg_core.session.reference import SessionReferenceReader
+    from channels.session_reference import SessionReferenceReader
 
 _TELEGRAM_PARSE_MODE = "HTML"
 _TELEGRAM_COMMAND_RE = re.compile(r"^[a-z0-9_]{1,32}$")

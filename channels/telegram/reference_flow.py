@@ -8,6 +8,14 @@ from typing import TypeVar
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from channels.session_reference import (
+    PersistentMemoryDetail,
+    ReferencePage,
+    SessionReferenceLocator,
+    SessionReferenceNotFoundError,
+    SessionReferenceReader,
+    StoryMemoryDetail,
+)
 from channels.telegram.action_registry import (
     ActionValue,
     TelegramActionRegistry,
@@ -20,14 +28,6 @@ from channels.telegram.reference_presenter import (
     turn_range,
 )
 from channels.telegram.reference_renderer import TelegramReferenceRenderer
-from rpg_core.session.reference import (
-    PersistentMemoryDetail,
-    ReferencePage,
-    SessionReferenceLocator,
-    SessionReferenceNotFoundError,
-    SessionReferenceReader,
-    StoryMemoryDetail,
-)
 
 REFERENCE_ACTION_ROOT = "reference_root"
 REFERENCE_ACTION_CHARACTER_LIST = "reference_character_list"
@@ -83,7 +83,7 @@ class _ViewButton:
 
 
 class TelegramReferenceFlow:
-    """Render multi-stage menus against the channel-neutral reference reader."""
+    """Render multi-stage menus against the public channel reference reader."""
 
     def __init__(
         self,

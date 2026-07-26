@@ -8,19 +8,19 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from channels.config import settings as channels_settings
-from channels.telegram.runner import main as _telegram_main
-from commons.process_logging import configure_process_logging
-from rpg_core.session.reference import (
+from channels.session_reference import (
     SessionReferenceApplicationService,
     ThreadedSessionReferenceReader,
 )
+from channels.telegram.runner import main as _telegram_main
+from commons.process_logging import configure_process_logging
 from rpg_core.summary.reference import SessionSummaryReferenceProvider
 from rpg_data.services import get_data_service_gateway
 from rpg_memory.persistent.reference import PersistentMemoryReferenceService
 from rpg_memory.story.application import StoryMemoryApplicationService
 
 if TYPE_CHECKING:
-    from rpg_core.session.reference import SessionReferenceReader
+    from channels.session_reference import SessionReferenceReader
     from rpg_data.services import DataServiceGateway
 
 

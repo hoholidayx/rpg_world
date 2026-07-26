@@ -18,7 +18,7 @@ from channels.telegram.adapter import TelegramAdapter
 from commons.process_logging import configure_process_logging
 
 if TYPE_CHECKING:
-    from rpg_core.session.reference import SessionReferenceReader
+    from channels.session_reference import SessionReferenceReader
 
 
 class _BotRuntime:

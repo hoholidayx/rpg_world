@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from rpg_core.session.reference import (
+from channels.session_reference import (
     SessionReferenceApplicationService,
     SessionReferenceLocator,
     SessionReferenceNotFoundError,

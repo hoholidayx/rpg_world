@@ -111,7 +111,7 @@ RPG World 采用独立 Agent、LLM、Dream、Media 与 TTS 服务拓扑。只有
 `rpg_memory.dream` 做离线提炼。只有 `run_llm.py` 进程读取
 `llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 和本地 llama runtime。
 Agent/Memory、Dream 与 TTS Service 通过 `llm_client` 调用 LLM 服务；Play API 的聊天、Dream、媒体和语音链路分别通过
-`AgentClient`、`DreamClient`、`MediaClient`、`TTSClient` 访问独立服务，CLI 与 Telegram 通过 `AgentClient` 调用 Agent 服务。Telegram 可选资料菜单通过进程内 Session Reference 只读查询已提交数据，不持有 Agent、Dream 或 LLM runtime。
+`AgentClient`、`DreamClient`、`MediaClient`、`TTSClient` 访问独立服务，CLI 与 Telegram 通过 `AgentClient` 调用 Agent 服务。Telegram 可选资料菜单通过进程内 `channels.session_reference` 只读查询已提交数据，不持有 Agent、Dream 或 LLM runtime；Play API/WebUI 继续使用独立的富交互契约。
 
 ```
 run_llm            -> llm_service.main:app   -> Provider + local llama runtime

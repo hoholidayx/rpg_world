@@ -23,7 +23,7 @@ from channels.telegram.reference_flow import (
     TelegramReferenceFlow,
 )
 from channels.tests.conftest import FakeAgent
-from rpg_core.session.reference import (
+from channels.session_reference import (
     CharacterCard,
     CharacterDetail,
     CharacterDetailSummary,

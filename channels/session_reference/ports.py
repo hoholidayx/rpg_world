@@ -1,4 +1,4 @@
-"""Narrow structural contracts for the common Session reference service."""
+"""Narrow structural contracts for the channel Session reference service."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from rpg_data.model.session_reference import (
 )
 from rpg_memory.persistent.reference import PersistentMemoryReferenceItem
 
-from rpg_core.session.reference.models import (
+from channels.session_reference.models import (
     CharacterCard,
     CharacterDetail,
     CharacterDetailSummary,

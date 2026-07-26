@@ -8,8 +8,8 @@ from collections.abc import Callable
 from functools import partial
 from typing import TypeVar
 
-from rpg_core.session.reference.errors import SessionReferenceReaderClosedError
-from rpg_core.session.reference.models import (
+from channels.session_reference.errors import SessionReferenceReaderClosedError
+from channels.session_reference.models import (
     CharacterCard,
     CharacterDetail,
     CharacterDetailSummary,
@@ -26,7 +26,7 @@ from rpg_core.session.reference.models import (
     SummaryDetail,
     SummarySummary,
 )
-from rpg_core.session.reference.service import SessionReferenceApplicationService
+from channels.session_reference.service import SessionReferenceApplicationService
 
 
 T = TypeVar("T")

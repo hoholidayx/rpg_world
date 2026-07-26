@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_core.session.reference import (
+from channels.session_reference import (
     SessionReferenceLocator,
     SessionReferenceReaderClosedError,
     ThreadedSessionReferenceReader,

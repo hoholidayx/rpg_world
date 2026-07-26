@@ -1,1 +1,0 @@
-"""Session reference application tests."""

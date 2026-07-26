@@ -1,4 +1,4 @@
-"""Player-facing, channel-neutral Session reference projections."""
+"""Player-facing Session reference projections for lightweight channels."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 
 class SessionReferenceResource(StrEnum):
-    """Read-only resource groups exposed by the common reference layer."""
+    """Read-only resource groups exposed by the channel reference layer."""
 
     CHARACTERS = "characters"
     STATUS_TABLES = "status_tables"
