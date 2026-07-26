@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from agent_service.client import AgentClientError
+from commons.scene_time import SceneTime
 from play_api import agent_client
 from play_api.main import app
 from play_api.delete_tokens import reset_delete_confirmation_tokens
@@ -522,6 +523,91 @@ def test_rp_module_config_inheritance_validation_and_history_page(
             effective_weights=models.NarrativeOutcomeWeights(),
             effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
         ))
+        gateway.plot_scheduling.append_decisions(
+            "s_forest001",
+            1,
+            (
+                models.StagedPlotScheduleDecision(
+                    source_kind=models.PLOT_SOURCE_POOL,
+                    source_id=22,
+                    event_id=22,
+                    container_id=202,
+                    decision_status=models.PLOT_DECISION_TRIGGERED,
+                    dispatch_mode=models.PLOT_DISPATCH_SOFT,
+                    scene_time=SceneTime(1, 1, 1, 8),
+                    event_snapshot={
+                        "eventTitle": "林间钟声",
+                        "directive": "让远处的钟声打断当前对话。",
+                    },
+                ),
+                models.StagedPlotScheduleDecision(
+                    source_kind=models.PLOT_SOURCE_OUTLINE,
+                    source_id=11,
+                    event_id=11,
+                    container_id=101,
+                    decision_status=models.PLOT_DECISION_TRIGGERED,
+                    dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                    scene_time=SceneTime(1, 1, 1, 8),
+                    event_snapshot={
+                        "eventTitle": "封印异动",
+                        "directive": "描写祭坛封印出现第一次明确异动。",
+                    },
+                ),
+            ),
+        )
+        gateway.plot_scheduling.append_decisions(
+            "s_forest001",
+            2,
+            (
+                models.StagedPlotScheduleDecision(
+                    source_kind=models.PLOT_SOURCE_OUTLINE,
+                    source_id=24,
+                    event_id=24,
+                    container_id=203,
+                    decision_status=models.PLOT_DECISION_ERROR,
+                    dispatch_mode=models.PLOT_DISPATCH_SOFT,
+                    scene_time=SceneTime(1, 1, 1, 8),
+                    event_snapshot={
+                        "eventTitle": "裁定失败事件",
+                        "directive": "这条错误指令不应公开。",
+                    },
+                    error_code="JUDGE_UNAVAILABLE",
+                    error_message="judge unavailable",
+                ),
+                models.StagedPlotScheduleDecision(
+                    source_kind=models.PLOT_SOURCE_POOL,
+                    source_id=23,
+                    event_id=23,
+                    container_id=202,
+                    decision_status=models.PLOT_DECISION_DEFERRED,
+                    dispatch_mode=models.PLOT_DISPATCH_SOFT,
+                    scene_time=SceneTime(1, 1, 1, 8),
+                    event_snapshot={
+                        "eventTitle": "暂缓事件",
+                        "directive": "这条指令不应公开。",
+                    },
+                    reason="当前不适合",
+                ),
+            ),
+        )
+        gateway.plot_scheduling.append_decisions(
+            "s_forest001",
+            3,
+            (
+                models.StagedPlotScheduleDecision(
+                    source_kind=models.PLOT_SOURCE_POOL,
+                    source_id=25,
+                    event_id=25,
+                    container_id=202,
+                    decision_status=models.PLOT_DECISION_TRIGGERED,
+                    dispatch_mode=models.PLOT_DISPATCH_SOFT,
+                    scene_time=SceneTime(1, 1, 1, 8),
+                    event_snapshot={
+                        "eventTitle": "缺少公开指令",
+                    },
+                ),
+            ),
+        )
 
         history_page = client.get(
             "/play-api/v1/sessions/s_forest001/history-page?limit=50"
@@ -540,10 +626,34 @@ def test_rp_module_config_inheritance_validation_and_history_page(
             "reason": "穿越霜藤",
             "actor": "Bob",
         }
+        assert turn_one["plotInjections"] == [
+            {
+                "eventTitle": "封印异动",
+                "directive": "描写祭坛封印出现第一次明确异动。",
+            },
+            {
+                "eventTitle": "林间钟声",
+                "directive": "让远处的钟声打断当前对话。",
+            },
+        ]
+        turn_two = next(
+            turn for turn in history_page.json()["turns"] if turn["turnId"] == 2
+        )
+        assert turn_two["plotInjections"] == []
+        turn_three = next(
+            turn for turn in history_page.json()["turns"] if turn["turnId"] == 3
+        )
+        assert turn_three["plotInjections"] == []
 
         history = client.get("/play-api/v1/sessions/s_forest001/history")
         assert history.status_code == 200
         assert history.json()[0]["outcome"]["outcomeCode"] == "success_with_cost"
+        assert history.json()[0]["plotInjections"] == turn_one["plotInjections"]
+
+        turn = client.get("/play-api/v1/sessions/s_forest001/turns/1")
+        assert turn.status_code == 200
+        assert turn.json()["plotInjections"] == turn_one["plotInjections"]
+        assert set(turn.json()["plotInjections"][0]) == {"eventTitle", "directive"}
 
 
 def test_main_llm_endpoints_expose_camel_case_and_forward_selection(

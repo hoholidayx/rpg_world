@@ -33,6 +33,12 @@ from rpg_core.session.turn_metadata import (
     validate_turn_metadata,
 )
 from rpg_core.scene.status import SceneStatusService
+from rpg_data.plot_models import (
+    PLOT_DECISION_TRIGGERED,
+    PLOT_SOURCE_OUTLINE,
+    PLOT_SOURCE_POOL,
+    SessionPlotScheduleDecision,
+)
 from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
@@ -226,12 +232,23 @@ class PlayHistoryMessage(BaseModel):
     created_at: str | None = Field(default=None, alias="createdAt")
 
 
+class PlayPlotInjection(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_title: str = Field(alias="eventTitle")
+    directive: str
+
+
 class PlayTurn(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     turn_id: int = Field(alias="turnId")
     messages: list[PlayHistoryMessage] = Field(default_factory=list)
     outcome: "PlayNarrativeOutcome | None" = None
+    plot_injections: list[PlayPlotInjection] = Field(
+        default_factory=list,
+        alias="plotInjections",
+    )
 
 
 class PlayNarrativeOutcome(BaseModel):
@@ -508,18 +525,20 @@ def _turns_from_history(
     return turns
 
 
-def _attach_narrative_outcomes(
+def _attach_turn_annotations(
     session_id: str,
     turns: list[PlayTurn],
 ) -> list[PlayTurn]:
     if not turns:
         return turns
+    turn_ids = tuple(turn.turn_id for turn in turns)
+    gateway = get_data_service_gateway()
     definitions = {
         definition.code: definition for definition in NARRATIVE_OUTCOME_DEFINITIONS
     }
-    records = get_data_service_gateway().narrative_outcomes.list_for_turns(
+    records = gateway.narrative_outcomes.list_for_turns(
         session_id,
-        (turn.turn_id for turn in turns),
+        turn_ids,
     )
     records_by_turn = {record.turn_id: record for record in records}
     for turn in turns:
@@ -534,6 +553,52 @@ def _attach_narrative_outcomes(
             reason=record.reason,
             actor=record.actor or None,
         )
+
+    plot_records = gateway.plot_scheduling.list_session_decisions_for_turns(
+        session_id,
+        turn_ids,
+    )
+    plot_records_by_turn: dict[int, list[SessionPlotScheduleDecision]] = {}
+    for record in plot_records:
+        if record.decision_status != PLOT_DECISION_TRIGGERED:
+            continue
+        plot_records_by_turn.setdefault(record.turn_id, []).append(record)
+
+    source_order = {
+        PLOT_SOURCE_OUTLINE: 0,
+        PLOT_SOURCE_POOL: 1,
+    }
+    for turn in turns:
+        records_for_turn = sorted(
+            plot_records_by_turn.get(turn.turn_id, ()),
+            key=lambda item: (
+                source_order.get(item.source_kind, len(source_order)),
+                item.id,
+            ),
+        )
+        for record in records_for_turn:
+            event_title = record.event_snapshot.get("eventTitle")
+            directive = record.event_snapshot.get("directive")
+            if (
+                not isinstance(event_title, str)
+                or not event_title.strip()
+                or not isinstance(directive, str)
+                or not directive.strip()
+            ):
+                logger.warning(
+                    "[PlayAPI] skipping malformed Plot injection snapshot: "
+                    "session_id={}, turn_id={}, decision_id={}",
+                    session_id,
+                    turn.turn_id,
+                    record.id,
+                )
+                continue
+            turn.plot_injections.append(
+                PlayPlotInjection(
+                    eventTitle=event_title,
+                    directive=directive,
+                )
+            )
     return turns
 
 
@@ -744,7 +809,7 @@ async def get_session_history(
         get_agent_backend().get_history(workspace, story_id, agent_session_id)
     )
     try:
-        return _attach_narrative_outcomes(
+        return _attach_turn_annotations(
             agent_session_id,
             _turns_from_history(history, source="api"),
         )
@@ -773,7 +838,7 @@ async def get_session_history_page(
     )
     raw_history = [_history_payload_from_row(row) for row in rows]
     try:
-        turns = _attach_narrative_outcomes(
+        turns = _attach_turn_annotations(
             agent_session_id,
             _turns_from_history(raw_history, source="api"),
         )
@@ -806,7 +871,7 @@ async def get_session_turn(
 
     raw_history = [_history_payload_from_row(row) for row in rows]
     try:
-        turns = _attach_narrative_outcomes(
+        turns = _attach_turn_annotations(
             agent_session_id,
             _turns_from_history(raw_history, source="api"),
         )

@@ -94,6 +94,12 @@ export type Turn = {
   turnId: number
   messages: HistoryMessage[]
   outcome?: NarrativeOutcome | null
+  plotInjections?: PlotInjection[]
+}
+
+export type PlotInjection = {
+  eventTitle: string
+  directive: string
 }
 
 export type HistoryPage = {

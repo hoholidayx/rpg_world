@@ -61,6 +61,14 @@ export function outcomeSpeaker(): SessionSpeaker {
   }
 }
 
+export function plotInjectionSpeaker(): SessionSpeaker {
+  return {
+    name: '剧情注入',
+    fallback: '注',
+    tone: 'plot',
+  }
+}
+
 export function commandSpeaker(): SessionSpeaker {
   return {
     name: '命令结果',
@@ -179,13 +187,35 @@ export function mapHistoryToMessages({
         canDerive: persistent && turnEndingAssistant,
       }
     })
-    if (!turn.outcome) return messages
     const outcomeCreatedAt = turn.messages.find(
       (message) => message.role === HISTORY_MESSAGE_ROLE.ASSISTANT,
     )?.createdAt ?? turn.messages[0]?.createdAt
-    return [
-      ...messages,
-      {
+    const plotInjections = turn.plotInjections ?? []
+    const supplementalMessages: SessionTimelineMessage[] = []
+
+    if (plotInjections.length) {
+      supplementalMessages.push({
+        id: `history-plot-injection-${turn.turnId}`,
+        turnId: turn.turnId,
+        timelineGroupId,
+        timelineAnchorTurnId: turn.turnId,
+        timelineGroupOrder: 0,
+        seqInTurn: 2,
+        role: SESSION_TIMELINE_ROLE.PLOT_INJECTION,
+        content: plotInjections.map((injection) => injection.directive).join('\n\n'),
+        plotInjections,
+        createdAt: outcomeCreatedAt,
+        speaker: plotInjectionSpeaker(),
+        status: SESSION_MESSAGE_STATUS.DONE,
+        canCopy: false,
+        canRetry: false,
+        canEdit: false,
+        canDelete: false,
+      })
+    }
+
+    if (turn.outcome) {
+      supplementalMessages.push({
         id: `history-outcome-${turn.turnId}`,
         turnId: turn.turnId,
         timelineGroupId,
@@ -202,8 +232,10 @@ export function mapHistoryToMessages({
         canRetry: false,
         canEdit: false,
         canDelete: false,
-      },
-    ]
+      })
+    }
+
+    return [...messages, ...supplementalMessages]
   })
 }
 

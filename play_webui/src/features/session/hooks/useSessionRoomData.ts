@@ -319,6 +319,7 @@ function timelineGroup(message: SessionTimelineMessage) {
 
 function timelineDisplayOrder(message: SessionTimelineMessage) {
   if (message.role === SESSION_TIMELINE_ROLE.USER) return 10
+  if (message.role === SESSION_TIMELINE_ROLE.PLOT_INJECTION) return 12
   if (message.role === SESSION_TIMELINE_ROLE.THINKING) return 20
   if (message.role === SESSION_TIMELINE_ROLE.OUTCOME) return 15
   if (message.role === SESSION_TIMELINE_ROLE.TOOL) return 30

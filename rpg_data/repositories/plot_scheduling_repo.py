@@ -449,6 +449,28 @@ class PlotSchedulingRepository:
             query = query.limit(int(limit))
         return [_to_decision(row) for row in query]
 
+    def list_decisions_for_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> list[models.SessionPlotScheduleDecision]:
+        ids = sorted({int(turn_id) for turn_id in turn_ids if int(turn_id) > 0})
+        if not ids:
+            return []
+        rows = (
+            SessionPlotScheduleDecisionRecord
+            .select()
+            .where(
+                (SessionPlotScheduleDecisionRecord.session == str(session_id))
+                & (SessionPlotScheduleDecisionRecord.turn_id.in_(ids))
+            )
+            .order_by(
+                SessionPlotScheduleDecisionRecord.turn_id,
+                SessionPlotScheduleDecisionRecord.id,
+            )
+        )
+        return [_to_decision(row) for row in rows]
+
     def create_decisions(
         self,
         session_id: str,

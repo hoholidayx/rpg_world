@@ -413,6 +413,14 @@ class PlotSchedulingDataService:
             before_id=normalized_before,
         )
 
+    def list_session_decisions_for_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> list[models.SessionPlotScheduleDecision]:
+        self._require_session(session_id)
+        return self._records.list_decisions_for_turns(session_id, turn_ids)
+
     def set_session_event_disabled(
         self,
         session_id: str,

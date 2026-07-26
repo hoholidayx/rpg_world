@@ -1,4 +1,4 @@
-import { AlertCircle, ChevronDown, Copy, GitBranch, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Trash2, Volume2 } from 'lucide-react'
+import { AlertCircle, ChevronDown, Copy, GitBranch, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Trash2, Volume2, Waypoints } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { HistoryPage } from '@/types/session'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
@@ -235,6 +235,7 @@ function MessageBubble({
     user: 'border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-100 dark:shadow-violet-950/30',
     assistant: 'border-slate-200 bg-white text-slate-950 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:shadow-black/25',
     tool: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200',
+    'plot-injection': 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200',
     outcome: 'border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200',
     system: 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300',
     thinking: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200',
@@ -376,6 +377,9 @@ function TimelineMessage({
   if (message.role === SESSION_TIMELINE_ROLE.OUTCOME && message.outcome) {
     return <NarrativeOutcomeCard message={message} />
   }
+  if (message.role === SESSION_TIMELINE_ROLE.PLOT_INJECTION && message.plotInjections?.length) {
+    return <PlotInjectionCard message={message} />
+  }
   const isUser = message.role === SESSION_TIMELINE_ROLE.USER
 
   return (
@@ -471,6 +475,35 @@ function NarrativeOutcomeCard({ message }: { message: SessionTimelineMessage }) 
         ) : null}
       </div>
       <p className="mt-2 text-sm font-semibold leading-6">{outcome.reason}</p>
+    </article>
+  )
+}
+
+function PlotInjectionCard({ message }: { message: SessionTimelineMessage }) {
+  const plotInjections = message.plotInjections!
+  return (
+    <article
+      data-turn-index={message.turnId}
+      data-plot-injection-count={plotInjections.length}
+      className="mx-auto max-w-2xl rounded-lg border border-sky-300 bg-sky-50 px-4 py-3 text-sky-900 shadow-sm dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-100"
+    >
+      <div className="flex items-center gap-2 text-sm font-black">
+        <Waypoints size={16} />
+        剧情注入 · 已注入本轮
+      </div>
+      <div className="mt-3 space-y-3">
+        {plotInjections.map((injection, index) => (
+          <section
+            key={`${injection.eventTitle}-${index}`}
+            className="rounded-lg border border-sky-200/80 bg-white/70 px-3 py-2.5 dark:border-sky-500/20 dark:bg-slate-950/25"
+          >
+            <h3 className="text-sm font-black [overflow-wrap:anywhere]">{injection.eventTitle}</h3>
+            <p className="mt-1.5 whitespace-pre-wrap text-sm font-semibold leading-6 text-sky-800 [overflow-wrap:anywhere] dark:text-sky-100">
+              {injection.directive}
+            </p>
+          </section>
+        ))}
+      </div>
     </article>
   )
 }

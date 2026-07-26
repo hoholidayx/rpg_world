@@ -231,7 +231,9 @@ def test_plot_data_constraints_and_transaction_rollback() -> None:
         gateway.close()
 
 
-def test_plot_data_ledger_pagination_and_caller_selected_copy() -> None:
+def test_plot_data_ledger_pagination_and_caller_selected_copy(
+    monkeypatch,
+) -> None:
     gateway = DataServiceGateway(":memory:")
     try:
         gateway.initialize()
@@ -293,6 +295,34 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy() -> None:
         )
         assert [item.id for item in first_page] == [errored[0].id]
         assert [item.id for item in second_page] == [triggered[0].id]
+
+        decision_selects: list[str] = []
+        original_execute_sql = gateway.database.execute_sql
+
+        def _tracked_execute_sql(sql: str, *args: object, **kwargs: object):
+            if (
+                sql.lstrip().upper().startswith("SELECT")
+                and 'FROM "rpg_session_plot_schedule_decisions"' in sql
+            ):
+                decision_selects.append(sql)
+            return original_execute_sql(sql, *args, **kwargs)
+
+        monkeypatch.setattr(
+            gateway.database,
+            "execute_sql",
+            _tracked_execute_sql,
+        )
+        assert service.list_session_decisions_for_turns(
+            "s_forest001",
+            (2, 999, 2),
+        ) == triggered
+        assert len(decision_selects) == 1
+        assert service.list_session_decisions_for_turns(
+            "s_forest001",
+            (),
+        ) == []
+        with pytest.raises(FileNotFoundError):
+            service.list_session_decisions_for_turns("missing_session", (1,))
 
         service.set_session_event_disabled("s_forest001", event.id, True)
         target = gateway.catalog.create_session(
