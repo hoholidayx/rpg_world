@@ -21,6 +21,8 @@ from rpg_core.agent.sub_agents import (
     SubAgentContext,
 )
 from rpg_core.agent.tools.history import HistoryToolSet
+from rpg_core.agent.tools.lookup import LookupToolSet
+from rpg_core.agent.tools.summary import SummaryToolSet
 from rpg_core.tooling.base import BaseTool
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
@@ -415,7 +417,7 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
         SimpleNamespace(
             verbose_logging=True,
             status_history_rounds=5,
-            adjudication_max_history_tool_rounds=5,
+            adjudication_max_lookup_tool_rounds=5,
         ),
     )
     monkeypatch.setattr(status_module.logger, "info", info)
@@ -500,10 +502,16 @@ async def test_each_status_stage_gets_an_independent_history_lookup_budget() -> 
                 schema["function"]["name"]
                 for schema in tools
             )
-            history_names = {"history_search", "history_read"}
-            terminal_names = frozenset(names - history_names)
+            lookup_names = {
+                "history_search",
+                "history_read",
+                "summary_search",
+                "summary_read",
+            }
+            terminal_names = frozenset(names - lookup_names)
             if "history_search" in names:
                 assert "history_read" in names
+                assert {"summary_search", "summary_read"} <= names
                 assert len(terminal_names) == 1
                 self.initial_terminal_names.append(terminal_names)
                 terminal_name = next(iter(terminal_names))
@@ -551,6 +559,18 @@ async def test_each_status_stage_gets_an_independent_history_lookup_budget() -> 
             return "status-test"
 
     query = QueryService()
+    summary_query = type(
+        "SummaryQuery",
+        (),
+        {
+            "search": lambda *_args, **_kwargs: _async_value({"ok": True}),
+            "read": lambda *_args, **_kwargs: _async_value({"ok": True}),
+        },
+    )()
+    lookup_tools = LookupToolSet(
+        HistoryToolSet(query),  # type: ignore[arg-type]
+        SummaryToolSet(summary_query),  # type: ignore[arg-type]
+    )
     provider = Provider()
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
@@ -568,8 +588,8 @@ async def test_each_status_stage_gets_an_independent_history_lookup_budget() -> 
         scene_context="当前位置：森林",
         context_tables=runtime.list_context_tables(),
         user_input="核对当前事实",
-        history_tools=HistoryToolSet(query),  # type: ignore[arg-type]
-        max_history_tool_rounds=1,
+        lookup_tools=lookup_tools,
+        max_lookup_tool_rounds=1,
     )
 
     expected = [

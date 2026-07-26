@@ -340,7 +340,7 @@ def test_context_window_reject_threshold_rejects_invalid_values(
         settings_module.Settings()
 
 
-def test_adjudication_history_tool_rounds_defaults_and_accepts_positive_integer(
+def test_adjudication_lookup_tool_rounds_defaults_and_accepts_positive_integer(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -350,29 +350,30 @@ def test_adjudication_history_tool_rounds_defaults_and_accepts_positive_integer(
     monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
     monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
 
-    assert settings_module.Settings().adjudication_max_history_tool_rounds == 5
+    assert settings_module.Settings().adjudication_max_lookup_tool_rounds == 5
 
     _write_settings(
         cfg,
         agent_extra=(
             "    adjudication:\n"
-            "      max_history_tool_rounds: 3\n"
+            "      max_lookup_tool_rounds: 3\n"
         ),
     )
-    assert settings_module.Settings().adjudication_max_history_tool_rounds == 3
+    assert settings_module.Settings().adjudication_max_lookup_tool_rounds == 3
 
 
 @pytest.mark.parametrize(
     "agent_extra",
     [
         "    adjudication: []\n",
-        "    adjudication:\n      max_history_tool_rounds: 0\n",
-        "    adjudication:\n      max_history_tool_rounds: true\n",
-        "    adjudication:\n      max_history_tool_rounds: 1.5\n",
-        "    adjudication:\n      max_history_tool_rounds: five\n",
+        "    adjudication:\n      max_lookup_tool_rounds: 0\n",
+        "    adjudication:\n      max_lookup_tool_rounds: true\n",
+        "    adjudication:\n      max_lookup_tool_rounds: 1.5\n",
+        "    adjudication:\n      max_lookup_tool_rounds: five\n",
+        "    adjudication:\n      max_history_tool_rounds: 3\n",
     ],
 )
-def test_adjudication_history_tool_rounds_rejects_invalid_config_at_startup(
+def test_adjudication_lookup_tool_rounds_rejects_invalid_config_at_startup(
     tmp_path: Path,
     monkeypatch,
     agent_extra: str,

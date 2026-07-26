@@ -25,6 +25,7 @@ class SummaryDocument:
     excerpt: str
     markdown: str
     updated_at: str | None
+    summary_type: str = ""
     batch_id: int | None = None
     last_batch_id: int | None = None
     time: str = ""
@@ -117,6 +118,7 @@ class SummaryReader:
                 title=title,
                 excerpt=_excerpt(markdown),
                 markdown=markdown,
+                summary_type=_normalized_text(front_matter.get("type")),
                 last_batch_id=_optional_non_negative_int(
                     front_matter.get("last_batch_id")
                 ),

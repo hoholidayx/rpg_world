@@ -61,6 +61,7 @@ characters:
 
     assert index.overall is not None
     assert index.overall.title == "雾港钟楼"
+    assert index.overall.summary_type == "overall"
     assert index.overall.last_batch_id == 2
     assert index.overall.markdown.startswith("主线已经推进。")
     assert not index.overall.markdown.startswith("#")

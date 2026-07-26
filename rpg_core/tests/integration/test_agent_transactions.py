@@ -483,6 +483,8 @@ async def test_status_sub_agent_preadjudicates_before_first_main_call(
     assert status_schema_names == {
         "history_search",
         "history_read",
+        "summary_search",
+        "summary_read",
         "rp_story_outcome",
     }
     main_schema_names = {

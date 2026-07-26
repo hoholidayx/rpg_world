@@ -202,3 +202,102 @@ async def test_stream_history_tools_match_sync_contract_and_emit_tool_events(
         (2, "user"),
         (2, "assistant"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_summary_tools_parse_headers_and_prefer_sql_turn_range(
+    integration_agent_factory,
+    integration_data_gateway,
+    scripted_llm_manager,
+) -> None:
+    session_id = "integration_summary_lookup"
+    agent = await integration_agent_factory(session_id)
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        response("艾琳在钟楼取得盐霜钥匙。", model="config-model")
+    )
+    await agent.send("我和艾琳进入钟楼寻找盐霜钥匙。")
+
+    first_turn_rows = integration_data_gateway.messages.list(session_id)
+    assert integration_data_gateway.messages.mark_summary_processed(
+        session_id,
+        [row.id for row in first_turn_rows],
+        batch_id=7,
+    ) == 2
+    summary_dir = (
+        integration_data_gateway.sessions.resolve_session_runtime_dir(
+            session_id
+        )
+        / "summaries"
+    )
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    (summary_dir / "007.md").write_text(
+        "---\n"
+        "batch_id: 7\n"
+        'title: "盐霜钥匙"\n'
+        "source_turn_start: 99\n"
+        "source_turn_end: 100\n"
+        "source_message_ids:\n"
+        f"  - {first_turn_rows[0].id}\n"
+        'time: "雨夜"\n'
+        'location: "钟楼"\n'
+        "characters:\n"
+        '  - "艾琳"\n'
+        "---\n"
+        "艾琳与玩家在钟楼取得了盐霜钥匙。",
+        encoding="utf-8",
+    )
+
+    provider.queue_chat(
+        response(
+            "",
+            model="config-model",
+            tool_calls=[
+                tool_call(
+                    "summary_search",
+                    json.dumps(
+                        {"terms": ["盐霜钥匙", "艾琳"], "limit": 5},
+                        ensure_ascii=False,
+                    ),
+                    call_id="summary_search_sync",
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        response(
+            "",
+            model="config-model",
+            tool_calls=[
+                tool_call(
+                    "summary_read",
+                    '{"summary_id":"7"}',
+                    call_id="summary_read_sync",
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        response("摘要与原始范围已复核。", model="config-model"),
+    )
+
+    reply = await agent.send("请查找归纳中的盐霜钥匙。", mode="ooc")
+
+    assert reply.text == "摘要与原始范围已复核。"
+    assert reply.tool_records is not None
+    assert len(reply.tool_records) == 2
+    search_result = json.loads(
+        str(reply.tool_records[0].tool_results[0]["content"])
+    )
+    assert search_result["items"][0]["summaryId"] == "7"
+    assert search_result["items"][0]["frontMatter"][
+        "source_turn_start"
+    ] == 99
+    assert search_result["items"][0]["resolvedTurnRange"] == {
+        "start": 1,
+        "end": 1,
+        "source": "sql",
+    }
+    read_result = json.loads(
+        str(reply.tool_records[1].tool_results[0]["content"])
+    )
+    assert "艾琳与玩家在钟楼取得了盐霜钥匙。" in read_result["content"]
+    assert read_result["contentTruncated"] is False

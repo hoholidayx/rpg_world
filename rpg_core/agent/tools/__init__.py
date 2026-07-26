@@ -21,6 +21,23 @@ from rpg_core.agent.tools.history_query import (
     HistoryQueryDataPort,
     HistoryQueryService,
 )
+from rpg_core.agent.tools.lookup import (
+    SENSITIVE_LOOKUP_TOOL_NAMES,
+    LookupToolSet,
+)
+from rpg_core.agent.tools.summary import (
+    SUMMARY_READ_TOOL_NAME,
+    SUMMARY_SEARCH_TOOL_NAME,
+    SENSITIVE_SUMMARY_TOOL_NAMES,
+    SummaryReadTool,
+    SummarySearchTool,
+    SummaryToolSet,
+)
+from rpg_core.agent.tools.summary_query import (
+    SummaryQueryService,
+    SummaryQuerySessionDataPort,
+    SummaryReferenceProviderPort,
+)
 
 __all__ = [
     "BaseTool",
@@ -38,4 +55,15 @@ __all__ = [
     "HistoryToolSet",
     "HistoryQueryDataPort",
     "HistoryQueryService",
+    "LookupToolSet",
+    "SENSITIVE_LOOKUP_TOOL_NAMES",
+    "SUMMARY_READ_TOOL_NAME",
+    "SUMMARY_SEARCH_TOOL_NAME",
+    "SENSITIVE_SUMMARY_TOOL_NAMES",
+    "SummaryReadTool",
+    "SummarySearchTool",
+    "SummaryToolSet",
+    "SummaryQueryService",
+    "SummaryQuerySessionDataPort",
+    "SummaryReferenceProviderPort",
 ]

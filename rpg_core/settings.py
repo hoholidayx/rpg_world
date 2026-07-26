@@ -129,9 +129,9 @@ class StatusSubAgentSettings:
 
 @dataclass(frozen=True)
 class AdjudicationSettings:
-    """Bounded committed-history lookup policy for each adjudication stage."""
+    """Bounded History/Summary lookup policy for each adjudication stage."""
 
-    max_history_tool_rounds: int = 5
+    max_lookup_tool_rounds: int = 5
 
 
 @dataclass(frozen=True)
@@ -520,23 +520,28 @@ class Settings(ProfiledYamlSettings):
         raw = self.agent_settings.get("adjudication", {})
         if not isinstance(raw, dict):
             raise ValueError("agent.adjudication must be a mapping")
-        max_history_tool_rounds = raw.get("max_history_tool_rounds", 5)
+        if "max_history_tool_rounds" in raw:
+            raise ValueError(
+                "agent.adjudication.max_history_tool_rounds is no longer "
+                "supported; use max_lookup_tool_rounds"
+            )
+        max_lookup_tool_rounds = raw.get("max_lookup_tool_rounds", 5)
         if (
-            isinstance(max_history_tool_rounds, bool)
-            or not isinstance(max_history_tool_rounds, int)
-            or max_history_tool_rounds <= 0
+            isinstance(max_lookup_tool_rounds, bool)
+            or not isinstance(max_lookup_tool_rounds, int)
+            or max_lookup_tool_rounds <= 0
         ):
             raise ValueError(
-                "agent.adjudication.max_history_tool_rounds must be a "
+                "agent.adjudication.max_lookup_tool_rounds must be a "
                 "positive integer"
             )
         return AdjudicationSettings(
-            max_history_tool_rounds=max_history_tool_rounds
+            max_lookup_tool_rounds=max_lookup_tool_rounds
         )
 
     @property
-    def adjudication_max_history_tool_rounds(self) -> int:
-        return self.adjudication_settings.max_history_tool_rounds
+    def adjudication_max_lookup_tool_rounds(self) -> int:
+        return self.adjudication_settings.max_lookup_tool_rounds
 
     @property
     def max_tool_calls(self) -> int:

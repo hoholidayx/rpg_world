@@ -23,7 +23,7 @@ from rpg_core.rp_modules.plot_scheduler.scheduler import PlotScheduleSelector
 if TYPE_CHECKING:
     from rpg_core.agent.runtime.context import AgentContextService
     from rpg_core.agent.telemetry import TurnStats
-    from rpg_core.agent.tools.history import HistoryToolSet
+    from rpg_core.agent.tools.lookup import LookupToolSet
     from rpg_core.agent.turn.models import TurnExecutionPlan
     from rpg_core.agent.turn.transaction import TurnScratch
     from rpg_core.session import SessionManager
@@ -39,14 +39,14 @@ class PlotSchedulingPreflightHook:
         *,
         context_service: "AgentContextService",
         session_manager: "SessionManager",
-        history_tools: "HistoryToolSet | None" = None,
+        lookup_tools: "LookupToolSet | None" = None,
         selector: PlotScheduleSelector | None = None,
         judge: PlotScheduleJudge | None = None,
     ) -> None:
         self._context_service = context_service
         self._session_manager = session_manager
         self._selector = selector or PlotScheduleSelector()
-        self._judge = judge or PlotScheduleJudge(history_tools=history_tools)
+        self._judge = judge or PlotScheduleJudge(lookup_tools=lookup_tools)
 
     async def run(
         self,

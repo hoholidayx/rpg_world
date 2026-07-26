@@ -23,9 +23,10 @@ base:
     scene:
       allow_runtime_key_changes: false
 
-    # Outcome、状态路由/单目标更新与软 Plot 各自独立使用的历史查询上限。
+    # Outcome、状态路由/单目标更新与软 Plot 各自独立使用的
+    # History/Summary 共享查询轮次上限。
     adjudication:
-      max_history_tool_rounds: 5
+      max_lookup_tool_rounds: 5
 
     # 记忆子 Agent 的摘要与剧情记忆参数；召回条数由 memory.top_k 统一控制。
     memory_sub_agent:

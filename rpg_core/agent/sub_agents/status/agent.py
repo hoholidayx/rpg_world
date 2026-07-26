@@ -52,7 +52,7 @@ from rpg_core.agent.sub_agents.status.prompts import (
     STATUS_ROUTER_SCHEMA,
     STATUS_ROUTER_TOOL_NAME,
 )
-from rpg_core.agent.tools.history import HistoryToolSet
+from rpg_core.agent.tools.lookup import LookupToolSet
 from rpg_core.agent.tools.state import StateToolSet
 from rpg_core.context.fingerprint import (
     build_request_fingerprint,
@@ -208,18 +208,18 @@ class StatusSubAgent(BaseSubAgent):
         context_tables: list[dict[str, object]],
         user_input: str,
         max_history_rounds: int | None = None,
-        max_history_tool_rounds: int | None = None,
+        max_lookup_tool_rounds: int | None = None,
         turn_stats: TurnStats | None = None,
         player_character: "TurnPlayerCharacterSnapshot | None" = None,
         adjudication_context: AdjudicationContextSnapshot | None = None,
-        history_tools: HistoryToolSet | None = None,
+        lookup_tools: LookupToolSet | None = None,
     ) -> StatusSubAgentResult:
         """Run the fixed outcome -> route -> selected-update pipeline."""
         if max_history_rounds is None:
             max_history_rounds = settings.status_history_rounds
-        if max_history_tool_rounds is None:
-            max_history_tool_rounds = (
-                settings.adjudication_max_history_tool_rounds
+        if max_lookup_tool_rounds is None:
+            max_lookup_tool_rounds = (
+                settings.adjudication_max_lookup_tool_rounds
             )
         adjudication_context = (
             adjudication_context or AdjudicationContextSnapshot()
@@ -255,8 +255,8 @@ class StatusSubAgent(BaseSubAgent):
                 turn_stats=turn_stats,
                 player_character=player_character,
                 adjudication_context=adjudication_context,
-                history_tools=history_tools,
-                max_history_tool_rounds=max_history_tool_rounds,
+                lookup_tools=lookup_tools,
+                max_lookup_tool_rounds=max_lookup_tool_rounds,
             )
             result.outcome_decision = outcome
             if outcome is not OutcomeDecision.NOT_REQUIRED:
@@ -287,8 +287,8 @@ class StatusSubAgent(BaseSubAgent):
                 turn_stats=turn_stats,
                 player_character=player_character,
                 adjudication_context=adjudication_context,
-                history_tools=history_tools,
-                max_history_tool_rounds=max_history_tool_rounds,
+                lookup_tools=lookup_tools,
+                max_lookup_tool_rounds=max_lookup_tool_rounds,
             )
             result.route = route
             result.call_stats.extend(route.call_stats)
@@ -310,8 +310,8 @@ class StatusSubAgent(BaseSubAgent):
                 turn_stats=turn_stats,
                 player_character=player_character,
                 adjudication_context=adjudication_context,
-                history_tools=history_tools,
-                max_history_tool_rounds=max_history_tool_rounds,
+                lookup_tools=lookup_tools,
+                max_lookup_tool_rounds=max_lookup_tool_rounds,
             )
             return result
         except _StatusPrewriteRollbackError as exc:
@@ -525,8 +525,8 @@ class StatusSubAgent(BaseSubAgent):
         turn_stats: TurnStats | None,
         player_character: "TurnPlayerCharacterSnapshot | None",
         adjudication_context: AdjudicationContextSnapshot,
-        history_tools: HistoryToolSet | None,
-        max_history_tool_rounds: int,
+        lookup_tools: LookupToolSet | None,
+        max_lookup_tool_rounds: int,
     ) -> OutcomeDecision:
         outcome_schema = self._schemas_for_names({NARRATIVE_OUTCOME_TOOL_NAME})
         if not outcome_schema:
@@ -558,8 +558,8 @@ class StatusSubAgent(BaseSubAgent):
             messages,
             outcome_schema,
             source="status_outcome_preflight",
-            history_tools=history_tools,
-            max_history_tool_rounds=max_history_tool_rounds,
+            lookup_tools=lookup_tools,
+            max_lookup_tool_rounds=max_lookup_tool_rounds,
             turn_stats=turn_stats,
         )
         result.call_stats.extend(call_records)
@@ -623,8 +623,8 @@ class StatusSubAgent(BaseSubAgent):
         turn_stats: TurnStats | None,
         player_character: "TurnPlayerCharacterSnapshot | None",
         adjudication_context: AdjudicationContextSnapshot,
-        history_tools: HistoryToolSet | None,
-        max_history_tool_rounds: int,
+        lookup_tools: LookupToolSet | None,
+        max_lookup_tool_rounds: int,
     ) -> StatusRouteResult:
         route = StatusRouteResult()
         catalog, policy_index = self._status_catalog(context_tables)
@@ -672,8 +672,8 @@ class StatusSubAgent(BaseSubAgent):
             messages,
             [route_schema],
             source="status_router",
-            history_tools=history_tools,
-            max_history_tool_rounds=max_history_tool_rounds,
+            lookup_tools=lookup_tools,
+            max_lookup_tool_rounds=max_lookup_tool_rounds,
             turn_stats=turn_stats,
         )
         route.call_stats.extend(call_records)
@@ -755,8 +755,8 @@ class StatusSubAgent(BaseSubAgent):
         turn_stats: TurnStats | None,
         player_character: "TurnPlayerCharacterSnapshot | None",
         adjudication_context: AdjudicationContextSnapshot,
-        history_tools: HistoryToolSet | None,
-        max_history_tool_rounds: int,
+        lookup_tools: LookupToolSet | None,
+        max_lookup_tool_rounds: int,
     ) -> None:
         tables_by_id = {int(table.get("id", 0)): table for table in context_tables}
         recent = self._format_history_window(history, max_history_rounds)
@@ -853,8 +853,8 @@ class StatusSubAgent(BaseSubAgent):
                     messages,
                     schemas,
                     source=batch.source,
-                    history_tools=history_tools,
-                    max_history_tool_rounds=max_history_tool_rounds,
+                    lookup_tools=lookup_tools,
+                    max_lookup_tool_rounds=max_lookup_tool_rounds,
                     turn_stats=turn_stats,
                 )
                 result.call_stats.extend(call_records)
@@ -1090,8 +1090,8 @@ class StatusSubAgent(BaseSubAgent):
         schemas: list[dict[str, object]],
         *,
         source: str,
-        history_tools: HistoryToolSet | None,
-        max_history_tool_rounds: int,
+        lookup_tools: LookupToolSet | None,
+        max_lookup_tool_rounds: int,
         turn_stats: TurnStats | None,
     ) -> tuple[_LLMChatResult, tuple[CallRecord, ...]]:
         schema_names = [
@@ -1110,18 +1110,18 @@ class StatusSubAgent(BaseSubAgent):
             messages=messages,
             terminal_schemas=schemas,
             source=source,
-            history_tools=history_tools,
-            max_history_tool_rounds=max_history_tool_rounds,
+            lookup_tools=lookup_tools,
+            max_lookup_tool_rounds=max_lookup_tool_rounds,
             turn_stats=turn_stats,
         )
         for record in loop_result.call_records:
             self._log_cache_usage(source, record.usage)
         self._log_verbose(
-            "LLM call completed: source={} provider_calls={} history_rounds={} "
+            "LLM call completed: source={} provider_calls={} lookup_rounds={} "
             "tool_calls={}",
             source,
             len(loop_result.call_records),
-            loop_result.history_rounds,
+            loop_result.lookup_rounds,
             self._tool_names_for_log(loop_result.response),
         )
         return loop_result.response, loop_result.call_records

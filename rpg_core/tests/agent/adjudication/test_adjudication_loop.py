@@ -10,6 +10,8 @@ from llm_client.types import LLMResponse
 from rpg_core.agent.adjudication import run_adjudication_tool_loop
 from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.tools.history import HistoryToolSet
+from rpg_core.agent.tools.lookup import LookupToolSet
+from rpg_core.agent.tools.summary import SummaryToolSet
 from rpg_core.context.models import Message, Role
 
 
@@ -64,6 +66,37 @@ class _QueryService:
             "anchorTurnId": turn_id,
             "messages": [{"content": "sensitive complete history"}],
         }
+
+
+class _SummaryQueryService:
+    def __init__(self) -> None:
+        self.searches: list[tuple[object, object]] = []
+        self.reads: list[object] = []
+
+    async def search(self, *, terms: object, limit: object) -> dict[str, object]:
+        self.searches.append((terms, limit))
+        return {
+            "ok": True,
+            "items": [{"summaryId": "3", "excerpt": "sensitive Summary excerpt"}],
+        }
+
+    async def read(self, *, summary_id: object) -> dict[str, object]:
+        self.reads.append(summary_id)
+        return {
+            "ok": True,
+            "summaryId": summary_id,
+            "content": "sensitive complete Summary",
+        }
+
+
+def _lookup_tools(
+    history: _QueryService,
+    summaries: _SummaryQueryService | None = None,
+) -> LookupToolSet:
+    return LookupToolSet(
+        HistoryToolSet(history),  # type: ignore[arg-type]
+        SummaryToolSet(summaries or _SummaryQueryService()),  # type: ignore[arg-type]
+    )
 
 
 class _Provider:
@@ -138,12 +171,12 @@ async def test_history_search_read_then_terminal_preserves_transient_reasoning()
         messages=[Message(Role.SYSTEM, "authority"), Message(Role.USER, "decide")],
         terminal_schemas=[_TERMINAL_SCHEMA],
         source="status_router",
-        history_tools=HistoryToolSet(query),  # type: ignore[arg-type]
-        max_history_tool_rounds=5,
+        lookup_tools=_lookup_tools(query),
+        max_lookup_tool_rounds=5,
         turn_stats=stats,
     )
 
-    assert result.history_rounds == 2
+    assert result.lookup_rounds == 2
     assert len(result.call_records) == 3
     assert [record.source for record in stats.calls] == ["status_router"] * 3
     assert query.searches == [(["旧誓言"], 2)]
@@ -194,11 +227,11 @@ async def test_mixed_history_and_terminal_requires_a_fresh_terminal_decision() -
         messages=[Message(Role.USER, "decide")],
         terminal_schemas=[_TERMINAL_SCHEMA],
         source="plot_scheduler",
-        history_tools=HistoryToolSet(query),  # type: ignore[arg-type]
-        max_history_tool_rounds=5,
+        lookup_tools=_lookup_tools(query),
+        max_lookup_tool_rounds=5,
     )
 
-    assert result.history_rounds == 1
+    assert result.lookup_rounds == 1
     assert len(provider.calls) == 2
     followup_tool_messages = [
         message
@@ -207,7 +240,7 @@ async def test_mixed_history_and_terminal_requires_a_fresh_terminal_decision() -
     ]
     assert len(followup_tool_messages) == 2
     assert "sensitive history excerpt" in followup_tool_messages[0]["content"]
-    assert "terminal_tool_mixed_with_history" in followup_tool_messages[1]["content"]
+    assert "terminal_tool_mixed_with_lookup" in followup_tool_messages[1]["content"]
     final_calls = result.response.tool_calls
     assert final_calls is not None
     assert final_calls[0]["id"] == "terminal_fresh"
@@ -248,39 +281,107 @@ async def test_five_history_rounds_are_followed_by_one_terminal_only_call() -> N
         messages=[Message(Role.USER, "decide")],
         terminal_schemas=[_TERMINAL_SCHEMA],
         source="status_update:scene",
-        history_tools=HistoryToolSet(query),  # type: ignore[arg-type]
-        max_history_tool_rounds=5,
+        lookup_tools=_lookup_tools(query),
+        max_lookup_tool_rounds=5,
     )
 
-    assert result.history_rounds == 5
+    assert result.lookup_rounds == 5
     assert len(provider.calls) == 6
     for _messages, schemas in provider.calls[:5]:
         assert {
             schema["function"]["name"]
             for schema in schemas
-        } == {"history_search", "history_read", "terminal_decision"}
+        } == {
+            "history_search",
+            "history_read",
+            "summary_search",
+            "summary_read",
+            "terminal_decision",
+        }
     assert [
         schema["function"]["name"]
         for schema in provider.calls[5][1]
     ] == ["terminal_decision"]
     assert any(
-        "历史查询轮次已经用尽" in message["content"]
+        "历史与摘要查询的共享轮次已经用尽" in message["content"]
         for message in provider.calls[5][0]
         if message["role"] == "system"
     )
 
 
 @pytest.mark.asyncio
-async def test_history_arguments_and_results_are_redacted_from_verbose_logs(
-    monkeypatch,
-) -> None:
-    query = _QueryService()
+async def test_history_and_summary_calls_share_one_lookup_round_budget() -> None:
+    history = _QueryService()
+    summaries = _SummaryQueryService()
     provider = _Provider([
         LLMResponse(
             content="",
             tool_calls=[
                 _tool_call(
+                    "summary_search",
+                    '{"terms":["旧誓言"],"limit":2}',
+                    "summary_search_1",
+                ),
+                _tool_call(
                     "history_search",
+                    '{"terms":["旧誓言"],"limit":2}',
+                    "history_search_1",
+                ),
+            ],
+            finish_reason="tool_calls",
+        ),
+        LLMResponse(
+            content="",
+            tool_calls=[
+                _tool_call(
+                    "terminal_decision",
+                    '{"accepted":true}',
+                    "terminal_1",
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+    ])
+
+    result = await run_adjudication_tool_loop(
+        provider=provider,
+        messages=[Message(Role.USER, "decide")],
+        terminal_schemas=[_TERMINAL_SCHEMA],
+        source="status_router",
+        lookup_tools=_lookup_tools(history, summaries),
+        max_lookup_tool_rounds=1,
+    )
+
+    assert result.lookup_rounds == 1
+    assert history.searches == [(["旧誓言"], 2)]
+    assert summaries.searches == [(["旧誓言"], 2)]
+    assert [
+        schema["function"]["name"]
+        for schema in provider.calls[1][1]
+    ] == ["terminal_decision"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "sensitive_result"),
+    [
+        ("history_search", "sensitive history excerpt"),
+        ("summary_search", "sensitive Summary excerpt"),
+    ],
+)
+async def test_lookup_arguments_and_results_are_redacted_from_verbose_logs(
+    monkeypatch,
+    tool_name: str,
+    sensitive_result: str,
+) -> None:
+    query = _QueryService()
+    summaries = _SummaryQueryService()
+    provider = _Provider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                _tool_call(
+                    tool_name,
                     '{"terms":["绝密名字"],"limit":1}',
                     "search_secret",
                 )
@@ -312,8 +413,8 @@ async def test_history_arguments_and_results_are_redacted_from_verbose_logs(
         messages=[Message(Role.USER, "decide")],
         terminal_schemas=[_TERMINAL_SCHEMA],
         source="status_outcome_preflight",
-        history_tools=HistoryToolSet(query),  # type: ignore[arg-type]
-        max_history_tool_rounds=5,
+        lookup_tools=_lookup_tools(query, summaries),
+        max_lookup_tool_rounds=5,
     )
 
     logged = "\n".join(
@@ -321,5 +422,5 @@ async def test_history_arguments_and_results_are_redacted_from_verbose_logs(
         for call in info.call_args_list
     )
     assert "绝密名字" not in logged
-    assert "sensitive history excerpt" not in logged
+    assert sensitive_result not in logged
     assert "<redacted chars=" in logged

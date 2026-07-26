@@ -10,7 +10,7 @@ from llm_client.keys import AGENT_PLOT_SCHEDULER_BIZ_KEY
 from llm_client.types import LLMProvider, LLMResponse
 from rpg_core.agent.adjudication import run_adjudication_tool_loop
 from rpg_core.agent.telemetry import TurnStats
-from rpg_core.agent.tools.history import HistoryToolSet
+from rpg_core.agent.tools.lookup import LookupToolSet
 from rpg_core.context.models import Message
 from rpg_core.rp_modules.plot_scheduler.models import (
     PLOT_SUITABILITY_REASON_MAX_CHARS,
@@ -57,15 +57,15 @@ class PlotScheduleJudge:
         self,
         provider_factory: _ProviderFactory | None = None,
         *,
-        history_tools: HistoryToolSet | None = None,
-        max_history_tool_rounds: int | None = None,
+        lookup_tools: LookupToolSet | None = None,
+        max_lookup_tool_rounds: int | None = None,
     ) -> None:
         self._provider_factory = provider_factory
-        self._history_tools = history_tools
-        self._max_history_tool_rounds = (
-            max_history_tool_rounds
-            if max_history_tool_rounds is not None
-            else settings.adjudication_max_history_tool_rounds
+        self._lookup_tools = lookup_tools
+        self._max_lookup_tool_rounds = (
+            max_lookup_tool_rounds
+            if max_lookup_tool_rounds is not None
+            else settings.adjudication_max_lookup_tool_rounds
         )
 
     async def judge(
@@ -80,8 +80,8 @@ class PlotScheduleJudge:
             messages=messages,
             terminal_schemas=[PLOT_SUITABILITY_SCHEMA],
             source="plot_scheduler",
-            history_tools=self._history_tools,
-            max_history_tool_rounds=self._max_history_tool_rounds,
+            lookup_tools=self._lookup_tools,
+            max_lookup_tool_rounds=self._max_lookup_tool_rounds,
             turn_stats=turn_stats,
         )
         result = loop_result.response

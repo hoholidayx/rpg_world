@@ -429,7 +429,9 @@ RPGGameAgent（composition root + public facade）
 
 `AgentContextResources` 是不可变的 session-scoped 引用集合，包含 builder、角色、世界书、状态、scene 与 memory manager。初始化、reload 或 switch 只能整体构建/替换该集合，再由 `AgentRuntimeLifecycle` 按顺序重绑 SubAgent context/tool providers、memory stores、compressor、RP registry 与 base tools；不要恢复 `_rpg_ctx` 字典或在 Agent 上散落 manager/store 字段。
 
-主 Agent 的默认基础查询能力是两阶段 SQL 会话历史工具：先用 `history_search` 在当前 Session 已提交的主消息表中按具体词项定位候选 turn，再用 `history_read` 读取目标 turn 及相邻的实际 turn。两者在 `neutral | ic | ooc | gm` 中均可用，只读取正 `turn_id` 的 user/assistant 主历史；不读取 append-only 冷备、本轮尚未提交的 scratch、Summary/Story/Persistent Memory 或在线 Memory 索引。Outcome、状态 Route、每个状态 Update 与每个 soft Plot 候选复用同一只读工具集，但各阶段拥有独立的 `agent.adjudication.max_history_tool_rounds` 正整数预算；查询 transcript 与 `reasoning_content` 只在当前阶段临时回传，不持久化，历史与终结工具混用时不得执行终结工具，预算耗尽后只额外允许一次终结调用。`list_files / read_file / write_file / grep` 只保留源码、显式注入能力和直接测试，不再由 `AgentToolService` 默认注册；显式注入的 `WriteFileTool` 在 OOC 仍按既有策略隐藏。历史工具的 arguments、excerpt 和正文属于敏感内容，`verbose_logging` 只能记录工具名与 `<redacted chars=N>`，不得输出原文。
+主 Agent 的默认基础查询能力由 SQL History 与派生 Summary 两组工具组成，四种 mode 均保留：`history_search` / `history_read` 定位并读取当前 Session 已提交的 user/assistant 主消息，是核对原话、主体和精确结果的历史真源；`summary_search` / `summary_read` 搜索并读取 `summaries/*.md` 的批次/总览归纳，用解析后的白名单 front matter 和 `resolvedTurnRange` 快速定位旧剧情。Summary 正文是次级证据，不被动注入裁定 Context；无冲突且语义明确时可辅助裁定，与当前 Scene/状态、较新 SQL History 或 Evidence-valid Memory 冲突时服从更高真源，存在歧义、缺失来源范围或需要精确事实时必须回查 History。Summary 的 batch turn 范围优先使用 SQL `summary_batch_id` 聚合，缺失时才回退文件 front matter；overall 按 `last_batch_id` 聚合覆盖的 batch。
+
+Outcome、状态 Route、每个状态 Update 与每个 soft Plot 候选复用组合后的只读 LookupToolSet，但各阶段分别拥有一个 `agent.adjudication.max_lookup_tool_rounds` 正整数预算；History 与 Summary 调用共同消耗该预算，不是两份额度。查询 transcript 与 `reasoning_content` 只在当前阶段临时回传，不持久化；查询与终结工具混用时不得执行终结工具，预算耗尽后只额外允许一次终结调用。`list_files / read_file / write_file / grep` 只保留源码、显式注入能力和直接测试，不再由 `AgentToolService` 默认注册；显式注入的 `WriteFileTool` 在 OOC 仍按既有策略隐藏。四个查询工具的 arguments、excerpt 和正文都属于敏感内容，`verbose_logging` 只能记录工具名与 `<redacted chars=N>`，不得输出原文。
 
 ### Agent Turn 分层
 
@@ -470,7 +472,7 @@ TurnRequest                            调用方原始、不可变输入
 `send()` / `send_stream()` 的普通 RP turn 通过 `AgentTurnTransaction` 管理写入一致性。事务边界是内存 scratch 加最终短 commit 点，不跨 LLM 调用打开数据库事务。
 
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
-- 创建 turn scratch 前先解析不可变 RP Module 快照，Narrative Outcome 权重随该快照固定；同时以显式白名单构建模块中立的裁定前缀，只含裁定事实/权限、Story Prompt、世界书、玩家绑定/角色卡、Persistent Memory 与 Story Memory。Summary、Recall、叙事风格、正文格式、核心叙事/状态同步契约、Message Mode 和所有当前/未来 `rp_module:*` 提示词一律不进入 Outcome、状态 Route/Update 或 soft Plot；RP Module 快照只决定能力/配置，不提供通用提示词。turn 开始后 `rp_story_outcome` 与 scratch 版 scene/status 工具一起绑定给 `StatusSubAgent`。代码固定编排为 Outcome 独立判定 → 状态表/字段路由 → scene 与每张命中表分别更新；Outcome 已暂存或判定失败时不进入状态路由与预写。
+- 创建 turn scratch 前先解析不可变 RP Module 快照，Narrative Outcome 权重随该快照固定；同时以显式白名单构建模块中立的裁定前缀，只含裁定事实/权限、Story Prompt、世界书、玩家绑定/角色卡、Persistent Memory 与 Story Memory。Summary Layer/正文、Recall、叙事风格、正文格式、核心叙事/状态同步契约、Message Mode 和所有当前/未来 `rp_module:*` 提示词一律不被动进入 Outcome、状态 Route/Update 或 soft Plot；裁定前缀只保留 Summary 次级证据与四个查询工具的使用边界，实际 Summary 内容只能由本阶段按需查询。RP Module 快照只决定能力/配置，不提供通用提示词。turn 开始后 `rp_story_outcome` 与 scratch 版 scene/status 工具一起绑定给 `StatusSubAgent`。代码固定编排为 Outcome 独立判定 → 状态表/字段路由 → scene 与每张命中表分别更新；Outcome 已暂存或判定失败时不进入状态路由与预写。
 - 状态路由只能选择具有实际可用工具的 scene，以及普通表中的已有字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID 与 key allowlist。空 `updateRule` 使用通用“事实已明确且值实际变化”条件，非空规则作为额外语义指导，不产生独立调度或数据库写入门禁。隔离 Update 使用稳定 system contract，明确只能调用本请求实际提供的工具；user 内容按 `Recent Conversation → User Action → Selected State Target` 排列，每次仍只下发当前目标 schema。默认结构权限关闭时只允许更新已有 value。即时更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
 - 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定成功后不再注入 Narrative Outcome fixed section，只用简短无序条目要求执行最终结果并明确列出本轮可用的 scene/status 工具，同时从主 Agent schema 和可执行 registry 移除 outcome 工具；漏判或预裁定失败时才保留原 fixed contract 和补判工具。主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，最终正文不得新增尚未同步的可追踪确定事实；状态同步无需询问玩家。
 - 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。状态 document 固定为 `schemaVersion=2`，行结构只允许 `key / value / runtimeKeyLocked / updateRule / metadata`；所有字段的 value 都可由 LLM 在当前 turn 即时更新，不存在频率、周期、人工只读或替代写权限字段。`runtimeKeyLocked` 只保护 key 结构。
@@ -689,7 +691,7 @@ Plot Scheduler 是 Story 级剧情动态调度模块：
 
 - Plot Scheduler 的业务 owner 是 `rpg_core/rp_modules/plot_scheduler`。定义管理的默认位置、移动/重排、重复/冷却、时间线和删除占用规则，以及 turn ledger 校验、派生复制与 `/clear` 保留策略都由 Core 的类型化 application service/policy 决定；`rpg_data.plot_scheduling` 提供定义、Session 覆盖和决策账本的类型化查询/写入、分页 read model、调用方指定的复制过滤与通用事务，不得恢复调度或继承策略。
 - Story 可同时挂载多条线性大纲和多个事件池。大纲节点引用稳定 Story 事件并保存固定 `SceneTime`；事件池按 priority 仲裁，池内使用 `random | sequential`。每个 `neutral | ic | gm` turn 最多选一个到期大纲节点和一个池事件，OOC 完全旁路。
-- `forced` 候选到时直接暂存为 triggered，不获得 Judge Context 或工具；`soft` 候选通过 `agent.plot_scheduler` 独立 biz key 调用 LLM。Judge 读取模块中立的共享裁定前缀（裁定权限、Story Prompt、世界书、玩家绑定/角色卡、Persistent Memory、Story Memory）、当前 scratch scene/普通状态表、最近 N 个完整原始可推进世界 turn 和当前输入；不读 Summary、Recall、叙事/格式指令、Message Mode 或任何 RP Module 提示词。关键事实不确定时可在本候选的独立预算内使用 `history_search` / `history_read`。Judge `reason` 由 schema 与 parser 双重限长，避免无界元数据突破主 Context 门禁预留。
+- `forced` 候选到时直接暂存为 triggered，不获得 Judge Context 或工具；`soft` 候选通过 `agent.plot_scheduler` 独立 biz key 调用 LLM。Judge 读取模块中立的共享裁定前缀（裁定权限、Story Prompt、世界书、玩家绑定/角色卡、Persistent Memory、Story Memory）、当前 scratch scene/普通状态表、最近 N 个完整原始可推进世界 turn 和当前输入；不被动读取 Summary/Recall，不读叙事/格式指令、Message Mode 或任何 RP Module 提示词。关键事实不确定时可在本候选的独立预算内按需使用 `summary_search` / `summary_read` 或 `history_search` / `history_read`。Judge `reason` 由 schema 与 parser 双重限长，避免无界元数据突破主 Context 门禁预留。
 - 门禁在 scratch 创建前按当前 Story 最长两条 directive、事件/容器名称与有界判断元数据保守预留。调度实际发生在 Status preflight 之后、Memory recall 之前；因此读取本轮最新 scratch 状态，并让主 Agent 在记忆召回完成后看到已触发指令。
 - 实际触发项不再进入 `RP_MODULES` system message，而是以 `[engine_plot_directive]` 作为当前 user message 的最终运行时 suffix，位于原始 input 与所有普通 user suffix 之后。载荷只保留稳定顺序、事件标题和 directive；source/container/dispatch mode/Scene 时间/Judge reason 等内部信息不得进入主 LLM 请求。待提交 user message 在渲染该 suffix 前已经以 scene snapshot + 原始 input 暂存，因此 suffix 不写历史、Summary、Memory、Dream、正文 SSE 或消息 metadata。
 - Fixed Layer 保留稳定执行契约：suffix 在世界、NPC 与剧情结果上优先于玩家的冲突要求，但不得覆盖更高层系统契约、已暂存 Narrative Outcome 或实际工具边界；非 GM turn 不得据此替玩家角色生成台词、动作、决定或心理活动。同轮两条事件必须按给定顺序兼容推进。
@@ -724,7 +726,7 @@ agent.send(user_input)
   → TurnPreparation → AgentContextService + AgentToolService → messages/tools/schemas
   → sync/stream runner → run_chat_loop(provider, tool_registry, messages)
     → 主 Agent 在漏判时可补判 outcome；已预裁定时不再获得重复调用选项，真实持久变化先修正状态，再输出 RP 正文
-    → LLM 也可调用其它 RP module tools，或先 history_search 再 history_read 查询 SQL 主历史
+    → LLM 也可调用其它 RP module tools，或按需查询 Summary，再用 History 核对 SQL 主历史
     → 每轮记录 TurnStats + CallRecord
   → TurnRuntime.commit() 短事务写入主/backup 消息、Narrative Outcome、Plot decisions 与状态表
   → 同步适配为 AgentReply；流式仅在 commit 成功后发送带 usage/turn_id 的 DONE

@@ -112,7 +112,7 @@ class StatusPreflightHook:
                 turn_stats=turn_stats,
                 player_character=player_character,
                 adjudication_context=adjudication_context,
-                history_tools=self._tool_service.history_tools,
+                lookup_tools=self._tool_service.lookup_tools,
             )
         if result.updated:
             logger.info(

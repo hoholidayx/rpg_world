@@ -72,8 +72,11 @@ class HistorySearchTool(_HistoryTool):
     name = HISTORY_SEARCH_TOOL_NAME
     description = (
         "Search the current Session's committed conversation history for specific "
-        "literal terms. Use this first to locate candidate turn IDs, then call "
-        "history_read to inspect the complete turn and its surrounding context."
+        "literal terms. This SQL main history is the source for exact events and "
+        "wording. Use this first to locate candidate turn IDs, then call "
+        "history_read to inspect the complete turn and its surrounding context. "
+        "For coarse older-story orientation, summary_search may locate a useful "
+        "Summary and source turn range first."
     )
 
     def __init__(self, service: HistoryQueryService) -> None:
@@ -132,7 +135,9 @@ class HistoryReadTool(_HistoryTool):
     description = (
         "Read the complete messages for a turn returned by history_search, plus "
         "a small number of neighboring turns. Use history_search first unless "
-        "the exact turn ID is already known."
+        "the exact turn ID is already known. Prefer this committed SQL source over "
+        "Summary whenever exact wording, actors, outcomes, or conflicting facts "
+        "must be resolved."
     )
 
     def __init__(self, service: HistoryQueryService) -> None:

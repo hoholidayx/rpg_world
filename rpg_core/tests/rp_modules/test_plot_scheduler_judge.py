@@ -5,6 +5,8 @@ import pytest
 from llm_client.types import LLMResponse
 from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.tools.history import HistoryToolSet
+from rpg_core.agent.tools.lookup import LookupToolSet
+from rpg_core.agent.tools.summary import SummaryToolSet
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.plot_scheduler.judge import (
     PlotScheduleJudge,
@@ -156,13 +158,24 @@ async def test_plot_judge_can_read_committed_history_before_deciding() -> None:
             return "judge-model"
 
     query = QueryService()
+    summary_query = type(
+        "SummaryQuery",
+        (),
+        {
+            "search": lambda *_args, **_kwargs: _provider_result({"ok": True}),
+            "read": lambda *_args, **_kwargs: _provider_result({"ok": True}),
+        },
+    )()
     provider = SequenceProvider()
     stats = TurnStats()
 
     decision = await PlotScheduleJudge(
         provider_factory=lambda: _provider_result(provider),
-        history_tools=HistoryToolSet(query),  # type: ignore[arg-type]
-        max_history_tool_rounds=5,
+        lookup_tools=LookupToolSet(
+            HistoryToolSet(query),  # type: ignore[arg-type]
+            SummaryToolSet(summary_query),  # type: ignore[arg-type]
+        ),
+        max_lookup_tool_rounds=5,
     ).judge([Message(Role.USER, "判断候选事件")], turn_stats=stats)
 
     assert decision.suitable is True
@@ -175,6 +188,8 @@ async def test_plot_judge_can_read_committed_history_before_deciding() -> None:
     } == {
         "history_search",
         "history_read",
+        "summary_search",
+        "summary_read",
         "plot_schedule_decision",
     }
     assert any(

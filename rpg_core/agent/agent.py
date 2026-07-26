@@ -14,6 +14,7 @@ from rpg_core.agent.runtime.derivation import (
     SessionDerivationPreparationResult,
 )
 from rpg_core.agent.tools.history_query import HistoryQueryService
+from rpg_core.agent.tools.summary_query import SummaryQueryService
 from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
 from rpg_core.agent.mailbox.service import AgentMailbox
 from rpg_core.agent.runtime.model import MainModelRuntime
@@ -46,6 +47,7 @@ from rpg_core.session.derivation import SessionDerivationService
 from rpg_core.session.reset import SessionResetService
 from rpg_core.session.role import SessionRoleService
 from rpg_core.settings import settings
+from rpg_core.summary.reference import SessionSummaryReferenceProvider
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
 
 if TYPE_CHECKING:
@@ -122,6 +124,14 @@ class RPGGameAgent:
                 data=gateway.messages,
                 close_worker_connection=gateway.close_thread_connection,
             ),
+            summary_query=SummaryQueryService(
+                session_id=lambda: self._lifecycle.session_id,
+                session_data=session_data,
+                summaries=SessionSummaryReferenceProvider(
+                    gateway.session_reference
+                ),
+                close_worker_connection=gateway.close_thread_connection,
+            ),
             extra_tools=tools,
         )
         self._session_service = AgentSessionService(
@@ -139,7 +149,7 @@ class RPGGameAgent:
         plot_scheduling_preflight = PlotSchedulingPreflightHook(
             context_service=self._context_service,
             session_manager=self._lifecycle.session_manager,
-            history_tools=self._tool_service.history_tools,
+            lookup_tools=self._tool_service.lookup_tools,
         )
         preparation = TurnPreparation(
             context_service=self._context_service,

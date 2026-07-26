@@ -364,9 +364,17 @@ async def test_stream_loop_returns_reasoning_within_tool_chain_only():
     assert events[-1].content == "你找到了线索。"
 
 
-@pytest.mark.parametrize("tool_name", ["history_search", "history_read"])
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "history_search",
+        "history_read",
+        "summary_search",
+        "summary_read",
+    ],
+)
 @pytest.mark.parametrize("stream", [False, True], ids=["sync", "stream"])
-async def test_history_tool_verbose_logs_redact_arguments_and_results(
+async def test_lookup_tool_verbose_logs_redact_arguments_and_results(
     monkeypatch,
     tool_name: str,
     stream: bool,

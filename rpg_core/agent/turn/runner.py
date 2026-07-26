@@ -14,7 +14,7 @@ from loguru import logger
 from llm_client.types import LLMProvider, LLMResponse, LLMUsage
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.telemetry import CallRecord, TurnStats
-from rpg_core.agent.tools.history import SENSITIVE_HISTORY_TOOL_NAMES
+from rpg_core.agent.tools.lookup import SENSITIVE_LOOKUP_TOOL_NAMES
 from rpg_core.context.models import Message, Role
 from rpg_core.settings import settings
 from rpg_core.tooling.registry import ToolRegistry
@@ -29,9 +29,9 @@ def _tool_log_value(
     *,
     limit: int | None = None,
 ) -> str:
-    """Render a tool payload for verbose logs without leaking history."""
+    """Render a tool payload for verbose logs without leaking lookup content."""
     text = str(value)
-    if tool_name in SENSITIVE_HISTORY_TOOL_NAMES:
+    if tool_name in SENSITIVE_LOOKUP_TOOL_NAMES:
         return f"<redacted chars={len(text)}>"
     return text if limit is None else text[:limit]
 

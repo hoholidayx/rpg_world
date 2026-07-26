@@ -13,7 +13,10 @@ from rpg_core.agent.tools.history import (
     HistoryToolSet,
 )
 from rpg_core.agent.tools.history_query import HistoryQueryService
+from rpg_core.agent.tools.lookup import LookupToolSet
 from rpg_core.agent.tools.state import StateToolSet, resolve_state_tool_set
+from rpg_core.agent.tools.summary import SummaryToolSet
+from rpg_core.agent.tools.summary_query import SummaryQueryService
 from rpg_core.agent.turn import TurnExecutionPolicy, TurnExecutionSnapshot, TurnMode
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SCENE_TOOL_NAMES
@@ -40,10 +43,16 @@ class AgentToolService:
         *,
         resources: Callable[[], AgentContextResources],
         history_query: HistoryQueryService,
+        summary_query: SummaryQueryService,
         extra_tools: list[BaseTool] | None = None,
     ) -> None:
         self._resources = resources
         self._history_tools = HistoryToolSet(history_query)
+        self._summary_tools = SummaryToolSet(summary_query)
+        self._lookup_tools = LookupToolSet(
+            self._history_tools,
+            self._summary_tools,
+        )
         self._extra_tools = list(extra_tools or [])
         self._base_registry: ToolRegistry | None = None
 
@@ -53,13 +62,25 @@ class AgentToolService:
 
     @property
     def history_tools(self) -> HistoryToolSet:
-        """Committed-history tools shared by main and adjudication loops."""
+        """Standalone committed-history tools."""
 
         return self._history_tools
 
+    @property
+    def summary_tools(self) -> SummaryToolSet:
+        """Standalone derived-Summary tools."""
+
+        return self._summary_tools
+
+    @property
+    def lookup_tools(self) -> LookupToolSet:
+        """Combined lookup tools shared by main and adjudication loops."""
+
+        return self._lookup_tools
+
     def refresh_base_registry(self) -> None:
         registry = ToolRegistry()
-        self._history_tools.register_into(registry)
+        self._lookup_tools.register_into(registry)
         scene_tracker = self._resources().scene_tracker
         if scene_tracker is not None:
             registry.register_all(scene_tracker.get_tools())

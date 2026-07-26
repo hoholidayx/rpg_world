@@ -371,7 +371,8 @@ def test_adjudication_snapshot_uses_explicit_allowlist_and_both_memories() -> No
     assert "GM 托管" not in content
     assert "neutral/IC" not in content
     assert "召回记忆" not in content
-    assert "Summary" not in content
+    assert "Summary 是按批次归纳的次级证据" in content
+    assert "summary_search" in content and "history_read" in content
     assert "rp_module:" not in content
 
 
