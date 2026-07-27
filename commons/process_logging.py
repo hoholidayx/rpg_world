@@ -9,6 +9,7 @@ use.
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,10 @@ _SUPPORTED_COMPRESSIONS = frozenset(
 )
 _CONFIGURE_LOCK = RLock()
 _configured_signature: tuple[object, ...] | None = None
+_TELEGRAM_BOT_TOKEN_PATTERN = re.compile(
+    r"(?<!\d)\d{5,16}:[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"
+)
+_TELEGRAM_BOT_TOKEN_REDACTION = "<redacted-telegram-bot-token>"
 
 
 @dataclass(frozen=True)
@@ -210,6 +215,7 @@ def _resolve_log_directory(value: str) -> Path:
 
 
 def _format_record(record: dict) -> str:
+    record["message"] = _redact_telegram_bot_tokens(str(record["message"]))
     extra = record["extra"]
     extra["source"] = extra.get("stdlib_logger_name", record["name"])
     extra["source_function"] = extra.get("stdlib_function", record["function"])
@@ -217,6 +223,13 @@ def _format_record(record: dict) -> str:
         "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
         "{extra[process]} | {extra[source]}:{extra[source_function]} - {message}\n"
         "{exception}"
+    )
+
+
+def _redact_telegram_bot_tokens(value: str) -> str:
+    return _TELEGRAM_BOT_TOKEN_PATTERN.sub(
+        _TELEGRAM_BOT_TOKEN_REDACTION,
+        value,
     )
 
 

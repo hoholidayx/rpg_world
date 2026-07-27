@@ -81,6 +81,29 @@ def test_process_logging_keeps_console_output(capsys, tmp_path):
     assert "console message" in capsys.readouterr().err
 
 
+def test_process_logging_redacts_telegram_bot_tokens(tmp_path):
+    path = configure_process_logging(
+        "telegram",
+        ProcessLoggingSettings(directory=str(tmp_path), console_enabled=False),
+    )
+    token = "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+
+    logger.info(
+        "Bot API URL: https://api.telegram.org/bot{}/getMe raw={}",
+        token,
+        token,
+    )
+    logging.getLogger("httpx").info(
+        "HTTP Request: POST https://api.telegram.org/bot%s/getUpdates",
+        token,
+    )
+    logger.complete()
+
+    content = path.read_text(encoding="utf-8")
+    assert token not in content
+    assert content.count("<redacted-telegram-bot-token>") == 3
+
+
 def test_uvicorn_log_config_reinitializes_spawned_process_logging(monkeypatch):
     settings = ProcessLoggingSettings()
     configured = []
