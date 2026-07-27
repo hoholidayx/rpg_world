@@ -7,7 +7,6 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from llm_client.manager import LLMClientManager
 
@@ -100,13 +99,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="RPG World Media Service", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.get(f"{_prefix()}/health", response_model=MediaHealthResponse)

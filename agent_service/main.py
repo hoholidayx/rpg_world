@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 from typing import Literal, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
@@ -125,14 +124,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="RPG World Agent Service", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.get(f"{_service_prefix()}/health", response_model=AgentHealthResponse)

@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
+from commons.network import loopback_host
 from commons.process_logging import (
     ProcessLoggingSettings,
     parse_process_logging_settings,
 )
+from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
 from llm_client.auth import (
     DEFAULT_LLM_SERVICE_TOKEN_ENV,
     resolve_llm_service_token,
@@ -64,7 +65,10 @@ class MediaServiceSettings(ProfiledYamlSettings):
     def service(self) -> MediaServiceListenSettings:
         raw = self._mapping("service")
         return MediaServiceListenSettings(
-            host=str(raw.get("host", "127.0.0.1") or "127.0.0.1"),
+            host=loopback_host(
+                raw.get("host", "127.0.0.1"),
+                setting_name="media_service.service.host",
+            ),
             port=forgiving_int(raw.get("port", 8011), 8011),
             api_prefix=str(raw.get("api_prefix", "/media/v1") or "/media/v1"),
             reload=optional_bool(raw.get("reload", False), False),

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
 
+from commons.network import loopback_host
 from commons.process_logging import ProcessLoggingSettings, parse_process_logging_settings
 from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
 from llm_client.auth import DEFAULT_LLM_SERVICE_TOKEN_ENV, resolve_llm_service_token
@@ -68,7 +68,10 @@ class DreamServiceSettings(ProfiledYamlSettings):
     def service(self) -> DreamServiceListenSettings:
         raw = self._mapping("service")
         return DreamServiceListenSettings(
-            host=_loopback_host(raw.get("host", "127.0.0.1")),
+            host=loopback_host(
+                raw.get("host", "127.0.0.1"),
+                setting_name="dream_service.service.host",
+            ),
             port=forgiving_int(raw.get("port", 8014), 8014),
             api_prefix=str(raw.get("api_prefix", "/dream/v1") or "/dream/v1"),
             reload=optional_bool(raw.get("reload", False), False),
@@ -160,26 +163,5 @@ class DreamServiceSettings(ProfiledYamlSettings):
             self._mapping("logging"),
             label="dream_service.logging",
         )
-
-
-def _loopback_host(value: object) -> str:
-    """Keep the unauthenticated v1 service on an explicit loopback bind."""
-
-    host = str(value or "127.0.0.1").strip()
-    if host.casefold() == "localhost":
-        return "localhost"
-    normalized = host[1:-1] if host.startswith("[") and host.endswith("]") else host
-    try:
-        address = ipaddress.ip_address(normalized)
-    except ValueError as exc:
-        raise ValueError(
-            "dream_service.service.host must be localhost or a loopback IP address"
-        ) from exc
-    if not address.is_loopback:
-        raise ValueError(
-            "dream_service.service.host must be localhost or a loopback IP address"
-        )
-    return normalized
-
 
 settings = DreamServiceSettings()

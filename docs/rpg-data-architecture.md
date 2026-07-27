@@ -53,7 +53,10 @@ Repository / Peewee Record（仅 rpg_data 内部）
 Composition Root 可以看见 Gateway，但不得把 Gateway 继续向业务对象传递。
 在 `rpg_core` 内，合法 Gateway 获取点固定为 `agent/agent.py` 与
 `context/factory.py`；其它 Core 文件只能接收具体 Data Service 或自身声明的窄
-Protocol。独立进程入口及其组装 adapter 的例外必须由架构守卫显式列出。
+Protocol。独立进程入口及其组装 adapter 的例外必须由架构守卫显式列出。当前
+Play 的数据组装边界是 lifespan-owned `PlayDataRuntime`，Agent、Media 与 TTS
+分别由 `AgentServiceRuntime`、`MediaRuntime`、`TTSRuntime` 取得 Gateway 后立即
+注入窄依赖；HTTP endpoint 和业务 helper 不得再次 lookup。
 
 ### `DataServiceGateway`
 
@@ -122,6 +125,33 @@ Repository 是 `rpg_data` 内部的 Peewee 实现细节，负责查询表达式�
 - `RPModuleDataService`：内置 catalog、Story mount、Session override 的 typed CRUD，以及解析单个 Session snapshot 所需的聚合 read model。
 - `MessageDataService`：主历史 CRUD、turn window/分页、processed flag 聚合与调用方指定的批量标记；不决定 Context 投影或 Summary/Story Memory 候选。
 - `NarrativeOutcomeDataService`：调用方准备好的 Outcome ledger row 追加、按 turn 查询和删除；不判断 Outcome code、sample、权重来源或剧情语义。
+- `RuntimeMaintenanceDataService`：未索引 workspace/story/session 运行目录的
+  类型化扫描、归属与路径复验、同盘隔离、批量目标折叠、失败恢复和 pending
+  cleanup 结果；它只表达文件系统数据事实，不把补偿过程伪装为 SQL 事务。
+
+### Play API 数据与网络边界
+
+Play API 只在 composition root 创建一个 `PlayDataRuntime`，由它拥有 Gateway
+生命周期并组装四个不含 Gateway 引用的后端：
+
+- `PlayCatalogBackend`：workspace/story 管理、Session 查询与 Opening、Composer
+  和 RP Module；
+- `PlayStoryAssetBackend`：Character、Lorebook、Status、Plot 管理与投影；
+- `PlaySessionReadBackend`：消息分页/单 Turn、Outcome/Plot annotation、Scene、
+  Summary 与 Story Memory；
+- `PlayRuntimeMaintenanceBackend`：只接收
+  `RuntimeMaintenanceDataService`。
+
+router 通过 FastAPI dependency 从 `app.state` 获取对应后端，不能在请求期间调用
+`get_data_service_gateway()`。`POST /sessions` 的创建动作归 Agent service，
+Play 的 Catalog 后端只读取创建后的相同 Session summary。四个后端不得接收或
+暴露 Peewee Database、Repository、Record 或完整 Gateway。
+
+网络部署仍遵循进程边界：Play API 是唯一允许监听 `0.0.0.0` 的入口，任意 Origin
+CORS 不携带 credentials，且只支持可信局域网；Agent、Media、TTS、Dream、LLM
+只能监听 `localhost`、IPv4 loopback 或 `::1`，也不声明浏览器 CORS。当前没有
+用户鉴权、TLS、限流或公网部署承诺；这些能力必须在单独设计中完成，不能通过放宽
+内部 service host 绕过。
 
 ### 轻量渠道 Session Reference 查询
 
@@ -244,6 +274,12 @@ Gateway。若一个协作者只需要解析 Session 运行目录，就只声明�
 
 领域错误码、HTTP 状态、玩家提示和重试策略由上层映射。Data Service 不返回 HTTP schema，不拼接玩家文案，也不发布 WebUI/后台事件。
 
+已识别的 Peewee 完整性异常在 `rpg_data` 边界使用 `raise ... from exc` 转换为
+`DataIntegrityError`，因此上层可以映射稳定冲突语义，同时
+`DataIntegrityError.__cause__` 继续保留原始 ORM 信息供完整日志和问题分析。
+不得用宽泛 `except Exception` 把未知 ORM、文件系统或程序错误改写成数据冲突；
+未知异常必须保留异常链、由服务端记录完整 traceback，并按传输层通用 500 处理。
+
 ## 静态架构守卫
 
 `rpg_data/tests/test_architecture_boundaries.py` 固定检查：
@@ -253,6 +289,10 @@ Gateway。若一个协作者只需要解析 Session 运行目录，就只声明�
 - 已整改 application service 不依赖 Gateway；
 - Status application service 不直接依赖具体 `StatusDataService`，只声明自身所需的窄 Data Port；
 - Gateway getter 使用面不超出显式 allowlist；
+- Play router/backend 不调用 Gateway getter，完整 Gateway 只留在
+  `play_api/data_runtime.py` 组装边界；
+- Agent HTTP endpoint/helper 不调用 Gateway getter，Agent service 的 lookup
+  只允许发生在 lifespan 组装；
 - `rpg_core` 的 Gateway getter 只出现在 `agent/agent.py` 与 `context/factory.py`；
 - 整 Gateway 类型引用与构造注入不超出独立的显式 allowlist；
 - 新聚合持久化入口采用 `*DataService` 命名；

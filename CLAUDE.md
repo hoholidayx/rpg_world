@@ -140,11 +140,13 @@ rpg_world/
 ├── llm_service/                  # 独立 LLM 服务：HTTP、provider/config/manager + 本地 llama runtime
 ├── play_api/                     # Play WebUI 专用 FastAPI 应用
 │   ├── main.py                   #   入口 + CORS + lifespan（不启动渠道）
+│   ├── runtime.py                #   PlayServiceRuntime：Hub、HTTP clients、数据 runtime
+│   ├── data_runtime.py           #   PlayDataRuntime：Gateway composition root
 │   ├── settings.yaml             #   Play API 进程配置（监听 + 日志）
 │   ├── settings.py               #   PlaySettings 单例
 │   ├── dream_client.py           #   DreamClient 生命周期封装
 │   ├── media_client.py           #   MediaClient 生命周期封装
-│   ├── backends/                 #   AgentClient / rpg_data 后端适配
+│   ├── backends/                 #   AgentClient + 四个无 Gateway 的窄数据后端
 │   └── routers/
 │       ├── sessions.py           #   session APIs + history/history-page/scene/commands/turn/stream
 │       ├── dream.py              #   Session Dream proposal / memory 代理
@@ -205,6 +207,14 @@ Dream Proposal 状态机、恢复、Apply、Persistent Memory 生命周期与 Co
 
 Play API 独占进程内事件 Hub：`POST /play-api/v1/internal/events` 使用 `RPG_WORLD_PLAY_EVENT_TOKEN` Bearer 鉴权，`GET /play-api/v1/events/stream` 为 WebUI 提供全局 SSE。每订阅者有界队列满时丢最旧事件；不实现 SQL outbox、补发或消费确认。首版只支持 Play API 单进程/单 worker。WebUI 根 `Providers` 只挂一个 EventSource bridge，严格解析并把最近 50 条事件留在 Zustand 内存；独立 `features/notifications` 模块可展示、标记已读和清除这些事件，但不得据此 Toast、跳转、自动刷新 Query、回写任务状态或写 localStorage。
 
+网络暴露边界固定为“Play API 可信局域网入口 + 内部服务 loopback”。
+`play_api/settings.yaml` 保持 `0.0.0.0`，Play API 允许任意 Origin 但
+`allow_credentials=false`；它当前没有用户鉴权，只支持可信局域网，不支持路由器
+端口转发、云安全组公网放行或公网反向代理。Agent、Media、TTS、Dream、LLM 的
+`service.host` 统一经共享校验，只接受 `localhost`、IPv4 loopback 和 `::1`；
+`0.0.0.0`、`::`、其它 IP 或 hostname 必须阻止启动，内部服务不得添加浏览器
+CORS。公网部署需要另立认证、TLS、Origin 白名单、限流和审计方案。
+
 ```
 run_llm            -> llm_service.main:app        -> Provider + local llama runtime
 run_agent          -> agent_service.main:app
@@ -241,6 +251,15 @@ agent_service 进程
 ├── llm_client -> http://127.0.0.1:8012/llm/v1
 └── HTTP + SSE: /agent/v1
 ```
+
+进程生命周期由明确 Runtime 所有：Agent 使用 `AgentServiceRuntime`，Media 使用
+`MediaRuntime`，TTS 使用 `TTSRuntime`，Play 使用 `PlayServiceRuntime`。
+`PlayServiceRuntime` 持有 Event Hub、`PlayDataRuntime` 与 Agent/Dream/Media/TTS
+四个 loop-owned HTTP client；`PlayDataRuntime` 只向路由暴露
+`PlayCatalogBackend`、`PlayStoryAssetBackend`、`PlaySessionReadBackend`、
+`PlayRuntimeMaintenanceBackend`。所有 close 均幂等，启动中途失败按已创建资源
+清理；单步失败不得跳过后续步骤，清理完成后汇总包含资源名和完整 traceback 的
+错误。已经关闭的 runtime、worker 或 client 不得在下一次 lifespan 重用。
 
 LLM Service 默认监听 `http://127.0.0.1:8012/llm/v1`，优先使用环境变量 `RPG_WORLD_LLM_SERVICE_TOKEN` 的静态 Bearer 令牌。环境变量缺失或仅含空白时，LLM Service 与 `llm_client` 共同回退到内置的 `rpg-world-local-token`，服务继续启动并在启动阶段记录一次 warning；该默认值只用于本地开发，非本地部署应显式覆盖。Agent Service 不因 LLM Service 暂不可用而拒绝启动，health 返回 degraded；需要 catalog 或推理的请求返回 503/SSE `LLM_SERVICE_UNAVAILABLE`。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程存活与配置是否加载，不校验调用方 token；catalog、chat、stream、embedding、dimension、rerank 和 speech 仍全部鉴权。调用方凭据是否有效由首次受保护请求确认，不得把 health 成功解释为 token 有效。
 
@@ -304,6 +323,9 @@ channels_settings.cli_session_id
 - memory 检索、融合、chunk 和 rerank pool 参数都属于 `settings.yaml`，包括 `keyword_tokenizer`、`keyword_k`、`raw_md_mode`、`raw_md_min_results`、`hybrid_*_weight`、`rerank_candidate_k`、`rerank_score_weight`。
 - `keyword_k` / `hybrid_keyword_weight` 是当前 keyword 架构配置；不要恢复旧 `bigram_k` / `hybrid_bigram_weight`。
 - `llm.yaml` 的 `memory.rerank` 只放 provider/model/model_path/n_ctx/temperature/request_timeout_ms 等 LLM 参数，并且 `kind: rerank` 必须显式声明 `rerank_model_type`。
+- Agent、Media、TTS、Dream、LLM 的监听 host 必须通过
+  `commons.network.loopback_host()` 校验；不要在单个 service 复制或放宽规则。
+  Play API 是唯一允许 `0.0.0.0` 的 HTTP 入口。
 
 ### AgentManager（`rpg_core/agent/manager.py`）
 
@@ -797,6 +819,11 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 | scene / commands / chat | 对应 router 文件 | legacy placeholder，保留模块名但不作为主入口 |
 
 - Play API 通过 `agent_service.client.AgentClient` 访问 Agent 服务，并通过 loop-owned `DreamClient` 访问 Dream 服务；不得在 Play API 进程直接运行 Dream 领域或写 Persistent Memory 账本。
+- Play 本地数据由 lifespan-owned `PlayDataRuntime` 一次性组装四个窄后端：
+  Catalog、Story Asset、Session Read 与 Runtime Maintenance。router 通过 FastAPI
+  dependency 从 `app.state` 获取对应后端，不得查询 Gateway；四个后端也不得保存
+  Gateway、Database、Repository 或 Peewee record。Session 创建必须经 Agent
+  service，再由 Catalog 后端读取响应 summary。
 - Play WebUI 会话内请求只传 `session_id`；Play API 负责从 catalog 解析 workspace/story。
 - Agent service / AgentClient 不接受 Provider API key 参数或 header；provider/key 选择只由 LLM Service 配置控制。Agent → LLM Service 只使用独立的静态 Bearer 服务令牌。
 - 主 Agent LLM 只允许 `agent.main.provider_option_keys` 白名单，解析优先级为 `config < story < session`；生成中切换固定当前 turn，从下一 turn 生效。

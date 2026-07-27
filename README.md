@@ -34,6 +34,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-27：Phase 1 数据边界与服务生命周期加固。** Character、Lorebook 与 Session Composer 的已知唯一键/引用冲突在 `rpg_data` 统一转为 `DataIntegrityError`，Play API 继续返回 409；转换使用异常链保留 Peewee 根因，未知异常仍完整记录并进入通用 500。Play 数据访问由 lifespan-owned `PlayDataRuntime` 组装 `PlayCatalogBackend`、`PlayStoryAssetBackend`、`PlaySessionReadBackend` 与 `PlayRuntimeMaintenanceBackend`，Session 创建统一转发 Agent service。Agent、Media、TTS、Play 的 Runtime 现在对称创建和聚合清理 worker、HTTP/LLM client 与数据库。Agent、Media、TTS、Dream、LLM 的监听配置统一强制 loopback；仅 Play API 保持可信局域网监听和无凭据的任意 Origin CORS。
 - **2026-07-25：生图快速重抽与用户优先提示词。** `VisualBrief` 新增只由用户填写的 `userPrompt`，Planner 始终留空；非空内容固定作为最终 Provider prompt 的末尾最高语义优先级区块，但不覆盖安全规则与画幅、尺寸等硬参数。Session 图像工作室为成功图片和终态失败任务提供直接重抽/重试与编辑后重抽/重试两种入口；编辑入口复用原 Brief，不再次调用 Planner，并固定继承原 Job 的 Provider、来源与生成参数。
 - **2026-07-24：角色卡与消息模式硬切。** 角色一级叙事字段统一为 `name + description`，性格、说话方式、行为倾向和心理改为带内置 kind 与 `scope:npc_portrayal` 的二级详情；玩家角色 Fixed Layer 排除这些演绎详情，仅在 GM 当前 turn 托管时动态注入。消息模式统一为 `neutral | ic | ooc | gm`，默认 neutral；Workspace mode 配置删除，提示词内置到无配置 `message_mode` RP Module，并在 Hot History 后动态注入以保持 Fixed Layer 前缀稳定。Story Design、Story Pack、DesignProject 与 MCP 契约同步硬切 2.0，v1 直接拒绝且无转换器。
 - **2026-07-24：状态字段 Schema v2 硬切。** Story 与 Session 状态 document 统一为 `schemaVersion=2`，每行只保留 `key / value / runtimeKeyLocked / updateRule / metadata`。字段频率、延迟周期、人工只读和逐字段进度账本全部删除；所有已有字段的 value 由 Agent 在当前 turn 即时判断更新，`updateRule` 只提供额外语义指导，`runtimeKeyLocked` 只保护 key 结构。Play API/WebUI、DesignProject schema/viewer 与 `rpg_mcp` 同步切换，旧 document 和旧行字段直接拒绝。
@@ -102,6 +103,13 @@ cd play_webui && npm run dev
 Agent `8010`、Media `8011`、LLM `8012`、TTS `8013`、Dream `8014`。
 配置已按进程/模块拆分到各自目录，进程启停不通过配置控制。
 
+默认网络边界是“一个可信局域网入口 + 五个仅本机内部服务”：Play API 保持
+`0.0.0.0:8001`，允许任意 Origin 但不允许浏览器 credentials；Agent、Media、
+TTS、Dream 与 LLM 的 `service.host` 只接受 `localhost`、IPv4 loopback 或
+`::1`，其它地址会阻止服务启动。Play API 当前没有用户鉴权，因此只能用于可信
+局域网；不要配置路由器端口转发、云安全组公网放行或公网反向代理。公网部署前
+必须另行设计认证、TLS、CORS 白名单、速率限制与操作审计。
+
 ## 架构
 
 ### 进程隔离架构
@@ -112,6 +120,12 @@ RPG World 采用独立 Agent、LLM、Dream、Media 与 TTS 服务拓扑。只有
 `llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 和本地 llama runtime。
 Agent/Memory、Dream 与 TTS Service 通过 `llm_client` 调用 LLM 服务；Play API 的聊天、Dream、媒体和语音链路分别通过
 `AgentClient`、`DreamClient`、`MediaClient`、`TTSClient` 访问独立服务，CLI 与 Telegram 通过 `AgentClient` 调用 Agent 服务。Telegram 的可选资料菜单及 commit 后 Outcome/Plot 气泡通过进程内 `channels.session_reference` 只读查询已提交数据，不持有 Agent、Dream 或 LLM runtime；Plot directive 不加入 Agent SSE，Play API/WebUI 继续使用独立的富交互契约。
+
+进程资源分别由 `AgentServiceRuntime`、`MediaRuntime`、`TTSRuntime` 与
+`PlayServiceRuntime` 在 lifespan 内拥有。`PlayServiceRuntime` 再持有
+`PlayDataRuntime`、Event Hub 和四个 loop-owned HTTP client；关闭时即使单个
+资源失败也会继续清理其它资源，汇总记录完整异常链，下一次 lifespan 不复用已经
+关闭的 runtime、worker 或 client。
 
 ```
 run_llm            -> llm_service.main:app   -> Provider + local llama runtime
@@ -211,6 +225,15 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 - `rpg_session_profiles` 保存会话标题、描述、`player_character_id`、`player_character_snapshot_json` 和稳定的 `story_opening_id`；`rpg_sessions.id` 保持稳定，用作 URL 和 Agent session id。
 
 Session 业务 owner 是 `rpg_core.session`：`SessionCatalogService` 负责 Story/Session 创建与状态副本初始化，`SessionRoleService` 负责绑定和 Opening，`SessionResetService`、`SessionDerivationService`、`SessionDeletionService` 分别负责重置、派生和永久删除。`rpg_data.sessions` 是聚合后的类型化持久化服务，负责关联查询/read model、CRUD、条件更新、显式复制与数据库事务，不决定首次绑定、默认 Opening、生命周期推进、清理矩阵或 runtime 补偿。`DataServiceGateway` 只在组装边界充当 service 注册表，业务服务不把它当万能依赖。
+
+Play API 的本地数据访问由单个 `PlayDataRuntime` 组装为四个窄后端：
+`PlayCatalogBackend` 负责 workspace/story 与 Session catalog/Composer/RP Module，
+`PlayStoryAssetBackend` 负责 Character/Lorebook/Status/Plot，
+`PlaySessionReadBackend` 负责消息分页、Turn annotation、Scene、Summary 与 Story
+Memory，`PlayRuntimeMaintenanceBackend` 只依赖
+`RuntimeMaintenanceDataService` 扫描和清理未索引运行目录。路由从 `app.state`
+按能力取得后端，不查找或持有 Gateway。`POST /sessions` 也只通过 Agent service
+创建 Session，再由 catalog 后端读取相同 summary。
 
 玩家扮演角色绑定是 session 级能力：
 
