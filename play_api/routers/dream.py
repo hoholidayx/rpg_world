@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from typing import Literal, TypeVar
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from dream_service.client import DreamClientError, DreamServiceUnavailable
 from dream_service.schemas import (
@@ -31,8 +31,8 @@ ResponseT = TypeVar("ResponseT")
 async def create_dream_proposal(
     session_id: str,
     body: DreamProposalCreateRequest,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> DreamProposalResponse:
-    await resolve_session_or_404(session_id)
     return await _dream_call(
         get_dream_client().create_proposal(
             session_id,
@@ -47,8 +47,10 @@ async def create_dream_proposal(
     "/sessions/{session_id}/dream/proposals",
     response_model=DreamProposalListResponse,
 )
-async def list_dream_proposals(session_id: str) -> DreamProposalListResponse:
-    await resolve_session_or_404(session_id)
+async def list_dream_proposals(
+    session_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> DreamProposalListResponse:
     return await _dream_call(get_dream_client().list_proposals(session_id))
 
 
@@ -59,8 +61,8 @@ async def list_dream_proposals(session_id: str) -> DreamProposalListResponse:
 async def get_dream_proposal(
     session_id: str,
     proposal_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> DreamProposalResponse:
-    await resolve_session_or_404(session_id)
     return await _dream_call(
         get_dream_client().get_proposal(session_id, proposal_id)
     )
@@ -74,8 +76,8 @@ async def update_dream_proposal(
     session_id: str,
     proposal_id: str,
     body: DreamProposalUpdateRequest,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> DreamProposalResponse:
-    await resolve_session_or_404(session_id)
     return await _dream_call(
         get_dream_client().update_proposal(session_id, proposal_id, body)
     )
@@ -88,8 +90,8 @@ async def update_dream_proposal(
 async def apply_dream_proposal(
     session_id: str,
     proposal_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> DreamProposalResponse:
-    await resolve_session_or_404(session_id)
     return await _dream_call(
         get_dream_client().apply_proposal(session_id, proposal_id)
     )
@@ -102,8 +104,8 @@ async def apply_dream_proposal(
 async def reject_dream_proposal(
     session_id: str,
     proposal_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> DreamProposalResponse:
-    await resolve_session_or_404(session_id)
     return await _dream_call(
         get_dream_client().reject_proposal(session_id, proposal_id)
     )
@@ -118,8 +120,8 @@ async def list_dream_memories(
     lifecycle: Literal["active", "retired", "superseded"] | None = Query(
         default=None
     ),
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> DreamMemoryListResponse:
-    await resolve_session_or_404(session_id)
     return await _dream_call(
         get_dream_client().list_memories(session_id, lifecycle=lifecycle)
     )
@@ -132,8 +134,8 @@ async def list_dream_memories(
 async def restore_dream_memory(
     session_id: str,
     memory_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> DreamMemoryResponse:
-    await resolve_session_or_404(session_id)
     return await _dream_call(
         get_dream_client().restore_memory(session_id, memory_id)
     )

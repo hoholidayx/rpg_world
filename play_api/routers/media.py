@@ -6,7 +6,15 @@ from collections.abc import Awaitable
 import json
 from typing import TypeVar
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 
 from media_service.client import (
@@ -254,8 +262,10 @@ async def stream_media_library_asset(
     "/sessions/{session_id}/media/providers",
     response_model=MediaProviderCatalogResponse,
 )
-async def list_media_providers(session_id: str) -> MediaProviderCatalogResponse:
-    await resolve_session_or_404(session_id)
+async def list_media_providers(
+    session_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> MediaProviderCatalogResponse:
     return await _media_call(get_media_client().list_providers(session_id))
 
 
@@ -263,8 +273,10 @@ async def list_media_providers(session_id: str) -> MediaProviderCatalogResponse:
     "/sessions/{session_id}/media/source-turns",
     response_model=MediaSourceTurnsResponse,
 )
-async def list_media_source_turns(session_id: str) -> MediaSourceTurnsResponse:
-    await resolve_session_or_404(session_id)
+async def list_media_source_turns(
+    session_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> MediaSourceTurnsResponse:
     return await _media_call(get_media_client().list_source_turns(session_id))
 
 
@@ -275,8 +287,8 @@ async def list_media_source_turns(session_id: str) -> MediaSourceTurnsResponse:
 async def create_media_brief(
     session_id: str,
     body: MediaBriefRequest,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> MediaBriefResponse:
-    await resolve_session_or_404(session_id)
     return await _media_call(get_media_client().create_brief(session_id, body))
 
 
@@ -287,8 +299,8 @@ async def create_media_brief(
 async def create_media_job(
     session_id: str,
     body: MediaJobCreateRequest,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> MediaJobResponse:
-    await resolve_session_or_404(session_id)
     return await _media_call(get_media_client().create_job(session_id, body))
 
 
@@ -296,8 +308,10 @@ async def create_media_job(
     "/sessions/{session_id}/media/gallery",
     response_model=MediaGalleryResponse,
 )
-async def get_media_gallery(session_id: str) -> MediaGalleryResponse:
-    await resolve_session_or_404(session_id)
+async def get_media_gallery(
+    session_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> MediaGalleryResponse:
     return await _media_call(get_media_client().get_gallery(session_id))
 
 
@@ -305,8 +319,11 @@ async def get_media_gallery(session_id: str) -> MediaGalleryResponse:
     "/sessions/{session_id}/media/jobs/{job_id}",
     response_model=MediaJobResponse,
 )
-async def get_media_job(session_id: str, job_id: str) -> MediaJobResponse:
-    await resolve_session_or_404(session_id)
+async def get_media_job(
+    session_id: str,
+    job_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> MediaJobResponse:
     return await _media_call(get_media_client().get_job(session_id, job_id))
 
 
@@ -314,8 +331,11 @@ async def get_media_job(session_id: str, job_id: str) -> MediaJobResponse:
     "/sessions/{session_id}/media/jobs/{job_id}/cancel",
     response_model=MediaJobResponse,
 )
-async def cancel_media_job(session_id: str, job_id: str) -> MediaJobResponse:
-    await resolve_session_or_404(session_id)
+async def cancel_media_job(
+    session_id: str,
+    job_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> MediaJobResponse:
     return await _media_call(get_media_client().cancel_job(session_id, job_id))
 
 
@@ -327,8 +347,8 @@ async def retry_media_job(
     session_id: str,
     job_id: str,
     body: MediaJobRetryRequest | None = None,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> MediaJobResponse:
-    await resolve_session_or_404(session_id)
     return await _media_call(
         get_media_client().retry_job(session_id, job_id, body)
     )
@@ -338,8 +358,10 @@ async def retry_media_job(
     "/sessions/{session_id}/media/background",
     response_model=MediaBackgroundResponse,
 )
-async def get_media_background(session_id: str) -> MediaBackgroundResponse:
-    await resolve_session_or_404(session_id)
+async def get_media_background(
+    session_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> MediaBackgroundResponse:
     return await _media_call(get_media_client().get_background(session_id))
 
 
@@ -350,8 +372,8 @@ async def get_media_background(session_id: str) -> MediaBackgroundResponse:
 async def set_media_background(
     session_id: str,
     body: MediaBackgroundSetRequest,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> MediaBackgroundResponse:
-    await resolve_session_or_404(session_id)
     return await _media_call(get_media_client().set_background(session_id, body))
 
 
@@ -359,8 +381,10 @@ async def set_media_background(
     "/sessions/{session_id}/media/background",
     response_model=MediaBackgroundResponse,
 )
-async def clear_media_background(session_id: str) -> MediaBackgroundResponse:
-    await resolve_session_or_404(session_id)
+async def clear_media_background(
+    session_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> MediaBackgroundResponse:
     return await _media_call(get_media_client().clear_background(session_id))
 
 
@@ -371,8 +395,8 @@ async def clear_media_background(session_id: str) -> MediaBackgroundResponse:
 async def queue_media_background_evaluation(
     session_id: str,
     body: MediaBackgroundEvaluationRequest,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> MediaBackgroundEvaluationResponse:
-    await resolve_session_or_404(session_id)
     return await _media_call(
         get_media_client().queue_background_evaluation(session_id, body)
     )
@@ -385,8 +409,8 @@ async def queue_media_background_evaluation(
 async def get_media_background_evaluation(
     session_id: str,
     evaluation_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> MediaBackgroundEvaluationResponse:
-    await resolve_session_or_404(session_id)
     return await _media_call(
         get_media_client().get_background_evaluation(session_id, evaluation_id)
     )
@@ -399,8 +423,8 @@ async def get_media_background_evaluation(
 async def get_media_asset(
     session_id: str,
     asset_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> MediaGalleryItemResponse:
-    await resolve_session_or_404(session_id)
     return await _media_call(get_media_client().get_asset(session_id, asset_id))
 
 
@@ -411,8 +435,8 @@ async def get_media_asset(
 async def delete_media_asset(
     session_id: str,
     asset_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> MediaAssetDeleteResponse:
-    await resolve_session_or_404(session_id)
     return await _media_call(get_media_client().delete_asset(session_id, asset_id))
 
 
@@ -420,8 +444,8 @@ async def delete_media_asset(
 async def stream_media_asset(
     session_id: str,
     asset_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> StreamingResponse:
-    await resolve_session_or_404(session_id)
     stream = await _media_call(
         get_media_client().stream_asset_content(session_id, asset_id)
     )

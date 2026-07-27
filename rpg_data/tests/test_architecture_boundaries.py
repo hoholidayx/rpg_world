@@ -43,6 +43,7 @@ from rpg_data.services.message import MessageDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleDataService
+from rpg_data.services.runtime_maintenance import RuntimeMaintenanceDataService
 from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.session_reference import SessionReferenceDataService
 from rpg_data.services.session import SessionDataService
@@ -157,10 +158,7 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "agent_service/main.py",
     "dream_service/repository.py",
     "media_service/main.py",
-    "play_api/backends/data_manager.py",
-    "play_api/routers/plot_scheduling.py",
-    "play_api/composition.py",
-    "play_api/routers/sessions.py",
+    "play_api/data_runtime.py",
     "channels/cli/memory_recall.py",
     "rpg_core/agent/agent.py",
     "rpg_core/context/factory.py",
@@ -179,7 +177,7 @@ CORE_GATEWAY_LOOKUP_ALLOWLIST = frozenset({
 # new caller cannot bypass the lookup guard through constructor injection.
 WHOLE_GATEWAY_REFERENCE_ALLOWLIST = frozenset({
     "media_service/main.py",
-    "play_api/backends/data_manager.py",
+    "play_api/data_runtime.py",
     "rpg_mcp/composition.py",
     "run_telegram.py",
     "tts_service/main.py",
@@ -341,6 +339,7 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         RPModuleDataService,
         MessageDataService,
         NarrativeOutcomeDataService,
+        RuntimeMaintenanceDataService,
     )
 
     assert all(service_type.__name__.endswith("DataService") for service_type in service_types)

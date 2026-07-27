@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from play_api.backends import close_data_manager_backend, get_data_manager_backend
+from play_api.data_runtime import PlayDataRuntime
 from play_api.dream_client import close_dream_client
 from play_api.media_client import close_media_client
 from play_api.tts_client import close_tts_client
@@ -55,18 +55,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         heartbeat_seconds=event_cfg.heartbeat_seconds,
         retry_ms=event_cfg.retry_ms,
     )
+    data_runtime = PlayDataRuntime.create()
+    app.state.play_data = data_runtime
     try:
-        get_data_manager_backend()
         yield
     finally:
         try:
             await event_hub.close()
         finally:
-            del app.state.play_events
+            if hasattr(app.state, "play_events"):
+                del app.state.play_events
             await close_dream_client()
             await close_media_client()
             await close_tts_client()
-            close_data_manager_backend()
+            data_runtime.close()
+            if hasattr(app.state, "play_data"):
+                del app.state.play_data
 
 
 app = FastAPI(title="RPG World Play API", lifespan=lifespan)

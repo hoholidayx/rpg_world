@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 
 from play_api.routers._locator import resolve_session_or_404
 from play_api.tts_client import get_tts_client
@@ -16,8 +16,11 @@ router = APIRouter(tags=["play-tts"])
     "/sessions/{session_id}/tts/messages/{message_id}/jobs",
     response_model=TTSJobResponse,
 )
-async def create_tts_job(session_id: str, message_id: int) -> TTSJobResponse:
-    await resolve_session_or_404(session_id)
+async def create_tts_job(
+    session_id: str,
+    message_id: int,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> TTSJobResponse:
     return _rewrite_parts(await _call(get_tts_client().create_job(session_id, message_id)))
 
 
@@ -25,8 +28,11 @@ async def create_tts_job(session_id: str, message_id: int) -> TTSJobResponse:
     "/sessions/{session_id}/tts/jobs/{job_id}",
     response_model=TTSJobResponse,
 )
-async def get_tts_job(session_id: str, job_id: str) -> TTSJobResponse:
-    await resolve_session_or_404(session_id)
+async def get_tts_job(
+    session_id: str,
+    job_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> TTSJobResponse:
     return _rewrite_parts(await _call(get_tts_client().get_job(session_id, job_id)))
 
 
@@ -34,8 +40,11 @@ async def get_tts_job(session_id: str, job_id: str) -> TTSJobResponse:
     "/sessions/{session_id}/tts/jobs/{job_id}/retry",
     response_model=TTSJobResponse,
 )
-async def retry_tts_job(session_id: str, job_id: str) -> TTSJobResponse:
-    await resolve_session_or_404(session_id)
+async def retry_tts_job(
+    session_id: str,
+    job_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+) -> TTSJobResponse:
     return _rewrite_parts(await _call(get_tts_client().retry_job(session_id, job_id)))
 
 
@@ -45,8 +54,8 @@ async def get_tts_audio(
     job_id: str,
     part_index: int,
     range_header: str | None = Header(default=None, alias="Range"),
+    _session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> Response:
-    await resolve_session_or_404(session_id)
     upstream = await _call(
         get_tts_client().get_audio(
             session_id,

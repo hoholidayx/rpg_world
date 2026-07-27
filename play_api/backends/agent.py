@@ -11,6 +11,23 @@ from play_api import agent_client
 
 
 class AgentBackend:
+    async def create_session(
+        self,
+        workspace: str,
+        story_id: int,
+        *,
+        title: str = "",
+        description: str = "",
+    ) -> dict[str, object]:
+        return dict(
+            await agent_client.get_agent_client().create_session(
+                workspace,
+                story_id,
+                title=title,
+                description=description,
+            )
+        )
+
     async def get_main_llm_options(self) -> dict[str, object]:
         return dict(await agent_client.get_agent_client().get_main_llm_options())
 
@@ -218,3 +235,10 @@ class AgentBackend:
     ) -> dict[str, object]:
         del workspace, story_id
         return await agent_client.get_agent_client().stop(session_id, request_id=request_id)
+
+
+def get_agent_backend() -> AgentBackend:
+    return AgentBackend()
+
+
+__all__ = ["AgentBackend", "get_agent_backend"]

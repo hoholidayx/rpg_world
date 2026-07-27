@@ -413,13 +413,20 @@ class FakeCatalog:
         story_id: int,
         *,
         title: str = "",
+        description: str = "",
         session_id: str | None = None,
     ) -> models.Session | None:
         if workspace_id == "missing":
             return None
         cls.created_count += 1
         sid = session_id or f"generated_{cls.created_count}"
-        session = models.Session(sid, workspace_id, story_id, title=title)
+        session = models.Session(
+            sid,
+            workspace_id,
+            story_id,
+            title=title,
+            description=description,
+        )
         cls.sessions[sid] = session
         return session
 
@@ -599,6 +606,7 @@ class FakeSessionCatalogApplication:
         *,
         session_id: str | None = None,
         title: str = "",
+        description: str = "",
         **_kwargs: object,
     ) -> models.Session | None:
         return FakeCatalog.create_session(
@@ -606,6 +614,7 @@ class FakeSessionCatalogApplication:
             story_id,
             session_id=session_id,
             title=title,
+            description=description,
         )
 
 
@@ -860,11 +869,20 @@ def test_agent_service_contracts(monkeypatch) -> None:
 
         created = client.post(
             "/agent/v1/chat/sessions",
-            json={"workspace_id": "ws", "story_id": 1, "title": "New"},
+            json={
+                "workspace_id": "ws",
+                "story_id": 1,
+                "title": "New",
+                "description": "Created through Agent",
+            },
         )
         assert created.status_code == 200
         assert created.json()["session_id"] == "generated_1"
         assert created.json()["title"] == "New"
+        assert (
+            FakeCatalog.sessions["generated_1"].description
+            == "Created through Agent"
+        )
 
         ensured_created = client.post(
             "/agent/v1/chat/session/ensure",

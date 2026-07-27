@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from commons.types import JsonObject
-from play_api.backends import get_data_manager_backend
+from play_api.backends import PlayStoryAssetBackend
+from play_api.dependencies import get_story_asset_backend
 from play_api.routers._data_errors import data_integrity_conflict
 from rpg_data.errors import DataIntegrityError
 
@@ -94,8 +95,9 @@ def _entry_response(item: dict[str, object]) -> PlayLorebookEntry:
 async def list_lorebook_entries(
     workspace_id: str,
     story_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> list[PlayLorebookEntry]:
-    entries = await get_data_manager_backend().list_lorebook_entries(
+    entries = await assets.list_lorebook_entries(
         workspace_id,
         story_id,
     )
@@ -109,9 +111,10 @@ async def create_lorebook_entry(
     workspace_id: str,
     story_id: int,
     payload: PlayLorebookEntryPayload,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlayLorebookEntry:
     try:
-        entry = await get_data_manager_backend().create_lorebook_entry(
+        entry = await assets.create_lorebook_entry(
             workspace_id,
             story_id,
             name=payload.name,
@@ -139,9 +142,10 @@ async def update_lorebook_entry(
     story_id: int,
     entry_id: int,
     payload: PlayLorebookEntryPatch,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlayLorebookEntry:
     try:
-        entry = await get_data_manager_backend().update_lorebook_entry(
+        entry = await assets.update_lorebook_entry(
             workspace_id,
             story_id,
             entry_id,
@@ -170,9 +174,10 @@ async def delete_lorebook_entry(
     workspace_id: str,
     story_id: int,
     entry_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> None:
     try:
-        deleted = await get_data_manager_backend().delete_lorebook_entry(
+        deleted = await assets.delete_lorebook_entry(
             workspace_id,
             story_id,
             entry_id,

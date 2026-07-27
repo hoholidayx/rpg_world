@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from typing import Literal, TypeVar
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_service.client import AgentClientError, AgentServiceUnavailable
@@ -118,8 +118,10 @@ async def set_story_main_llm(
     "/sessions/{session_id}/main-llm",
     response_model=PlayMainLLMSelection,
 )
-async def get_session_main_llm(session_id: str) -> PlayMainLLMSelection:
-    session = await resolve_session_or_404(session_id)
+async def get_session_main_llm(
+    session_id: str,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+) -> PlayMainLLMSelection:
     payload = await _agent_call(
         get_agent_backend().get_session_main_llm(str(session["id"]))
     )
@@ -133,8 +135,8 @@ async def get_session_main_llm(session_id: str) -> PlayMainLLMSelection:
 async def set_session_main_llm(
     session_id: str,
     body: PlayMainLLMUpdateRequest,
+    session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> PlayMainLLMSelection:
-    session = await resolve_session_or_404(session_id)
     payload = await _agent_call(
         get_agent_backend().set_session_main_llm(
             str(session["id"]),

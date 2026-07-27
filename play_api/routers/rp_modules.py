@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from commons.types import JsonObject, JsonValue
-from play_api.composition import rp_module_service
+from play_api.backends import PlayCatalogBackend
+from play_api.dependencies import get_catalog_backend
 from play_api.routers._locator import resolve_session_or_404
 from rpg_core.rp_modules.constants import RP_MODULE_NARRATIVE_OUTCOME_NAME
-from rpg_core.rp_modules.application import RPModuleApplicationService
 from rpg_core.rp_modules.models import RPModuleSelection, RPModuleSelectionSnapshot
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_DEFINITIONS
 
@@ -80,10 +80,6 @@ class PlaySessionRPModulePatch(BaseModel):
     config: JsonObject | None = None
 
 
-def _service() -> RPModuleApplicationService:
-    return rp_module_service()
-
-
 def _selection_response(
     snapshot: RPModuleSelectionSnapshot,
     selected: RPModuleSelection,
@@ -129,8 +125,10 @@ def _list_response(snapshot: RPModuleSelectionSnapshot) -> PlayRPModuleList:
 
 
 @router.get("/rp-modules/catalog", response_model=PlayRPModuleCatalog)
-async def get_rp_module_catalog() -> PlayRPModuleCatalog:
-    service = _service()
+async def get_rp_module_catalog(
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> PlayRPModuleCatalog:
+    service = catalog.rp_modules
     definitions = {item.name: item for item in service.definitions()}
     rows = service.list_catalog()
     return PlayRPModuleCatalog(modules=[
@@ -157,8 +155,15 @@ async def get_rp_module_catalog() -> PlayRPModuleCatalog:
     "/workspaces/{workspace_id}/stories/{story_id}/rp-modules",
     response_model=PlayRPModuleList,
 )
-async def get_story_rp_modules(workspace_id: str, story_id: int) -> PlayRPModuleList:
-    snapshot = _service().resolve_story_snapshot(workspace_id, story_id)
+async def get_story_rp_modules(
+    workspace_id: str,
+    story_id: int,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> PlayRPModuleList:
+    snapshot = catalog.rp_modules.resolve_story_snapshot(
+        workspace_id,
+        story_id,
+    )
     if snapshot is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return _list_response(snapshot)
@@ -173,8 +178,9 @@ async def patch_story_rp_module(
     story_id: int,
     module_name: str,
     payload: PlayStoryRPModulePatch,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayRPModuleConfig:
-    service = _service()
+    service = catalog.rp_modules
     definition = service.definition(module_name)
     if definition is None:
         raise HTTPException(status_code=404, detail="RP module not found")
@@ -199,9 +205,12 @@ async def patch_story_rp_module(
     "/sessions/{session_id}/rp-modules",
     response_model=PlayRPModuleList,
 )
-async def get_session_rp_modules(session_id: str) -> PlayRPModuleList:
-    await resolve_session_or_404(session_id)
-    return _list_response(_service().resolve_snapshot(session_id))
+async def get_session_rp_modules(
+    session_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> PlayRPModuleList:
+    return _list_response(catalog.rp_modules.resolve_snapshot(session_id))
 
 
 @router.patch(
@@ -212,9 +221,10 @@ async def patch_session_rp_module(
     session_id: str,
     module_name: str,
     payload: PlaySessionRPModulePatch,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayRPModuleConfig:
-    await resolve_session_or_404(session_id)
-    service = _service()
+    service = catalog.rp_modules
     definition = service.definition(module_name)
     if definition is None:
         raise HTTPException(status_code=404, detail="RP module not found")
@@ -242,9 +252,10 @@ async def patch_session_rp_module(
 async def delete_session_rp_module_override(
     session_id: str,
     module_name: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayRPModuleConfig:
-    await resolve_session_or_404(session_id)
-    service = _service()
+    service = catalog.rp_modules
     definition = service.definition(module_name)
     if definition is None:
         raise HTTPException(status_code=404, detail="RP module not found")

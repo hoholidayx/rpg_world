@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from play_api.composition import session_composer_service
+from play_api.backends import PlayCatalogBackend
+from play_api.dependencies import get_catalog_backend
 from play_api.routers._data_errors import data_integrity_conflict
 from play_api.routers._locator import resolve_session_or_404
 from rpg_core.rp_modules.message_mode import MessageModeOption
-from rpg_core.session.composer import SessionComposerApplicationService
 from rpg_data.errors import DataIntegrityError
 from rpg_data.model.composer import (
     NarrativeStyle,
@@ -208,16 +208,15 @@ def _quick_reply_response(item: StoryQuickReply) -> PlayQuickReply:
     )
 
 
-def _composer_service() -> SessionComposerApplicationService:
-    return session_composer_service()
-
-
 @router.get(
     "/workspaces/{workspace_id}/narrative-styles",
     response_model=list[PlayNarrativeStyle],
 )
-async def list_narrative_styles(workspace_id: str) -> list[PlayNarrativeStyle]:
-    items = _composer_service().list_styles(workspace_id)
+async def list_narrative_styles(
+    workspace_id: str,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> list[PlayNarrativeStyle]:
+    items = catalog.session_composer.list_styles(workspace_id)
     if items is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     return [_style_response(item) for item in items]
@@ -230,9 +229,10 @@ async def list_narrative_styles(workspace_id: str) -> list[PlayNarrativeStyle]:
 async def create_narrative_style(
     workspace_id: str,
     body: PlayNarrativeStyleCreate,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayNarrativeStyle:
     try:
-        item = _composer_service().create_style(
+        item = catalog.session_composer.create_style(
             workspace_id,
             name=body.name,
             prompt=body.prompt,
@@ -257,9 +257,10 @@ async def update_narrative_style(
     workspace_id: str,
     style_id: int,
     body: PlayNarrativeStylePatch,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayNarrativeStyle:
     try:
-        item = _composer_service().update_style(
+        item = catalog.session_composer.update_style(
             workspace_id,
             style_id,
             name=body.name,
@@ -279,9 +280,16 @@ async def update_narrative_style(
 
 
 @router.delete("/workspaces/{workspace_id}/narrative-styles/{style_id}", status_code=204)
-async def delete_narrative_style(workspace_id: str, style_id: int) -> Response:
+async def delete_narrative_style(
+    workspace_id: str,
+    style_id: int,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> Response:
     try:
-        deleted = _composer_service().delete_style(workspace_id, style_id)
+        deleted = catalog.session_composer.delete_style(
+            workspace_id,
+            style_id,
+        )
     except DataIntegrityError as exc:
         raise data_integrity_conflict(
             exc,
@@ -301,8 +309,12 @@ async def delete_narrative_style(workspace_id: str, style_id: int) -> Response:
 async def list_story_narrative_styles(
     workspace_id: str,
     story_id: int,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> list[PlayStoryNarrativeStyle]:
-    items = _composer_service().list_story_styles(workspace_id, story_id)
+    items = catalog.session_composer.list_story_styles(
+        workspace_id,
+        story_id,
+    )
     if items is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return [_story_style_response(item) for item in items]
@@ -316,9 +328,10 @@ async def mount_story_narrative_style(
     workspace_id: str,
     story_id: int,
     body: PlayStoryStyleMountRequest,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayStoryNarrativeStyle:
     try:
-        item = _composer_service().mount_story_style(
+        item = catalog.session_composer.mount_story_style(
             workspace_id,
             story_id,
             body.narrative_style_id,
@@ -346,9 +359,10 @@ async def unmount_story_narrative_style(
     workspace_id: str,
     story_id: int,
     mount_id: int,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> Response:
     try:
-        deleted = _composer_service().unmount_story_style(
+        deleted = catalog.session_composer.unmount_story_style(
             workspace_id,
             story_id,
             mount_id,
@@ -374,9 +388,10 @@ async def set_story_base_narrative_style(
     workspace_id: str,
     story_id: int,
     body: PlayStoryBaseStyleRequest,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayStoryNarrativeStyle | None:
     try:
-        item = _composer_service().set_story_base_style(
+        item = catalog.session_composer.set_story_base_style(
             workspace_id,
             story_id,
             body.mount_id,
@@ -398,8 +413,15 @@ async def set_story_base_narrative_style(
     "/workspaces/{workspace_id}/stories/{story_id}/quick-replies",
     response_model=list[PlayQuickReply],
 )
-async def list_quick_replies(workspace_id: str, story_id: int) -> list[PlayQuickReply]:
-    items = _composer_service().list_quick_replies(workspace_id, story_id)
+async def list_quick_replies(
+    workspace_id: str,
+    story_id: int,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> list[PlayQuickReply]:
+    items = catalog.session_composer.list_quick_replies(
+        workspace_id,
+        story_id,
+    )
     if items is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return [_quick_reply_response(item) for item in items]
@@ -413,9 +435,10 @@ async def create_quick_reply(
     workspace_id: str,
     story_id: int,
     body: PlayQuickReplyCreate,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayQuickReply:
     try:
-        item = _composer_service().create_quick_reply(
+        item = catalog.session_composer.create_quick_reply(
             workspace_id,
             story_id,
             title=body.title,
@@ -444,9 +467,10 @@ async def update_quick_reply(
     story_id: int,
     reply_id: int,
     body: PlayQuickReplyPatch,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayQuickReply:
     try:
-        item = _composer_service().update_quick_reply(
+        item = catalog.session_composer.update_quick_reply(
             workspace_id,
             story_id,
             reply_id,
@@ -476,9 +500,10 @@ async def delete_quick_reply(
     workspace_id: str,
     story_id: int,
     reply_id: int,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> Response:
     try:
-        deleted = _composer_service().delete_quick_reply(
+        deleted = catalog.session_composer.delete_quick_reply(
             workspace_id,
             story_id,
             reply_id,
@@ -497,10 +522,13 @@ async def delete_quick_reply(
 
 
 @router.get("/sessions/{session_id}/composer", response_model=PlaySessionComposer)
-async def get_session_composer(session_id: str) -> PlaySessionComposer:
-    session_payload = await resolve_session_or_404(session_id)
+async def get_session_composer(
+    session_id: str,
+    session_payload: dict[str, object] = Depends(resolve_session_or_404),
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> PlaySessionComposer:
     agent_session_id = str(session_payload["id"])
-    snapshot = _composer_service().get_snapshot(agent_session_id)
+    snapshot = catalog.session_composer.get_snapshot(agent_session_id)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="session not found")
     return PlaySessionComposer(

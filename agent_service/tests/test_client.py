@@ -175,7 +175,12 @@ async def test_client_truncate_turn_uses_standard_payload() -> None:
 async def test_client_session_crud_uses_agent_service_contract() -> None:
     client = AgentClient(base_url="http://agent")
     await client.ensure_session("ws", 1, session_id="s1", title="Default")
-    await client.create_session("ws", 1, title="Alt")
+    await client.create_session(
+        "ws",
+        1,
+        title="Alt",
+        description="Forwarded",
+    )
     result = await client.list_sessions("ws", 1)
 
     assert result == {"ok": True, "commands": []}
@@ -185,7 +190,18 @@ async def test_client_session_crud_uses_agent_service_contract() -> None:
             "http://agent/chat/session/ensure",
             {"json": {"workspace_id": "ws", "story_id": 1, "session_id": "s1", "title": "Default"}},
         ),
-        ("POST", "http://agent/chat/sessions", {"json": {"workspace_id": "ws", "story_id": 1, "title": "Alt"}}),
+        (
+            "POST",
+            "http://agent/chat/sessions",
+            {
+                "json": {
+                    "workspace_id": "ws",
+                    "story_id": 1,
+                    "title": "Alt",
+                    "description": "Forwarded",
+                }
+            },
+        ),
         ("GET", "http://agent/chat/sessions", {"params": {"workspace_id": "ws", "story_id": 1}}),
     ]
 

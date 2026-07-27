@@ -423,6 +423,7 @@ async def create_session(body: AgentSessionCreateRequest) -> AgentSessionCreateP
         body.workspace_id,
         int(body.story_id),
         title=str(body.title or ""),
+        description=str(body.description or ""),
     )
     await _bind_session_player_character_if_present(session.id, body.player_character_id)
     return {"status": "created", **_session_payload(session)}
@@ -840,13 +841,20 @@ def _require_ready_catalog_session(session_id: str) -> models.Session:
     return session
 
 
-def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> models.Session:
+def _create_catalog_session(
+    workspace_id: str,
+    story_id: int,
+    *,
+    title: str,
+    description: str = "",
+) -> models.Session:
     workspace_id = _require_workspace(workspace_id)
     gateway = get_data_service_gateway()
     session = SessionCatalogService(gateway.sessions).create_session(
         workspace_id,
         story_id,
         title=title,
+        description=description,
     )
     if session is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
