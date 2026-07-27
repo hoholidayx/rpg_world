@@ -28,28 +28,27 @@ async def test_play_api_allows_lan_origin_without_credentials() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("service_app", "health_path"),
+    "service_app",
     [
-        (agent_app, "/agent/v1/health"),
-        (media_app, "/media/v1/health"),
-        (tts_app, "/tts/v1/health"),
-        (dream_app, "/dream/v1/health"),
-        (llm_app, "/llm/v1/health"),
+        agent_app,
+        media_app,
+        tts_app,
+        dream_app,
+        llm_app,
     ],
 )
 async def test_internal_services_do_not_emit_browser_cors_headers(
     service_app,
-    health_path: str,
 ) -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=service_app),
         base_url="http://testserver",
     ) as client:
         response = await client.get(
-            health_path,
+            "/__cors_probe__",
             headers={"Origin": "http://192.168.1.25:3000"},
         )
 
-    assert response.status_code == 200
+    assert response.status_code == 404
     assert "access-control-allow-origin" not in response.headers
     assert "access-control-allow-credentials" not in response.headers

@@ -303,6 +303,20 @@ def test_gateway_lookup_surface_does_not_grow() -> None:
     assert actual - GATEWAY_LOOKUP_ALLOWLIST == set()
 
 
+def test_play_request_boundaries_do_not_lookup_or_reference_gateway() -> None:
+    violations: list[str] = []
+    for boundary_root in (ROOT / "play_api/routers", ROOT / "play_api/backends"):
+        for path in _python_files(boundary_root):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            if _uses_gateway_lookup(path) or any(
+                isinstance(node, ast.Name) and node.id == "DataServiceGateway"
+                for node in ast.walk(tree)
+            ):
+                violations.append(path.relative_to(ROOT).as_posix())
+
+    assert violations == []
+
+
 def test_agent_service_gateway_lookup_is_limited_to_lifespan() -> None:
     path = ROOT / "agent_service/main.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
