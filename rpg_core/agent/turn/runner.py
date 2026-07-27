@@ -36,6 +36,16 @@ def _tool_log_value(
     return text if limit is None else text[:limit]
 
 
+async def _execute_tool_call(
+    tool_registry: ToolRegistry | None,
+    name: str,
+    arguments: str,
+) -> str:
+    if tool_registry is None:
+        return f"Error: unknown tool {name!r}"
+    return await tool_registry.execute(name, arguments)
+
+
 class ToolCallRecord:
     """One tool-call iteration — assistant message + corresponding tool results.
 
@@ -104,7 +114,7 @@ class AgentReply:
 
 async def run_chat_loop(
     provider: LLMProvider,
-    tool_registry: ToolRegistry,
+    tool_registry: ToolRegistry | None,
     messages: list[Message],
     schemas: list[dict] | None,
     turn_stats: TurnStats | None = None,
@@ -116,7 +126,8 @@ async def run_chat_loop(
     provider:
         The LLM provider to call for chat completions.
     tool_registry:
-        Registered tool instances — used to dispatch ``tool_calls`` by name.
+        Registered tool instances used to dispatch ``tool_calls`` by name, or
+        ``None`` when the current turn exposes no tools.
     messages:
         The working message buffer (e.g. 5-layer RPG context).  Assistant
         tool-call messages and tool results are appended here for subsequent
@@ -183,7 +194,7 @@ async def run_chat_loop(
             for tc in tool_calls:
                 name = tc["function"]["name"]
                 args = tc["function"]["arguments"]
-                tool_result = await tool_registry.execute(name, args)
+                tool_result = await _execute_tool_call(tool_registry, name, args)
                 tool_msg_obj = Message(role=Role.TOOL, content=str(tool_result), tool_call_id=tc["id"])
                 tool_msg = tool_msg_obj.to_dict()
                 messages.append(tool_msg_obj)
@@ -251,7 +262,7 @@ async def run_chat_loop(
                     _tool_log_value(name, args),
                 )
 
-            tool_result = await tool_registry.execute(name, args)
+            tool_result = await _execute_tool_call(tool_registry, name, args)
 
             if settings.verbose_logging:
                 logger.info(
@@ -285,7 +296,7 @@ async def run_chat_loop(
 
 async def run_chat_loop_stream(
     provider: LLMProvider,
-    tool_registry: ToolRegistry,
+    tool_registry: ToolRegistry | None,
     messages: list[Message],
     schemas: list[dict] | None,
     turn_stats: TurnStats | None = None,
@@ -474,7 +485,7 @@ async def run_chat_loop_stream(
                     _tool_log_value(name, args),
                 )
 
-            tool_result = await tool_registry.execute(name, args)
+            tool_result = await _execute_tool_call(tool_registry, name, args)
 
             if settings.verbose_logging:
                 logger.info(

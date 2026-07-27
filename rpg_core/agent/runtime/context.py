@@ -86,6 +86,7 @@ class AgentContextService:
         turn_snapshot_data: TurnSnapshotDataPort,
         session_composer: SessionComposerSnapshotReader,
         role_snapshot_reader: SessionRoleSnapshotReader,
+        lookup_tools_enabled: bool | None = None,
     ) -> None:
         self._world_name = world_name
         self._session_id = session_id
@@ -97,6 +98,11 @@ class AgentContextService:
         self._turn_snapshot_data = turn_snapshot_data
         self._session_composer = session_composer
         self._role_snapshot_reader = role_snapshot_reader
+        if lookup_tools_enabled is None:
+            lookup_tools_enabled = settings.lookup_tools_enabled
+        if not isinstance(lookup_tools_enabled, bool):
+            raise TypeError("lookup_tools_enabled must be a boolean")
+        self._lookup_tools_enabled = lookup_tools_enabled
 
     def resolve_turn_execution(
         self,
@@ -585,7 +591,9 @@ class AgentContextService:
         return FixedLayerAssembler(
             world_name=self._world_name,
             contributors=[
-                AdjudicationAuthorityFixedLayerContributor(),
+                AdjudicationAuthorityFixedLayerContributor(
+                    include_lookup_guidance=self._lookup_tools_enabled
+                ),
                 StoryPromptFixedLayerContributor(
                     self._session_id(),
                     catalog=self._turn_snapshot_data,

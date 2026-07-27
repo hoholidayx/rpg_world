@@ -275,6 +275,45 @@ async def test_stream_loop_emits_error_for_missing_tool_payload():
     assert "finish_reason=tool_calls" in events[-1].content
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["sync", "stream"])
+async def test_loop_rejects_unexposed_tool_call_when_registry_is_absent(
+    stream: bool,
+) -> None:
+    provider = _ToolThenNarrateProvider("unexposed_tool", "{}")
+    messages = [Message(Role.USER, "继续")]
+
+    if stream:
+        events = [
+            event
+            async for event in run_chat_loop_stream(
+                provider=provider,
+                tool_registry=None,
+                messages=messages,
+                schemas=None,
+            )
+        ]
+        results = [
+            event.tool_result
+            for event in events
+            if event.kind is StreamEventKind.TOOL_RESULT
+        ]
+        assert results == ["Error: unknown tool 'unexposed_tool'"]
+        assert events[-1].kind is StreamEventKind.DONE
+        assert events[-1].content == "done"
+        return
+
+    reply, records = await run_chat_loop(
+        provider=provider,
+        tool_registry=None,
+        messages=messages,
+        schemas=None,
+    )
+    assert reply == "done"
+    assert records[0].tool_results[0]["content"] == (
+        "Error: unknown tool 'unexposed_tool'"
+    )
+
+
 @pytest.mark.asyncio
 async def test_stream_loop_executes_defaulted_dice_check_and_feeds_result_back():
     provider = _DiceThenNarrateStreamProvider()

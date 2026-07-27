@@ -480,13 +480,7 @@ async def test_status_sub_agent_preadjudicates_before_first_main_call(
         schema["function"]["name"]
         for schema in scripted_llm_manager.status.calls[0].tools or []
     }
-    assert status_schema_names == {
-        "history_search",
-        "history_read",
-        "summary_search",
-        "summary_read",
-        "rp_story_outcome",
-    }
+    assert status_schema_names == {"rp_story_outcome"}
     main_schema_names = {
         schema["function"]["name"]
         for schema in scripted_llm_manager.main_provider().calls[0].tools or []

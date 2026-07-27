@@ -362,6 +362,49 @@ def test_adjudication_lookup_tool_rounds_defaults_and_accepts_positive_integer(
     assert settings_module.Settings().adjudication_max_lookup_tool_rounds == 3
 
 
+def test_lookup_tools_default_disabled_and_accept_boolean(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg)
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    assert settings_module.Settings().lookup_tools_enabled is False
+
+    _write_settings(
+        cfg,
+        agent_extra="    lookup_tools:\n      enabled: true\n",
+    )
+    assert settings_module.Settings().lookup_tools_enabled is True
+
+
+@pytest.mark.parametrize(
+    "agent_extra",
+    [
+        "    lookup_tools: []\n",
+        "    lookup_tools:\n      enabled: 1\n",
+        '    lookup_tools:\n      enabled: "true"\n',
+        "    lookup_tools:\n      enabled: disabled\n",
+    ],
+)
+def test_lookup_tools_reject_invalid_config_at_startup(
+    tmp_path: Path,
+    monkeypatch,
+    agent_extra: str,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg, agent_extra=agent_extra)
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    with pytest.raises(ValueError, match="agent.lookup_tools"):
+        settings_module.Settings()
+
+
 @pytest.mark.parametrize(
     "agent_extra",
     [

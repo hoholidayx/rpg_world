@@ -23,8 +23,13 @@ base:
     scene:
       allow_runtime_key_changes: false
 
+    # 主 Agent 与各裁定阶段是否暴露 History/Summary 按需查询工具。
+    # 当前默认关闭；开启后统一注册 history_* 与 summary_* 四个只读工具。
+    lookup_tools:
+      enabled: false
+
     # Outcome、状态路由/单目标更新与软 Plot 各自独立使用的
-    # History/Summary 共享查询轮次上限。
+    # History/Summary 共享查询轮次上限；仅在 lookup_tools.enabled=true 时生效。
     adjudication:
       max_lookup_tool_rounds: 5
 

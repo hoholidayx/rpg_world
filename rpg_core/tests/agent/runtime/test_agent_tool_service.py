@@ -146,10 +146,10 @@ def test_ooc_tool_policy_hides_state_rp_and_write_tools(tmp_path) -> None:
         "history_read",
         "summary_search",
         "summary_read",
-    } <= names
+    }.isdisjoint(names)
 
 
-def test_tool_service_replaces_default_file_tools_with_lookup_tools() -> None:
+def test_tool_service_registers_no_lookup_or_legacy_file_tools_by_default() -> None:
     resources = AgentContextResources(
         builder=SimpleNamespace(),
         character_manager=None,
@@ -168,17 +168,21 @@ def test_tool_service_replaces_default_file_tools_with_lookup_tools() -> None:
     registry = service.base_registry
     assert registry is not None
     names = {tool.name for tool in registry}
+    assert service.lookup_tools is None
     assert {
         "history_search",
         "history_read",
         "summary_search",
         "summary_read",
-    } <= names
-    assert {"list_files", "read_file", "write_file", "grep"}.isdisjoint(names)
+        "list_files",
+        "read_file",
+        "write_file",
+        "grep",
+    }.isdisjoint(names)
 
 
 @pytest.mark.parametrize("mode", list(TurnMode))
-def test_lookup_tools_are_exposed_in_every_turn_mode(mode: TurnMode) -> None:
+def test_enabled_lookup_tools_are_exposed_in_every_turn_mode(mode: TurnMode) -> None:
     resources = AgentContextResources(
         builder=SimpleNamespace(),
         character_manager=None,
@@ -191,9 +195,11 @@ def test_lookup_tools_are_exposed_in_every_turn_mode(mode: TurnMode) -> None:
         resources=lambda: resources,
         history_query=_HistoryQuery(),
         summary_query=_SummaryQuery(),
+        lookup_tools_enabled=True,
     )
     service.refresh_base_registry()
 
+    assert service.lookup_tools is not None
     registry = service.registry_for_turn(
         None,
         None,

@@ -157,6 +157,7 @@ def _service(
     scene=None,
     characters=None,
     lorebook=None,
+    lookup_tools_enabled: bool = False,
 ):  # noqa: ANN001, ANN201
     session = session or SessionManager(history_enabled=False)
     resources = _resources(builder, scene, characters, lorebook)
@@ -173,6 +174,7 @@ def _service(
         turn_snapshot_data=_TurnSnapshotData(),
         session_composer=_SessionComposer(),
         role_snapshot_reader=_RoleReader(),
+        lookup_tools_enabled=lookup_tools_enabled,
     )
 
 
@@ -371,9 +373,26 @@ def test_adjudication_snapshot_uses_explicit_allowlist_and_both_memories() -> No
     assert "GM 托管" not in content
     assert "neutral/IC" not in content
     assert "召回记忆" not in content
-    assert "Summary 是按批次归纳的次级证据" in content
-    assert "summary_search" in content and "history_read" in content
+    assert "Summary 是按批次归纳的次级证据" not in content
+    assert "summary_search" not in content and "history_read" not in content
+    assert "不得假定存在未提供的查询能力" in content
     assert "rp_module:" not in content
+
+
+def test_adjudication_snapshot_includes_lookup_guidance_when_enabled() -> None:
+    service = _service(_Builder(), lookup_tools_enabled=True)
+
+    fixed = service._assemble_adjudication_fixed_layer(
+        turn_execution=_execution()
+    )
+    content = "\n".join(section.content for section in fixed.sections)
+
+    assert "Summary 是按批次归纳的次级证据" in content
+    assert "summary_search" in content
+    assert "summary_read" in content
+    assert "history_search" in content
+    assert "history_read" in content
+    assert "不得假定存在未提供的查询能力" not in content
 
 
 def test_context_gate_excludes_new_input_and_rejects_at_threshold(monkeypatch) -> None:

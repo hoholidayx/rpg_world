@@ -88,6 +88,7 @@ class RPGGameAgent:
         role_service = SessionRoleService(session_data)
         reset_service = SessionResetService(session_data)
         derivation_service = SessionDerivationService(session_data)
+        lookup_tools_enabled = settings.lookup_tools_enabled
         self._command_dispatcher = CommandDispatcher(agent=self)
         self._model_runtime = MainModelRuntime(
             selection_service=(
@@ -116,6 +117,7 @@ class RPGGameAgent:
             turn_snapshot_data=session_data,
             session_composer=session_composer,
             role_snapshot_reader=role_service,
+            lookup_tools_enabled=lookup_tools_enabled,
         )
         self._tool_service = AgentToolService(
             resources=lambda: self._lifecycle.resources,
@@ -133,6 +135,7 @@ class RPGGameAgent:
                 close_worker_connection=gateway.close_thread_connection,
             ),
             extra_tools=tools,
+            lookup_tools_enabled=lookup_tools_enabled,
         )
         self._session_service = AgentSessionService(
             lifecycle=self._lifecycle,

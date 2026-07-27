@@ -135,6 +135,13 @@ class AdjudicationSettings:
 
 
 @dataclass(frozen=True)
+class LookupToolsSettings:
+    """Main-Agent and adjudication History/Summary lookup exposure."""
+
+    enabled: bool = False
+
+
+@dataclass(frozen=True)
 class MemoryStorySettings:
     """Story-memory extraction policy."""
 
@@ -316,6 +323,7 @@ class Settings(ProfiledYamlSettings):
     def _validate_settings(self) -> None:
         self._validate_context_window_reject_threshold()
         self._validate_status_sub_agent_settings()
+        _ = self.lookup_tools_settings
         _ = self.adjudication_settings
         # Materialize memory settings so malformed batch limits fail at startup.
         self.memory_story_settings
@@ -514,6 +522,20 @@ class Settings(ProfiledYamlSettings):
     @property
     def status_history_rounds(self) -> int:
         return self.status_sub_agent_settings.history_rounds
+
+    @property
+    def lookup_tools_settings(self) -> LookupToolsSettings:
+        raw = self.agent_settings.get("lookup_tools", {})
+        if not isinstance(raw, dict):
+            raise ValueError("agent.lookup_tools must be a mapping")
+        enabled = raw.get("enabled", False)
+        if not isinstance(enabled, bool):
+            raise ValueError("agent.lookup_tools.enabled must be a boolean")
+        return LookupToolsSettings(enabled=enabled)
+
+    @property
+    def lookup_tools_enabled(self) -> bool:
+        return self.lookup_tools_settings.enabled
 
     @property
     def adjudication_settings(self) -> AdjudicationSettings:

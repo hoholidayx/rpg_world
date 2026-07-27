@@ -45,8 +45,14 @@ class AgentToolService:
         history_query: HistoryQueryService,
         summary_query: SummaryQueryService,
         extra_tools: list[BaseTool] | None = None,
+        lookup_tools_enabled: bool | None = None,
     ) -> None:
         self._resources = resources
+        if lookup_tools_enabled is None:
+            lookup_tools_enabled = settings.lookup_tools_enabled
+        if not isinstance(lookup_tools_enabled, bool):
+            raise TypeError("lookup_tools_enabled must be a boolean")
+        self._lookup_tools_enabled = lookup_tools_enabled
         self._history_tools = HistoryToolSet(history_query)
         self._summary_tools = SummaryToolSet(summary_query)
         self._lookup_tools = LookupToolSet(
@@ -73,14 +79,15 @@ class AgentToolService:
         return self._summary_tools
 
     @property
-    def lookup_tools(self) -> LookupToolSet:
-        """Combined lookup tools shared by main and adjudication loops."""
+    def lookup_tools(self) -> LookupToolSet | None:
+        """Enabled lookup tools shared by main and adjudication loops."""
 
-        return self._lookup_tools
+        return self._lookup_tools if self._lookup_tools_enabled else None
 
     def refresh_base_registry(self) -> None:
         registry = ToolRegistry()
-        self._lookup_tools.register_into(registry)
+        if self._lookup_tools_enabled:
+            self._lookup_tools.register_into(registry)
         scene_tracker = self._resources().scene_tracker
         if scene_tracker is not None:
             registry.register_all(scene_tracker.get_tools())

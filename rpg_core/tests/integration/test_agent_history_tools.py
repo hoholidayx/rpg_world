@@ -5,10 +5,20 @@ import json
 import pytest
 
 from llm_client.types import ProviderChunk
+from rpg_core import settings as settings_module
 from rpg_core.agent.protocol import StreamEventKind
 from tests.support.scripted_llm import response, tool_call
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _enable_lookup_tools_for_lookup_integration_tests(monkeypatch) -> None:
+    monkeypatch.setattr(
+        type(settings_module.settings),
+        "lookup_tools_enabled",
+        property(lambda _self: True),
+    )
 
 
 @pytest.mark.asyncio
