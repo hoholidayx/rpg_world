@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 
-from peewee import Database
+from peewee import Database, IntegrityError
 
 from rpg_data import models
+from rpg_data.errors import DataIntegrityError
 from rpg_data.repositories.records import SessionRecord, StoryLorebookEntryRecord, bind_database
 from rpg_data.repositories.story_lorebook_repo import StoryLorebookEntryRepository
 from rpg_data.repositories.story_repo import StoryRepository
@@ -15,6 +16,9 @@ from rpg_data.repositories.story_repo import StoryRepository
 __all__ = ["LorebookManagementService", "LorebookReadService"]
 
 logger = logging.getLogger("rpg_data.lorebook")
+_LOREBOOK_WRITE_INTEGRITY_MESSAGE = (
+    "Lorebook entry write violated persisted constraints"
+)
 
 
 class LorebookReadService:
@@ -93,16 +97,21 @@ class LorebookManagementService:
     ) -> models.StoryLorebookEntry | None:
         if not self._story_belongs_to_workspace(workspace_id, story_id):
             return None
-        return self._entries.create(
-            workspace_id,
-            story_id,
-            name.strip(),
-            content=content,
-            description=description,
-            tags_json=_dump_tags(tags),
-            sort_order=sort_order,
-            metadata_json=_dump_metadata(metadata),
-        )
+        try:
+            return self._entries.create(
+                workspace_id,
+                story_id,
+                name.strip(),
+                content=content,
+                description=description,
+                tags_json=_dump_tags(tags),
+                sort_order=sort_order,
+                metadata_json=_dump_metadata(metadata),
+            )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _LOREBOOK_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def update_entry(
         self,
@@ -119,15 +128,22 @@ class LorebookManagementService:
     ) -> models.StoryLorebookEntry | None:
         if self._owned_entry(workspace_id, story_id, entry_id) is None:
             return None
-        return self._entries.update(
-            entry_id,
-            name=name.strip() if name is not None else None,
-            content=content,
-            description=description,
-            tags_json=_dump_tags(tags) if tags is not None else None,
-            sort_order=sort_order,
-            metadata_json=_dump_metadata(metadata) if metadata is not None else None,
-        )
+        try:
+            return self._entries.update(
+                entry_id,
+                name=name.strip() if name is not None else None,
+                content=content,
+                description=description,
+                tags_json=_dump_tags(tags) if tags is not None else None,
+                sort_order=sort_order,
+                metadata_json=(
+                    _dump_metadata(metadata) if metadata is not None else None
+                ),
+            )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _LOREBOOK_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def delete_entry(
         self,
@@ -137,7 +153,12 @@ class LorebookManagementService:
     ) -> bool:
         if self._owned_entry(workspace_id, story_id, entry_id) is None:
             return False
-        return self._entries.delete(entry_id)
+        try:
+            return self._entries.delete(entry_id)
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _LOREBOOK_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def _owned_entry(
         self,

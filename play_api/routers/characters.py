@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from peewee import IntegrityError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from commons.types import JsonObject
 from play_api.backends import get_data_manager_backend
+from play_api.routers._data_errors import data_integrity_conflict
 from rpg_core.character_tags import normalize_character_detail_tags
+from rpg_data.errors import DataIntegrityError
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/stories/{story_id}/characters",
     tags=["play-characters"],
 )
-
-
-def _conflict(exc: IntegrityError) -> HTTPException:
-    return HTTPException(status_code=409, detail=str(exc))
 
 
 class PlayCharacterPayload(BaseModel):
@@ -197,8 +194,13 @@ async def create_character(
             sort_order=payload.sort_order,
             metadata=payload.metadata,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="character.create",
+            workspace_id=workspace_id,
+            story_id=story_id,
+        ) from exc
     if character is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return _character_response(character)
@@ -221,8 +223,14 @@ async def update_character(
             sort_order=payload.sort_order,
             metadata=payload.metadata,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="character.update",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=character_id,
+        ) from exc
     if character is None:
         raise HTTPException(status_code=404, detail="character not found")
     return _character_response(character)
@@ -234,11 +242,20 @@ async def delete_character(
     story_id: int,
     character_id: int,
 ) -> None:
-    deleted = await get_data_manager_backend().delete_character(
-        workspace_id,
-        story_id,
-        character_id,
-    )
+    try:
+        deleted = await get_data_manager_backend().delete_character(
+            workspace_id,
+            story_id,
+            character_id,
+        )
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="character.delete",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=character_id,
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="character not found")
 
@@ -260,8 +277,14 @@ async def create_character_detail(
             tags=payload.tags,
             sort_order=payload.sort_order,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="character_detail.create",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=character_id,
+        ) from exc
     if detail is None:
         raise HTTPException(status_code=404, detail="character not found")
     return _detail_response(detail)
@@ -286,8 +309,14 @@ async def update_character_detail(
             tags=payload.tags,
             sort_order=payload.sort_order,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="character_detail.update",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=detail_id,
+        ) from exc
     if detail is None:
         raise HTTPException(status_code=404, detail="character detail not found")
     return _detail_response(detail)
@@ -300,11 +329,20 @@ async def delete_character_detail(
     character_id: int,
     detail_id: int,
 ) -> None:
-    deleted = await get_data_manager_backend().delete_character_detail(
-        workspace_id,
-        story_id,
-        character_id,
-        detail_id,
-    )
+    try:
+        deleted = await get_data_manager_backend().delete_character_detail(
+            workspace_id,
+            story_id,
+            character_id,
+            detail_id,
+        )
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="character_detail.delete",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=detail_id,
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="character detail not found")

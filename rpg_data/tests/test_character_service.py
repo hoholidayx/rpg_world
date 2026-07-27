@@ -6,6 +6,7 @@ import pytest
 from peewee import IntegrityError, SqliteDatabase
 
 from rpg_data import db
+from rpg_data.errors import DataIntegrityError
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.repositories.records import StoryCharacterRecord
 from rpg_data.repositories.session_repo import SessionRepository
@@ -25,6 +26,15 @@ def _migrated_database(tmp_path: Path) -> SqliteDatabase:
     database = db.bind_peewee_database(db.make_peewee_database(db_path))
     database.connect()
     return database
+
+
+def _assert_integrity_chain(
+    exc: DataIntegrityError,
+    expected_message: str,
+) -> None:
+    assert str(exc) == expected_message
+    assert isinstance(exc.__cause__, IntegrityError)
+    assert "constraint" in str(exc.__cause__).lower()
 
 
 def test_character_read_service_lists_only_session_story_characters(tmp_path: Path) -> None:
@@ -115,8 +125,15 @@ def test_character_management_service_manages_story_cards_and_details(tmp_path: 
             "main_ws", other_story.id, name="Harbor Watcher"
         )
         assert same_name_other_story is not None
-        with pytest.raises(IntegrityError):
+        with pytest.raises(
+            DataIntegrityError,
+            match="Character write violated persisted constraints",
+        ) as conflict:
             service.create_character("main_ws", story.id, name="Harbor Watcher")
+        _assert_integrity_chain(
+            conflict.value,
+            "Character write violated persisted constraints",
+        )
 
         detail = service.create_detail(
             "main_ws",
@@ -164,6 +181,126 @@ def test_character_management_service_manages_story_cards_and_details(tmp_path: 
         assert service.delete_character("main_ws", story.id, created.id) is False
         assert service.list_characters("main_ws", story.id) == []
         assert service.list_characters("main_ws", other_story.id) == [same_name_other_story]
+    finally:
+        database.close()
+
+
+def test_character_management_translates_update_and_detail_integrity_errors(
+    tmp_path: Path,
+) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        workspaces = WorkspaceRepository(database)
+        stories = StoryRepository(database)
+        with database.atomic():
+            workspaces.create("main_ws", "Main", "data/main_ws")
+            story = stories.create("main_ws", "Main Story")
+        service = CharacterManagementService(database)
+        first = service.create_character("main_ws", story.id, name="First")
+        second = service.create_character("main_ws", story.id, name="Second")
+        assert first is not None and second is not None
+
+        with pytest.raises(DataIntegrityError) as character_conflict:
+            service.update_character(
+                "main_ws",
+                story.id,
+                second.id,
+                name="First",
+            )
+        _assert_integrity_chain(
+            character_conflict.value,
+            "Character write violated persisted constraints",
+        )
+
+        first_detail = service.create_detail(
+            "main_ws",
+            story.id,
+            first.id,
+            name="First Detail",
+        )
+        second_detail = service.create_detail(
+            "main_ws",
+            story.id,
+            first.id,
+            name="Second Detail",
+        )
+        assert first_detail is not None and second_detail is not None
+
+        with pytest.raises(DataIntegrityError) as detail_create_conflict:
+            service.create_detail(
+                "main_ws",
+                story.id,
+                first.id,
+                name="First Detail",
+            )
+        _assert_integrity_chain(
+            detail_create_conflict.value,
+            "Character detail write violated persisted constraints",
+        )
+
+        with pytest.raises(DataIntegrityError) as detail_update_conflict:
+            service.update_detail(
+                "main_ws",
+                story.id,
+                first.id,
+                second_detail.id,
+                name="First Detail",
+            )
+        _assert_integrity_chain(
+            detail_update_conflict.value,
+            "Character detail write violated persisted constraints",
+        )
+    finally:
+        database.close()
+
+
+def test_character_management_translates_delete_integrity_errors(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        workspaces = WorkspaceRepository(database)
+        stories = StoryRepository(database)
+        with database.atomic():
+            workspaces.create("main_ws", "Main", "data/main_ws")
+            story = stories.create("main_ws", "Main Story")
+        service = CharacterManagementService(database)
+        character = service.create_character("main_ws", story.id, name="First")
+        assert character is not None
+        detail = service.create_detail(
+            "main_ws",
+            story.id,
+            character.id,
+            name="Detail",
+        )
+        assert detail is not None
+
+        def _fail_delete(_resource_id: int) -> bool:
+            raise IntegrityError("forced constraint failure")
+
+        with monkeypatch.context() as scoped:
+            scoped.setattr(service._characters, "delete", _fail_delete)
+            with pytest.raises(DataIntegrityError) as character_conflict:
+                service.delete_character("main_ws", story.id, character.id)
+        _assert_integrity_chain(
+            character_conflict.value,
+            "Character write violated persisted constraints",
+        )
+
+        with monkeypatch.context() as scoped:
+            scoped.setattr(service._characters, "delete_detail", _fail_delete)
+            with pytest.raises(DataIntegrityError) as detail_conflict:
+                service.delete_detail(
+                    "main_ws",
+                    story.id,
+                    character.id,
+                    detail.id,
+                )
+        _assert_integrity_chain(
+            detail_conflict.value,
+            "Character detail write violated persisted constraints",
+        )
     finally:
         database.close()
 

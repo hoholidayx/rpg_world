@@ -210,6 +210,18 @@ def test_repositories_and_peewee_records_do_not_escape_rpg_data() -> None:
     assert violations == []
 
 
+def test_peewee_does_not_escape_rpg_data() -> None:
+    violations: list[str] = []
+    for path in _production_python_files():
+        if path.is_relative_to(ROOT / "rpg_data"):
+            continue
+        for imported in _imports(path):
+            if imported == "peewee" or imported.startswith("peewee."):
+                violations.append(f"{path.relative_to(ROOT)}: {imported}")
+
+    assert violations == []
+
+
 def test_recent_application_services_do_not_depend_on_gateway() -> None:
     violations: list[str] = []
     forbidden_names = {"DataServiceGateway", "get_data_service_gateway"}

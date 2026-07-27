@@ -5,13 +5,14 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Response
-from peewee import IntegrityError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from play_api.composition import session_composer_service
+from play_api.routers._data_errors import data_integrity_conflict
 from play_api.routers._locator import resolve_session_or_404
 from rpg_core.rp_modules.message_mode import MessageModeOption
 from rpg_core.session.composer import SessionComposerApplicationService
+from rpg_data.errors import DataIntegrityError
 from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
@@ -211,10 +212,6 @@ def _composer_service() -> SessionComposerApplicationService:
     return session_composer_service()
 
 
-def _conflict(exc: IntegrityError) -> HTTPException:
-    return HTTPException(status_code=409, detail=str(exc))
-
-
 @router.get(
     "/workspaces/{workspace_id}/narrative-styles",
     response_model=list[PlayNarrativeStyle],
@@ -241,8 +238,12 @@ async def create_narrative_style(
             prompt=body.prompt,
             sort_order=body.sort_order,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="narrative_style.create",
+            workspace_id=workspace_id,
+        ) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     return _style_response(item)
@@ -265,8 +266,13 @@ async def update_narrative_style(
             prompt=body.prompt,
             sort_order=body.sort_order,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="narrative_style.update",
+            workspace_id=workspace_id,
+            resource_id=style_id,
+        ) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="narrative style not found")
     return _style_response(item)
@@ -274,7 +280,15 @@ async def update_narrative_style(
 
 @router.delete("/workspaces/{workspace_id}/narrative-styles/{style_id}", status_code=204)
 async def delete_narrative_style(workspace_id: str, style_id: int) -> Response:
-    deleted = _composer_service().delete_style(workspace_id, style_id)
+    try:
+        deleted = _composer_service().delete_style(workspace_id, style_id)
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="narrative_style.delete",
+            workspace_id=workspace_id,
+            resource_id=style_id,
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="narrative style not found")
     return Response(status_code=204)
@@ -309,6 +323,14 @@ async def mount_story_narrative_style(
             story_id,
             body.narrative_style_id,
         )
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="story_narrative_style.mount",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=body.narrative_style_id,
+        ) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if item is None:
@@ -325,7 +347,20 @@ async def unmount_story_narrative_style(
     story_id: int,
     mount_id: int,
 ) -> Response:
-    deleted = _composer_service().unmount_story_style(workspace_id, story_id, mount_id)
+    try:
+        deleted = _composer_service().unmount_story_style(
+            workspace_id,
+            story_id,
+            mount_id,
+        )
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="story_narrative_style.unmount",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=mount_id,
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="story narrative style mount not found")
     return Response(status_code=204)
@@ -346,6 +381,14 @@ async def set_story_base_narrative_style(
             story_id,
             body.mount_id,
         )
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="story_narrative_style.set_base",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=body.mount_id,
+        ) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _story_style_response(item) if item is not None else None
@@ -380,8 +423,13 @@ async def create_quick_reply(
             sort_order=body.sort_order,
             enabled=body.enabled,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="quick_reply.create",
+            workspace_id=workspace_id,
+            story_id=story_id,
+        ) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return _quick_reply_response(item)
@@ -407,8 +455,14 @@ async def update_quick_reply(
             sort_order=body.sort_order,
             enabled=body.enabled,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="quick_reply.update",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=reply_id,
+        ) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="quick reply not found")
     return _quick_reply_response(item)
@@ -423,7 +477,20 @@ async def delete_quick_reply(
     story_id: int,
     reply_id: int,
 ) -> Response:
-    deleted = _composer_service().delete_quick_reply(workspace_id, story_id, reply_id)
+    try:
+        deleted = _composer_service().delete_quick_reply(
+            workspace_id,
+            story_id,
+            reply_id,
+        )
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="quick_reply.delete",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=reply_id,
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="quick reply not found")
     return Response(status_code=204)

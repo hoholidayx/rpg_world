@@ -38,10 +38,14 @@ def test_play_session_composer_management_contract(tmp_path, monkeypatch) -> Non
     )
     assert created_style.status_code == 200
     style_id = created_style.json()["id"]
-    assert client.post(
+    duplicate_style = client.post(
         "/play-api/v1/workspaces/demo_workspace/narrative-styles",
         json={"name": "冷峻留白", "prompt": "duplicate"},
-    ).status_code == 409
+    )
+    assert duplicate_style.status_code == 409
+    assert duplicate_style.json()["detail"] == (
+        "Narrative style write violated persisted constraints"
+    )
 
     mount = client.post(
         "/play-api/v1/workspaces/demo_workspace/stories/1/narrative-styles",
@@ -64,6 +68,14 @@ def test_play_session_composer_management_contract(tmp_path, monkeypatch) -> Non
         json={"title": "停用", "message": "不展示", "sortOrder": 0, "enabled": False},
     )
     assert enabled_reply.status_code == 200 and disabled_reply.status_code == 200
+    duplicate_reply = client.post(
+        "/play-api/v1/workspaces/demo_workspace/stories/1/quick-replies",
+        json={"title": "观察", "message": "duplicate"},
+    )
+    assert duplicate_reply.status_code == 409
+    assert duplicate_reply.json()["detail"] == (
+        "Quick reply write violated persisted constraints"
+    )
 
     composer = client.get("/play-api/v1/sessions/s_forest001/composer")
     assert composer.status_code == 200

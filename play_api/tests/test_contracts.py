@@ -1419,10 +1419,14 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert new_character.json()["description"] == "灯塔旧守夜人，知道潮汐与失火名单。"
     assert new_character.json()["sortOrder"] == 37
     assert new_character.json()["metadata"]["ui"]["roleLabel"] == "NPC"
-    assert client.post(
+    duplicate_character = client.post(
         character_base,
         json={"name": "守夜人伊凡"},
-    ).status_code == 409
+    )
+    assert duplicate_character.status_code == 409
+    assert duplicate_character.json()["detail"] == (
+        "Character write violated persisted constraints"
+    )
     assert client.post(
         character_base,
         json={"name": ""},
@@ -1590,10 +1594,14 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert new_entry.json()["tags"] == ["规则", "组织"]
     assert new_entry.json()["sortOrder"] == 45
     assert new_entry.json()["metadata"]["ui"]["displayVersion"] == "v1.0.0"
-    assert client.post(
+    duplicate_lorebook = client.post(
         lorebook_base,
         json={"name": "潮汐信号"},
-    ).status_code == 409
+    )
+    assert duplicate_lorebook.status_code == 409
+    assert duplicate_lorebook.json()["detail"] == (
+        "Lorebook entry write violated persisted constraints"
+    )
     assert client.post(
         lorebook_base,
         json={"name": ""},

@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 
-from peewee import Database
+from peewee import Database, IntegrityError
 
 from rpg_data import models
+from rpg_data.errors import DataIntegrityError
 from rpg_data.repositories.records import (
     SessionRecord,
     StoryCharacterDetailRecord,
@@ -20,6 +21,12 @@ from rpg_data.repositories.story_repo import StoryRepository
 __all__ = ["CharacterManagementService", "CharacterReadService"]
 
 logger = logging.getLogger("rpg_data.character")
+_CHARACTER_WRITE_INTEGRITY_MESSAGE = (
+    "Character write violated persisted constraints"
+)
+_CHARACTER_DETAIL_WRITE_INTEGRITY_MESSAGE = (
+    "Character detail write violated persisted constraints"
+)
 
 
 class CharacterReadService:
@@ -105,14 +112,19 @@ class CharacterManagementService:
     ) -> models.StoryCharacter | None:
         if not self._story_belongs_to_workspace(workspace_id, story_id):
             return None
-        character = self._characters.create(
-            workspace_id,
-            story_id,
-            _required_character_name(name),
-            description=description,
-            sort_order=sort_order,
-            metadata_json=_dump_metadata(metadata),
-        )
+        try:
+            character = self._characters.create(
+                workspace_id,
+                story_id,
+                _required_character_name(name),
+                description=description,
+                sort_order=sort_order,
+                metadata_json=_dump_metadata(metadata),
+            )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _CHARACTER_WRITE_INTEGRITY_MESSAGE
+            ) from exc
         logger.info(
             "created Story character workspace_id=%s story_id=%s character_id=%s",
             workspace_id,
@@ -135,13 +147,20 @@ class CharacterManagementService:
         character = self._owned_character(workspace_id, story_id, character_id)
         if character is None:
             return None
-        return self._characters.update(
-            character_id,
-            name=_required_character_name(name) if name is not None else None,
-            description=description,
-            sort_order=sort_order,
-            metadata_json=_dump_metadata(metadata) if metadata is not None else None,
-        )
+        try:
+            return self._characters.update(
+                character_id,
+                name=_required_character_name(name) if name is not None else None,
+                description=description,
+                sort_order=sort_order,
+                metadata_json=(
+                    _dump_metadata(metadata) if metadata is not None else None
+                ),
+            )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _CHARACTER_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def delete_character(
         self,
@@ -151,7 +170,12 @@ class CharacterManagementService:
     ) -> bool:
         if self._owned_character(workspace_id, story_id, character_id) is None:
             return False
-        return self._characters.delete(character_id)
+        try:
+            return self._characters.delete(character_id)
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _CHARACTER_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def list_details(
         self,
@@ -176,13 +200,18 @@ class CharacterManagementService:
     ) -> models.CharacterDetail | None:
         if self._owned_character(workspace_id, story_id, character_id) is None:
             return None
-        return self._characters.create_detail(
-            character_id,
-            name.strip(),
-            content=content,
-            tags_json=_dump_tags(tags),
-            sort_order=sort_order,
-        )
+        try:
+            return self._characters.create_detail(
+                character_id,
+                name.strip(),
+                content=content,
+                tags_json=_dump_tags(tags),
+                sort_order=sort_order,
+            )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _CHARACTER_DETAIL_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def update_detail(
         self,
@@ -204,13 +233,18 @@ class CharacterManagementService:
         )
         if detail is None:
             return None
-        return self._characters.update_detail(
-            detail_id,
-            name=name.strip() if name is not None else None,
-            content=content,
-            tags_json=_dump_tags(tags) if tags is not None else None,
-            sort_order=sort_order,
-        )
+        try:
+            return self._characters.update_detail(
+                detail_id,
+                name=name.strip() if name is not None else None,
+                content=content,
+                tags_json=_dump_tags(tags) if tags is not None else None,
+                sort_order=sort_order,
+            )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _CHARACTER_DETAIL_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def delete_detail(
         self,
@@ -226,7 +260,12 @@ class CharacterManagementService:
             detail_id,
         ) is None:
             return False
-        return self._characters.delete_detail(detail_id)
+        try:
+            return self._characters.delete_detail(detail_id)
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _CHARACTER_DETAIL_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def _owned_character(
         self,

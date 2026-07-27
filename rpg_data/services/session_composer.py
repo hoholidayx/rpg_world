@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from peewee import Database
+from peewee import Database, IntegrityError
 
 from rpg_data import models
+from rpg_data.errors import DataIntegrityError
 from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
@@ -17,6 +18,16 @@ from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 
 __all__ = ["SessionComposerDataService"]
+
+_NARRATIVE_STYLE_WRITE_INTEGRITY_MESSAGE = (
+    "Narrative style write violated persisted constraints"
+)
+_STORY_NARRATIVE_STYLE_WRITE_INTEGRITY_MESSAGE = (
+    "Story narrative style write violated persisted constraints"
+)
+_QUICK_REPLY_WRITE_INTEGRITY_MESSAGE = (
+    "Quick reply write violated persisted constraints"
+)
 
 
 class SessionComposerDataService:
@@ -50,13 +61,18 @@ class SessionComposerDataService:
     ) -> NarrativeStyle | None:
         if not self.workspace_exists(workspace_id):
             return None
-        with self._database.atomic():
-            return self._repo.create_style(
-                str(workspace_id),
-                name=str(name),
-                prompt=str(prompt),
-                sort_order=int(sort_order),
-            )
+        try:
+            with self._database.atomic():
+                return self._repo.create_style(
+                    str(workspace_id),
+                    name=str(name),
+                    prompt=str(prompt),
+                    sort_order=int(sort_order),
+                )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _NARRATIVE_STYLE_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def update_style(
         self,
@@ -70,13 +86,18 @@ class SessionComposerDataService:
         current = self._repo.get_style(int(style_id))
         if current is None or current.workspace_id != str(workspace_id):
             return None
-        with self._database.atomic():
-            return self._repo.update_style(
-                int(style_id),
-                name=str(name) if name is not None else None,
-                prompt=str(prompt) if prompt is not None else None,
-                sort_order=sort_order,
-            )
+        try:
+            with self._database.atomic():
+                return self._repo.update_style(
+                    int(style_id),
+                    name=str(name) if name is not None else None,
+                    prompt=str(prompt) if prompt is not None else None,
+                    sort_order=sort_order,
+                )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _NARRATIVE_STYLE_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def delete_style(self, workspace_id: str, style_id: int) -> bool | None:
         current = self._repo.get_style(int(style_id))
@@ -84,8 +105,13 @@ class SessionComposerDataService:
             return False
         if current.workspace_id != str(workspace_id):
             return None
-        with self._database.atomic():
-            return self._repo.delete_style(int(style_id))
+        try:
+            with self._database.atomic():
+                return self._repo.delete_style(int(style_id))
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _NARRATIVE_STYLE_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def list_story_styles(
         self,
@@ -107,12 +133,17 @@ class SessionComposerDataService:
         style = self._repo.get_style(int(style_id))
         if style is None or style.workspace_id != str(workspace_id):
             raise FileNotFoundError(f"narrative style not found in workspace: {style_id}")
-        with self._database.atomic():
-            items = self._repo.mount_story_styles(
-                str(workspace_id),
-                int(story_id),
-                [int(style_id)],
-            )
+        try:
+            with self._database.atomic():
+                items = self._repo.mount_story_styles(
+                    str(workspace_id),
+                    int(story_id),
+                    [int(style_id)],
+                )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _STORY_NARRATIVE_STYLE_WRITE_INTEGRITY_MESSAGE
+            ) from exc
         return next(item for item in items if item.narrative_style_id == int(style_id))
 
     def unmount_story_style(
@@ -123,8 +154,13 @@ class SessionComposerDataService:
     ) -> bool | None:
         if self._story(workspace_id, story_id) is None:
             return None
-        with self._database.atomic():
-            return self._repo.unmount_story_style(int(story_id), int(mount_id))
+        try:
+            with self._database.atomic():
+                return self._repo.unmount_story_style(int(story_id), int(mount_id))
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _STORY_NARRATIVE_STYLE_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def set_story_base_style(
         self,
@@ -134,8 +170,13 @@ class SessionComposerDataService:
     ) -> StoryNarrativeStyle | None:
         if self._story(workspace_id, story_id) is None:
             raise FileNotFoundError("story not found in workspace")
-        with self._database.atomic():
-            return self._repo.set_story_base_style(int(story_id), mount_id)
+        try:
+            with self._database.atomic():
+                return self._repo.set_story_base_style(int(story_id), mount_id)
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _STORY_NARRATIVE_STYLE_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def list_quick_replies(
         self,
@@ -163,15 +204,20 @@ class SessionComposerDataService:
     ) -> StoryQuickReply | None:
         if self._story(workspace_id, story_id) is None:
             return None
-        with self._database.atomic():
-            return self._repo.create_quick_reply(
-                str(workspace_id),
-                int(story_id),
-                title=str(title),
-                message=str(message),
-                sort_order=int(sort_order),
-                enabled=bool(enabled),
-            )
+        try:
+            with self._database.atomic():
+                return self._repo.create_quick_reply(
+                    str(workspace_id),
+                    int(story_id),
+                    title=str(title),
+                    message=str(message),
+                    sort_order=int(sort_order),
+                    enabled=bool(enabled),
+                )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _QUICK_REPLY_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def update_quick_reply(
         self,
@@ -191,14 +237,19 @@ class SessionComposerDataService:
             or current.story_id != int(story_id)
         ):
             return None
-        with self._database.atomic():
-            return self._repo.update_quick_reply(
-                int(reply_id),
-                title=str(title) if title is not None else None,
-                message=str(message) if message is not None else None,
-                sort_order=sort_order,
-                enabled=enabled,
-            )
+        try:
+            with self._database.atomic():
+                return self._repo.update_quick_reply(
+                    int(reply_id),
+                    title=str(title) if title is not None else None,
+                    message=str(message) if message is not None else None,
+                    sort_order=sort_order,
+                    enabled=enabled,
+                )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _QUICK_REPLY_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def delete_quick_reply(
         self,
@@ -214,8 +265,13 @@ class SessionComposerDataService:
             or current.story_id != int(story_id)
         ):
             return None
-        with self._database.atomic():
-            return self._repo.delete_quick_reply(int(reply_id))
+        try:
+            with self._database.atomic():
+                return self._repo.delete_quick_reply(int(reply_id))
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                _QUICK_REPLY_WRITE_INTEGRITY_MESSAGE
+            ) from exc
 
     def _story(self, workspace_id: str, story_id: int) -> models.Story | None:
         story = self._stories.get(int(story_id))

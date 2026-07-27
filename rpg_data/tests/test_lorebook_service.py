@@ -6,6 +6,7 @@ import pytest
 from peewee import IntegrityError, SqliteDatabase
 
 from rpg_data import db
+from rpg_data.errors import DataIntegrityError
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_lorebook_repo import StoryLorebookEntryRepository
@@ -24,6 +25,12 @@ def _migrated_database(tmp_path: Path) -> SqliteDatabase:
     database = db.bind_peewee_database(db.make_peewee_database(db_path))
     database.connect()
     return database
+
+
+def _assert_integrity_chain(exc: DataIntegrityError) -> None:
+    assert str(exc) == "Lorebook entry write violated persisted constraints"
+    assert isinstance(exc.__cause__, IntegrityError)
+    assert "constraint" in str(exc.__cause__).lower()
 
 
 def test_lorebook_read_service_lists_only_session_story_entries(tmp_path: Path) -> None:
@@ -84,8 +91,12 @@ def test_lorebook_management_service_manages_story_entries(tmp_path: Path) -> No
         assert service.create_entry("main_ws", 99999, name="Hidden") is None
         same_name = service.create_entry("main_ws", other_story.id, name="Harbor Bell")
         assert same_name is not None
-        with pytest.raises(IntegrityError):
+        with pytest.raises(
+            DataIntegrityError,
+            match="Lorebook entry write violated persisted constraints",
+        ) as conflict:
             service.create_entry("main_ws", story.id, name="Harbor Bell")
+        _assert_integrity_chain(conflict.value)
 
         updated = service.update_entry(
             "main_ws",
@@ -106,5 +117,42 @@ def test_lorebook_management_service_manages_story_entries(tmp_path: Path) -> No
         assert service.delete_entry("main_ws", story.id, created.id) is False
         assert service.list_entries("main_ws", story.id) == []
         assert service.list_entries("main_ws", other_story.id) == [same_name]
+    finally:
+        database.close()
+
+
+def test_lorebook_management_translates_update_and_delete_integrity_errors(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        workspaces = WorkspaceRepository(database)
+        stories = StoryRepository(database)
+        with database.atomic():
+            workspaces.create("main_ws", "Main", "data/main_ws")
+            story = stories.create("main_ws", "Main Story")
+        service = LorebookManagementService(database)
+        first = service.create_entry("main_ws", story.id, name="First")
+        second = service.create_entry("main_ws", story.id, name="Second")
+        assert first is not None and second is not None
+
+        with pytest.raises(DataIntegrityError) as update_conflict:
+            service.update_entry(
+                "main_ws",
+                story.id,
+                second.id,
+                name="First",
+            )
+        _assert_integrity_chain(update_conflict.value)
+
+        def _fail_delete(_entry_id: int) -> bool:
+            raise IntegrityError("forced constraint failure")
+
+        with monkeypatch.context() as scoped:
+            scoped.setattr(service._entries, "delete", _fail_delete)
+            with pytest.raises(DataIntegrityError) as delete_conflict:
+                service.delete_entry("main_ws", story.id, first.id)
+        _assert_integrity_chain(delete_conflict.value)
     finally:
         database.close()

@@ -10,6 +10,7 @@ from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.session.catalog import SessionCatalogService
 from rpg_core.session.composer import SessionComposerApplicationService
 from rpg_data import db
+from rpg_data.errors import DataIntegrityError
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.services.gateway import DataServiceGateway
 from rpg_data.services.session_composer import SessionComposerDataService
@@ -25,6 +26,15 @@ def _database(tmp_path: Path) -> SqliteDatabase:
     database = db.bind_peewee_database(db.make_peewee_database(path))
     database.connect()
     return database
+
+
+def _assert_integrity_chain(
+    exc: DataIntegrityError,
+    expected_message: str,
+) -> None:
+    assert str(exc) == expected_message
+    assert isinstance(exc.__cause__, IntegrityError)
+    assert "constraint" in str(exc.__cause__).lower()
 
 
 def test_session_composer_modes_styles_and_story_defaults(tmp_path: Path) -> None:
@@ -127,9 +137,165 @@ def test_session_composer_workspace_isolation_and_quick_reply_order(tmp_path: Pa
             "demo_workspace", 1, enabled_only=True,
         ) or []] == ["第一", "第二"]
         assert service.list_quick_replies("other", other_story_id) == []
-        with pytest.raises(IntegrityError):
+        with pytest.raises(
+            DataIntegrityError,
+            match="Quick reply write violated persisted constraints",
+        ) as conflict:
             service.create_quick_reply(
                 "demo_workspace", 1, title="第一", message="duplicate",
             )
+        _assert_integrity_chain(
+            conflict.value,
+            "Quick reply write violated persisted constraints",
+        )
+    finally:
+        database.close()
+
+
+def test_session_composer_translates_style_and_quick_reply_integrity_errors(
+    tmp_path: Path,
+) -> None:
+    database = _database(tmp_path)
+    try:
+        service = SessionComposerApplicationService(
+            SessionComposerDataService(database)
+        )
+        first_style = service.create_style(
+            "demo_workspace",
+            name="Boundary First",
+            prompt="first",
+        )
+        second_style = service.create_style(
+            "demo_workspace",
+            name="Boundary Second",
+            prompt="second",
+        )
+        assert first_style is not None and second_style is not None
+
+        with pytest.raises(DataIntegrityError) as style_create_conflict:
+            service.create_style(
+                "demo_workspace",
+                name="Boundary First",
+                prompt="duplicate",
+            )
+        _assert_integrity_chain(
+            style_create_conflict.value,
+            "Narrative style write violated persisted constraints",
+        )
+
+        with pytest.raises(DataIntegrityError) as style_update_conflict:
+            service.update_style(
+                "demo_workspace",
+                second_style.id,
+                name="Boundary First",
+            )
+        _assert_integrity_chain(
+            style_update_conflict.value,
+            "Narrative style write violated persisted constraints",
+        )
+
+        first_reply = service.create_quick_reply(
+            "demo_workspace",
+            1,
+            title="Boundary First",
+            message="first",
+        )
+        second_reply = service.create_quick_reply(
+            "demo_workspace",
+            1,
+            title="Boundary Second",
+            message="second",
+        )
+        assert first_reply is not None and second_reply is not None
+
+        with pytest.raises(DataIntegrityError) as reply_update_conflict:
+            service.update_quick_reply(
+                "demo_workspace",
+                1,
+                second_reply.id,
+                title="Boundary First",
+            )
+        _assert_integrity_chain(
+            reply_update_conflict.value,
+            "Quick reply write violated persisted constraints",
+        )
+    finally:
+        database.close()
+
+
+def test_session_composer_translates_low_frequency_write_errors(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = _database(tmp_path)
+    try:
+        data = SessionComposerDataService(database)
+        service = SessionComposerApplicationService(data)
+        style = service.create_style(
+            "demo_workspace",
+            name="Boundary Mount",
+            prompt="mount",
+        )
+        reply = service.create_quick_reply(
+            "demo_workspace",
+            1,
+            title="Boundary Delete",
+            message="delete",
+        )
+        assert style is not None and reply is not None
+
+        def _fail_write(*_args, **_kwargs):
+            raise IntegrityError("forced constraint failure")
+
+        cases = (
+            (
+                "delete_style",
+                lambda: service.delete_style("demo_workspace", style.id),
+                "Narrative style write violated persisted constraints",
+            ),
+            (
+                "mount_story_styles",
+                lambda: service.mount_story_style(
+                    "demo_workspace",
+                    1,
+                    style.id,
+                ),
+                "Story narrative style write violated persisted constraints",
+            ),
+            (
+                "unmount_story_style",
+                lambda: service.unmount_story_style(
+                    "demo_workspace",
+                    1,
+                    999,
+                ),
+                "Story narrative style write violated persisted constraints",
+            ),
+            (
+                "set_story_base_style",
+                lambda: service.set_story_base_style(
+                    "demo_workspace",
+                    1,
+                    None,
+                ),
+                "Story narrative style write violated persisted constraints",
+            ),
+            (
+                "delete_quick_reply",
+                lambda: service.delete_quick_reply(
+                    "demo_workspace",
+                    1,
+                    reply.id,
+                ),
+                "Quick reply write violated persisted constraints",
+            ),
+        )
+
+        for repository_method, operation, expected_message in cases:
+            with monkeypatch.context() as scoped:
+                scoped.setattr(data._repo, repository_method, _fail_write)
+                with pytest.raises(DataIntegrityError) as conflict:
+                    operation()
+            _assert_integrity_chain(conflict.value, expected_message)
     finally:
         database.close()

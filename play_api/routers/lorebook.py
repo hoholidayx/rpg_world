@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from peewee import IntegrityError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from commons.types import JsonObject
 from play_api.backends import get_data_manager_backend
+from play_api.routers._data_errors import data_integrity_conflict
+from rpg_data.errors import DataIntegrityError
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/stories/{story_id}/lorebook-entries",
     tags=["play-lorebook"],
 )
-
-
-def _conflict(exc: IntegrityError) -> HTTPException:
-    return HTTPException(status_code=409, detail=str(exc))
 
 
 class PlayLorebookEntryPayload(BaseModel):
@@ -124,8 +121,13 @@ async def create_lorebook_entry(
             sort_order=payload.sort_order,
             metadata=payload.metadata,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="lorebook_entry.create",
+            workspace_id=workspace_id,
+            story_id=story_id,
+        ) from exc
     if entry is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return _entry_response(entry)
@@ -150,8 +152,14 @@ async def update_lorebook_entry(
             sort_order=payload.sort_order,
             metadata=payload.metadata,
         )
-    except IntegrityError as exc:
-        raise _conflict(exc) from exc
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="lorebook_entry.update",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=entry_id,
+        ) from exc
     if entry is None:
         raise HTTPException(status_code=404, detail="lorebook entry not found")
     return _entry_response(entry)
@@ -163,10 +171,19 @@ async def delete_lorebook_entry(
     story_id: int,
     entry_id: int,
 ) -> None:
-    deleted = await get_data_manager_backend().delete_lorebook_entry(
-        workspace_id,
-        story_id,
-        entry_id,
-    )
+    try:
+        deleted = await get_data_manager_backend().delete_lorebook_entry(
+            workspace_id,
+            story_id,
+            entry_id,
+        )
+    except DataIntegrityError as exc:
+        raise data_integrity_conflict(
+            exc,
+            operation="lorebook_entry.delete",
+            workspace_id=workspace_id,
+            story_id=story_id,
+            resource_id=entry_id,
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="lorebook entry not found")
