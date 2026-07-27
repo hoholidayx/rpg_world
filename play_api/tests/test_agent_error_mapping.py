@@ -12,27 +12,32 @@ from play_api.main import app
 from play_api.sse_protocol import PLAY_SSE_SCHEMA_VERSION, PlaySSEType
 
 
-class _FailingHistoryClient:
+class _ClosableAgentClient:
+    async def aclose(self) -> None:
+        return None
+
+
+class _FailingHistoryClient(_ClosableAgentClient):
     async def get_history(self, session_id: str) -> dict[str, object]:
         raise AgentClientError("Agent service returned HTTP 502")
 
 
-class _ConflictHistoryClient:
+class _ConflictHistoryClient(_ClosableAgentClient):
     async def get_history(self, session_id: str) -> dict[str, object]:
         raise AgentClientError("invalid turn metadata at history[1]", status_code=409)
 
 
-class _UnavailableHistoryClient:
+class _UnavailableHistoryClient(_ClosableAgentClient):
     async def get_history(self, session_id: str) -> dict[str, object]:
         raise AgentServiceUnavailable("Agent service unavailable: connection refused")
 
 
-class _UnavailableSendClient:
+class _UnavailableSendClient(_ClosableAgentClient):
     async def send(self, session_id: str, text: str) -> dict[str, object]:
         raise AgentServiceUnavailable("Agent service unavailable: connection refused")
 
 
-class _LLMUnavailableHistoryClient:
+class _LLMUnavailableHistoryClient(_ClosableAgentClient):
     async def get_history(self, session_id: str) -> dict[str, object]:
         raise AgentClientError(
             "LLM service connection failed",
@@ -41,7 +46,7 @@ class _LLMUnavailableHistoryClient:
         )
 
 
-class _LLMUnavailableOptionsClient:
+class _LLMUnavailableOptionsClient(_ClosableAgentClient):
     async def get_main_llm_options(self) -> dict[str, object]:
         raise AgentClientError(
             "LLM service connection failed",
@@ -50,7 +55,7 @@ class _LLMUnavailableOptionsClient:
         )
 
 
-class _FailingStreamClient:
+class _FailingStreamClient(_ClosableAgentClient):
     async def stream(self, session_id: str, text: str, request_id: str | None = None):
         del request_id
         if False:
@@ -58,7 +63,7 @@ class _FailingStreamClient:
         raise AgentClientError("stream failed")
 
 
-class _LLMUnavailableStreamClient:
+class _LLMUnavailableStreamClient(_ClosableAgentClient):
     async def stream(self, session_id: str, text: str, request_id: str | None = None):
         del request_id
         if False:
@@ -70,7 +75,7 @@ class _LLMUnavailableStreamClient:
         )
 
 
-class _MessageModeUnavailableClient:
+class _MessageModeUnavailableClient(_ClosableAgentClient):
     async def send(self, session_id: str, text: str, **_kwargs):
         del session_id, text
         raise AgentClientError(

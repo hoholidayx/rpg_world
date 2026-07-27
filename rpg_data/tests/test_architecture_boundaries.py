@@ -157,14 +157,14 @@ MESSAGE_AND_LEDGER_BUSINESS_FILES = (
 GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "agent_service/main.py",
     "dream_service/repository.py",
-    "media_service/main.py",
+    "media_service/runtime.py",
     "play_api/data_runtime.py",
     "channels/cli/memory_recall.py",
     "rpg_core/agent/agent.py",
     "rpg_core/context/factory.py",
     "rpg_mcp/composition.py",
     "run_telegram.py",
-    "tts_service/main.py",
+    "tts_service/runtime.py",
 })
 
 CORE_GATEWAY_LOOKUP_ALLOWLIST = frozenset({
@@ -177,11 +177,11 @@ CORE_GATEWAY_LOOKUP_ALLOWLIST = frozenset({
 # new caller cannot bypass the lookup guard through constructor injection.
 WHOLE_GATEWAY_REFERENCE_ALLOWLIST = frozenset({
     "agent_service/runtime.py",
-    "media_service/main.py",
+    "media_service/runtime.py",
     "play_api/data_runtime.py",
     "rpg_mcp/composition.py",
     "run_telegram.py",
-    "tts_service/main.py",
+    "tts_service/runtime.py",
 })
 
 

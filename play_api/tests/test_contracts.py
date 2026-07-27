@@ -119,6 +119,9 @@ class _FakeAgentClient:
         self.story_main_llm_provider_key: str | None = None
         self.session_main_llm_provider_key: str | None = None
 
+    async def aclose(self) -> None:
+        return None
+
     @staticmethod
     def _main_llm_option(provider_key: str) -> dict[str, object]:
         return {

@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Protocol, TypeAlias
 
 from loguru import logger
 
@@ -13,6 +13,21 @@ from loguru import logger
 CleanupResult: TypeAlias = object | Awaitable[object]
 CleanupAction: TypeAlias = Callable[[], CleanupResult]
 CleanupStep: TypeAlias = tuple[str, CleanupAction]
+
+
+class LLMClientLifecycle(Protocol):
+    """Lifecycle-only view of the loop-owned LLM client manager."""
+
+    async def aconfigure(
+        self,
+        *,
+        base_url: str,
+        token: str,
+        request_timeout_ms: int,
+        stream_timeout_ms: int,
+    ) -> None: ...
+
+    async def areset(self) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +90,7 @@ async def cleanup_runtime_resources(
 __all__ = [
     "CleanupAction",
     "CleanupStep",
+    "LLMClientLifecycle",
     "RuntimeCleanupError",
     "RuntimeCleanupFailure",
     "cleanup_runtime_resources",

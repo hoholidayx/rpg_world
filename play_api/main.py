@@ -11,15 +11,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from loguru import logger
 
-from play_api.data_runtime import PlayDataRuntime
-from play_api.dream_client import close_dream_client
-from play_api.media_client import close_media_client
-from play_api.tts_client import close_tts_client
+from play_api.runtime import PlayServiceRuntime
 from play_api.settings import play_settings
-from play_api.event_hub import PlayEventHub, PlayEventRuntime
-from play_events.auth import uses_default_play_event_token
 from play_api.routers import (
     characters,
     dream,
@@ -40,35 +34,20 @@ from play_api.routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    event_cfg = play_settings.events
-    if uses_default_play_event_token(event_cfg.token_env):
-        logger.warning(
-            "{} is not set; using the local Play event token fallback",
-            event_cfg.token_env,
-        )
-    event_hub = PlayEventHub(
-        subscriber_queue_capacity=event_cfg.subscriber_queue_capacity,
-    )
-    app.state.play_events = PlayEventRuntime(
-        hub=event_hub,
-        token=event_cfg.token,
-        heartbeat_seconds=event_cfg.heartbeat_seconds,
-        retry_ms=event_cfg.retry_ms,
-    )
-    data_runtime = PlayDataRuntime.create()
-    app.state.play_data = data_runtime
+    runtime = await PlayServiceRuntime.create(settings=play_settings)
     try:
+        app.state.play_runtime = runtime
+        app.state.play_events = runtime.events
+        app.state.play_data = runtime.data
         yield
     finally:
         try:
-            await event_hub.close()
+            await runtime.close()
         finally:
+            if hasattr(app.state, "play_runtime"):
+                del app.state.play_runtime
             if hasattr(app.state, "play_events"):
                 del app.state.play_events
-            await close_dream_client()
-            await close_media_client()
-            await close_tts_client()
-            data_runtime.close()
             if hasattr(app.state, "play_data"):
                 del app.state.play_data
 

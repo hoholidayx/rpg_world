@@ -11,7 +11,7 @@ from loguru import logger
 from agent_service.derivation_worker import SessionDerivationWorker
 from agent_service.play_event_notifications import SessionDerivationPlayEventSink
 from agent_service.settings import AgentServiceSettings
-from commons.runtime_lifecycle import cleanup_runtime_resources
+from commons.runtime_lifecycle import LLMClientLifecycle, cleanup_runtime_resources
 from llm_client.manager import LLMClientManager
 from play_events import PlayEventPublisher
 from play_events.auth import uses_default_play_event_token
@@ -45,19 +45,6 @@ class AgentManagerRuntime(Protocol):
     def finish_session_deletion(self, session_id: str) -> None: ...
 
 
-class LLMClientManagerRuntime(Protocol):
-    async def aconfigure(
-        self,
-        *,
-        base_url: str,
-        token: str,
-        request_timeout_ms: int,
-        stream_timeout_ms: int,
-    ) -> None: ...
-
-    async def areset(self) -> None: ...
-
-
 @dataclass(slots=True)
 class AgentServiceRuntime:
     """Own process resources and expose only preassembled narrow services."""
@@ -73,7 +60,7 @@ class AgentServiceRuntime:
     agent_manager: AgentManagerRuntime
     derivation_worker: SessionDerivationWorker | None
     _gateway: DataServiceGateway = field(repr=False)
-    _llm_manager: LLMClientManagerRuntime = field(repr=False)
+    _llm_manager: LLMClientLifecycle = field(repr=False)
     _event_publisher: PlayEventPublisher | None = field(default=None, repr=False)
     _llm_configured: bool = field(default=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
@@ -85,7 +72,7 @@ class AgentServiceRuntime:
         gateway: DataServiceGateway,
         settings: AgentServiceSettings,
         agent_manager: AgentManagerRuntime = AgentManager,
-        llm_manager: LLMClientManagerRuntime = LLMClientManager,
+        llm_manager: LLMClientLifecycle = LLMClientManager,
         derivation_worker_factory: DerivationWorkerFactory = SessionDerivationWorker,
         event_publisher_factory: EventPublisherFactory = PlayEventPublisher,
     ) -> "AgentServiceRuntime":
