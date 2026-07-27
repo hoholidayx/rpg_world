@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 
@@ -238,10 +239,10 @@ def test_demo_data_uses_story_owned_resources_and_complete_defaults() -> None:
         assert conn.execute(
             "SELECT COUNT(*) AS count FROM rpg_story_characters "
             "WHERE workspace_id = 'demo_workspace'"
-        ).fetchone()["count"] == 5
+        ).fetchone()["count"] == 7
         assert conn.execute(
             "SELECT COUNT(*) AS count FROM rpg_story_character_details"
-        ).fetchone()["count"] == 4
+        ).fetchone()["count"] == 6
         assert conn.execute(
             "SELECT COUNT(*) AS count FROM rpg_story_lorebook_entries "
             "WHERE workspace_id = 'demo_workspace'"
@@ -249,11 +250,11 @@ def test_demo_data_uses_story_owned_resources_and_complete_defaults() -> None:
         assert conn.execute(
             "SELECT COUNT(*) AS count FROM rpg_story_status_tables "
             "WHERE workspace_id = 'demo_workspace'"
-        ).fetchone()["count"] == 4
+        ).fetchone()["count"] == 8
         assert conn.execute(
             "SELECT COUNT(*) AS count FROM rpg_session_status_tables "
             "WHERE workspace_id = 'demo_workspace'"
-        ).fetchone()["count"] == 4
+        ).fetchone()["count"] == 8
         status_documents = [
             json.loads(str(row["document_json"]))
             for row in conn.execute(
@@ -280,8 +281,8 @@ def test_demo_data_uses_story_owned_resources_and_complete_defaults() -> None:
             "dice",
         }
         expected_modules_by_story = {
-            1: {"message_mode", "dice", "narrative_outcome"},
-            2: {"message_mode", "dice", "narrative_outcome"},
+            1: catalog,
+            2: catalog,
             3: catalog,
         }
         for story_id, expected_modules in expected_modules_by_story.items():
@@ -321,6 +322,161 @@ def test_demo_data_uses_story_owned_resources_and_complete_defaults() -> None:
         assert conn.execute(
             "SELECT id FROM rpg_workspaces WHERE id = 'default'"
         ).fetchone() is None
+    finally:
+        conn.close()
+
+
+def test_primary_demo_sessions_include_rich_runtime_fixtures() -> None:
+    conn = db.connect(":memory:")
+    try:
+        run_migrations(conn)
+
+        history_counts = {
+            row["session_id"]: (row["turn_count"], row["message_count"])
+            for row in conn.execute(
+                "SELECT session_id, COUNT(DISTINCT turn_id) AS turn_count, "
+                "COUNT(*) AS message_count "
+                "FROM rpg_session_messages "
+                "WHERE session_id IN ('s_forest001', 's_academy01') "
+                "GROUP BY session_id"
+            )
+        }
+        assert history_counts == {
+            "s_forest001": (14, 28),
+            "s_academy01": (12, 24),
+        }
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_session_messages "
+            "WHERE session_id IN ('s_forest001', 's_academy01') "
+            "AND role = 'assistant' AND content LIKE '%<rp-narration>%'"
+        ).fetchone()["count"] == 12
+
+        summary_ranges = [
+            (
+                row["session_id"],
+                row["summary_batch_id"],
+                row["turn_start"],
+                row["turn_end"],
+                row["message_count"],
+            )
+            for row in conn.execute(
+                "SELECT session_id, summary_batch_id, "
+                "MIN(turn_id) AS turn_start, MAX(turn_id) AS turn_end, "
+                "COUNT(*) AS message_count "
+                "FROM rpg_session_messages "
+                "WHERE summary_processed = 1 "
+                "GROUP BY session_id, summary_batch_id "
+                "ORDER BY session_id, summary_batch_id"
+            )
+        ]
+        assert summary_ranges == [
+            ("s_academy01", 1, 1, 6, 12),
+            ("s_academy01", 2, 7, 10, 8),
+            ("s_forest001", 1, 1, 6, 12),
+            ("s_forest001", 2, 7, 12, 12),
+        ]
+
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_story_plot_event_pools"
+        ).fetchone()["count"] == 4
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_story_plot_events"
+        ).fetchone()["count"] == 12
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_story_plot_outlines"
+        ).fetchone()["count"] == 2
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_story_plot_outline_nodes"
+        ).fetchone()["count"] == 8
+        decisions = list(
+            conn.execute(
+                "SELECT decision_status, event_snapshot_json "
+                "FROM rpg_session_plot_schedule_decisions"
+            )
+        )
+        assert len(decisions) == 8
+        assert all(row["decision_status"] == "triggered" for row in decisions)
+        snapshots = [
+            json.loads(str(row["event_snapshot_json"]))
+            for row in decisions
+        ]
+        assert all(
+            snapshot.get("eventTitle") and snapshot.get("directive")
+            for snapshot in snapshots
+        )
+
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_session_story_memories"
+        ).fetchone()["count"] == 12
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_session_story_memory_evidence"
+        ).fetchone()["count"] == 13
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_session_persistent_memories "
+            "WHERE lifecycle = 'active'"
+        ).fetchone()["count"] == 6
+        assert conn.execute(
+            "SELECT COUNT(*) AS count "
+            "FROM rpg_session_persistent_memory_revisions"
+        ).fetchone()["count"] == 6
+        assert conn.execute(
+            "SELECT COUNT(*) AS count "
+            "FROM rpg_session_persistent_memory_evidence"
+        ).fetchone()["count"] == 6
+
+        evidence_queries = (
+            (
+                "rpg_session_story_memory_evidence",
+                "JOIN rpg_session_story_memories AS owner "
+                "ON owner.id = evidence.story_memory_id",
+            ),
+            (
+                "rpg_session_persistent_memory_evidence",
+                "JOIN rpg_session_persistent_memory_revisions AS owner "
+                "ON owner.id = evidence.revision_id",
+            ),
+        )
+        for table, owner_join in evidence_queries:
+            rows = conn.execute(
+                "SELECT evidence.content_hash, messages.content, "
+                "evidence.turn_id, evidence.message_version, "
+                "messages.turn_id AS message_turn_id, "
+                "messages.version AS current_message_version "
+                f"FROM {table} AS evidence "
+                f"{owner_join} "
+                "JOIN rpg_session_messages AS messages "
+                "ON messages.id = evidence.message_id"
+            )
+            for row in rows:
+                assert row["content_hash"] == hashlib.sha256(
+                    str(row["content"]).encode("utf-8")
+                ).hexdigest()
+                assert row["turn_id"] == row["message_turn_id"]
+                assert row["message_version"] == row["current_message_version"]
+
+        bound_story_tables = list(
+            conn.execute(
+                "SELECT id FROM rpg_story_status_tables "
+                "WHERE story_character_id IS NOT NULL"
+            )
+        )
+        assert len(bound_story_tables) == 2
+        copied_metadata = [
+            json.loads(str(row["metadata_json"]))
+            for row in conn.execute(
+                "SELECT metadata_json FROM rpg_session_status_tables "
+                "WHERE source_story_status_table_id IN "
+                "(SELECT id FROM rpg_story_status_tables "
+                "WHERE story_character_id IS NOT NULL)"
+            )
+        ]
+        assert len(copied_metadata) == 2
+        assert all(
+            item["storyStatusSource"]["characterId"] is not None
+            and item["storyStatusSource"]["characterName"]
+            for item in copied_metadata
+        )
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         conn.close()
 

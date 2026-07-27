@@ -19,6 +19,7 @@ def test_catalog_default_mount_and_session_override_round_trip(tmp_path) -> None
     assert {item.module_name for item in story_modules} == {
         "message_mode",
         "narrative_outcome",
+        "plot_scheduler",
         "dice",
     }
 

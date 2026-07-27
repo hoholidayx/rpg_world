@@ -50,10 +50,11 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
         story_memory = _story_memory(database)
+        session_id = _create_test_session(database, "s_story_memory_crud")
 
-        first = story_memory.add_detail("s_forest001", "remember this", turn_id=2)
+        first = story_memory.add_detail(session_id, "remember this", turn_id=2)
         second = story_memory.add_detail(
-            "s_forest001",
+            session_id,
             "dream this",
             turn_id=3,
             dream_processed=True,
@@ -65,17 +66,17 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
             metadata_json='{"kind":"test"}',
         )
 
-        assert [row.text for row in story_memory.list("s_forest001")] == [
+        assert [row.text for row in story_memory.list(session_id)] == [
             "remember this",
             "dream this",
         ]
         assert [
             row.id
-            for row in story_memory.list("s_forest001", dream_processed=True)
+            for row in story_memory.list(session_id, dream_processed=True)
         ] == [second.id]
         context_by_id = {
             item.id: item.to_context_dict()
-            for item in story_memory.get_context_items("s_forest001")
+            for item in story_memory.get_context_items(session_id)
         }
         assert context_by_id[first.id]["turn_id"] == 2
         assert context_by_id[second.id]["metadata"] == {"kind": "test"}
@@ -84,7 +85,7 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         assert story_memory.get(second.id).source_turn_start == 2
 
         duplicate = story_memory.add_detail(
-            "s_forest001",
+            session_id,
             "dream this",
             turn_id=4,
             memory_kind="clue",
@@ -97,12 +98,12 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         assert duplicate.version == second.version + 1
         duplicate_context = next(
             item
-            for item in story_memory.get_context_items("s_forest001")
+            for item in story_memory.get_context_items(session_id)
             if item.id == duplicate.id
         )
         assert duplicate_context.to_context_dict()["metadata"] == {"kind": "test"}
 
-        assert len(story_memory.list("s_forest001")) == 2
+        assert len(story_memory.list(session_id)) == 2
 
         assert story_memory.set_dream_processed(
             [first.id],
@@ -110,11 +111,11 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         ) == 1
         assert {
             row.id
-            for row in story_memory.list("s_forest001", dream_processed=True)
+            for row in story_memory.list(session_id, dream_processed=True)
         } == {first.id, second.id}
 
         replacement = story_memory.set_details(
-            "s_forest001",
+            session_id,
             [
                 {
                     "text": "replacement",
@@ -124,15 +125,15 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
             ],
         )
         assert [row.text for row in replacement] == ["replacement"]
-        assert story_memory.get_context_items("s_forest001")[0].to_context_dict()[
+        assert story_memory.get_context_items(session_id)[0].to_context_dict()[
             "metadata"
         ] == {"kind": "unit"}
 
         with pytest.raises(InvalidTurnMetadataError):
-            story_memory.add_detail("s_forest001", "missing turn", turn_id=0)
+            story_memory.add_detail(session_id, "missing turn", turn_id=0)
         with pytest.raises(InvalidTurnMetadataError):
-            story_memory.set_details("s_forest001", [{"text": "invalid"}])
-        assert [row.text for row in story_memory.list("s_forest001")] == [
+            story_memory.set_details(session_id, [{"text": "invalid"}])
+        assert [row.text for row in story_memory.list(session_id)] == [
             "replacement"
         ]
     finally:

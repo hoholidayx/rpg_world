@@ -1327,9 +1327,9 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         f"/play-api/v1/sessions/{demo_session_id}/scene",
     )
     assert scene.status_code == 200
-    assert scene.json()["location"] == "北境森林·石林·圆形封印祭坛"
-    assert scene.json()["time"] == "第 1 年 1 月 1 日 8 时 30 分"
-    assert scene.json()["presentCharacters"] == ["Bob", "Alice"]
+    assert scene.json()["location"] == "北境森林·石林·祭坛下层回廊"
+    assert scene.json()["time"] == "第 1 年 1 月 1 日 9 时 20 分"
+    assert scene.json()["presentCharacters"] == ["Bob", "Alice", "灰烬守门人"]
 
     commands = client.get(
         f"/play-api/v1/sessions/{demo_session_id}/commands",

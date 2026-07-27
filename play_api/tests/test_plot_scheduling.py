@@ -23,12 +23,10 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
     with TestClient(app) as client:
         initial = client.get(story_path)
         assert initial.status_code == 200
-        assert initial.json() == {
-            "storyId": 1,
-            "pools": [],
-            "events": [],
-            "outlines": [],
-        }
+        assert initial.json()["storyId"] == 1
+        assert initial.json()["pools"]
+        assert initial.json()["events"]
+        assert initial.json()["outlines"]
 
         pool = client.post(
             f"{story_path}/pools",
@@ -149,12 +147,22 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
 
         aggregate = client.get(story_path)
         assert aggregate.status_code == 200
-        assert aggregate.json()["outlines"][0]["nodes"][0]["eventId"] == event_id
+        created_outline = next(
+            item
+            for item in aggregate.json()["outlines"]
+            if item["id"] == outline_id
+        )
+        assert created_outline["nodes"][0]["eventId"] == event_id
 
         runtime = client.get("/play-api/v1/sessions/s_forest001/plot-scheduling")
         assert runtime.status_code == 200
         assert runtime.json()["sessionId"] == "s_forest001"
-        assert runtime.json()["schedule"]["events"][0]["title"] == "雨夜加急来信"
+        runtime_event = next(
+            item
+            for item in runtime.json()["schedule"]["events"]
+            if item["id"] == event_id
+        )
+        assert runtime_event["title"] == "雨夜加急来信"
         assert runtime.json()["sceneTime"] is not None
         max_page = client.get(
             "/play-api/v1/sessions/s_forest001/plot-scheduling?limit=200"
@@ -190,16 +198,30 @@ def test_session_plot_story_masks_spoilers_and_projects_triggered_sources(
     )
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     reset_data_service_gateways()
-    story_path = (
-        "/play-api/v1/workspaces/demo_workspace/stories/1/plot-scheduling"
+    gateway = get_data_service_gateway()
+    story = gateway.catalog.create_story(
+        "demo_workspace",
+        title="剧情防剧透隔离故事",
     )
-    session_path = "/play-api/v1/sessions/s_forest001/plot-story"
+    assert story is not None
+    session = gateway.catalog.create_session(
+        "demo_workspace",
+        story.id,
+        session_id="s_plot_story",
+        title="剧情防剧透隔离会话",
+    )
+    assert session is not None
+    story_path = (
+        f"/play-api/v1/workspaces/demo_workspace/stories/{story.id}"
+        "/plot-scheduling"
+    )
+    session_path = f"/play-api/v1/sessions/{session.id}/plot-story"
 
     with TestClient(app) as client:
         empty = client.get(session_path)
         assert empty.status_code == 200
         assert empty.json() == {
-            "sessionId": "s_forest001",
+            "sessionId": session.id,
             "spoilerProtectionEnabled": True,
             "outlines": [],
             "pools": [],
@@ -286,8 +308,8 @@ def test_session_plot_story_masks_spoilers_and_projects_triggered_sources(
             assert response.status_code == 201
             node_ids.append(int(response.json()["id"]))
 
-        get_data_service_gateway().plot_scheduling.append_decisions(
-            "s_forest001",
+        gateway.plot_scheduling.append_decisions(
+            session.id,
             7,
             (
                 models.StagedPlotScheduleDecision(

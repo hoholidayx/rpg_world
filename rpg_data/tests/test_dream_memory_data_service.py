@@ -79,8 +79,15 @@ def test_story_memory_crud_evidence_progress_and_rollback(
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "story-memory-data.sqlite3")
     data = gateway.story_memory
+    session = gateway.catalog.create_session(
+        "demo_workspace",
+        1,
+        session_id="s_story_memory_data",
+        title="Story memory data isolation",
+    )
+    assert session is not None
     source = gateway.messages.append(
-        "s_forest001",
+        session.id,
         models.MESSAGE_ROLE_ASSISTANT,
         "石门只会在月蚀时开启。",
         mode=models.TURN_MODE_IC,
@@ -95,10 +102,10 @@ def test_story_memory_crud_evidence_progress_and_rollback(
     )
     key = "1" * 64
 
-    created = data.create("s_forest001", _story_values(dedupe_key=key))
+    created = data.create(session.id, _story_values(dedupe_key=key))
     with data.transaction(DataTransactionMode.IMMEDIATE):
         data.replace_evidence(created.id, (evidence,))
-        assert data.mark_messages_processed("s_forest001", (source.id,)) == 1
+        assert data.mark_messages_processed(session.id, (source.id,)) == 1
 
     loaded = data.get(created.id)
     assert loaded is not None
@@ -116,7 +123,7 @@ def test_story_memory_crud_evidence_progress_and_rollback(
     )
     assert updated.version == 2
     assert data.list_page(
-        "s_forest001",
+        session.id,
         page=1,
         page_size=10,
         memory_kind="world_fact",
@@ -130,7 +137,7 @@ def test_story_memory_crud_evidence_progress_and_rollback(
         )
 
     rollback_source = gateway.messages.append(
-        "s_forest001",
+        session.id,
         models.MESSAGE_ROLE_USER,
         "我记下了石门开启条件。",
         mode=models.TURN_MODE_IC,
@@ -141,7 +148,7 @@ def test_story_memory_crud_evidence_progress_and_rollback(
     with pytest.raises(RuntimeError, match="rollback"):
         with data.transaction(DataTransactionMode.IMMEDIATE):
             row = data.create(
-                "s_forest001",
+                session.id,
                 _story_values(dedupe_key=rollback_key),
             )
             data.replace_evidence(
@@ -156,12 +163,12 @@ def test_story_memory_crud_evidence_progress_and_rollback(
                 ),
             )
             data.mark_messages_processed(
-                "s_forest001",
+                session.id,
                 (rollback_source.id,),
             )
             raise RuntimeError("rollback")
 
-    assert data.get_by_dedupe_key("s_forest001", rollback_key) is None
+    assert data.get_by_dedupe_key(session.id, rollback_key) is None
     assert gateway.messages.get(rollback_source.id).story_memory_processed is False
 
 

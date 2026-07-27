@@ -90,8 +90,14 @@ def _story_memory(gateway):  # noqa: ANN001, ANN202
     return StoryMemoryApplicationService(gateway.story_memory)
 
 
+def _clear_demo_memory_seed(gateway) -> None:  # noqa: ANN001
+    gateway.dream_memory.clear("s_forest001")
+    gateway.story_memory.clear("s_forest001")
+
+
 def test_snapshot_proposal_apply_and_context_evidence_guard(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway)
     snapshot = dream.build_source_snapshot("s_forest001")
     message = snapshot.messages[0]
@@ -178,6 +184,7 @@ def test_snapshot_proposal_apply_and_context_evidence_guard(tmp_path) -> None:
 
 def test_revision_retire_restore_and_supersede_preserve_history(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-lifecycle.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     evidence = (_evidence(message),)
@@ -278,6 +285,7 @@ def test_revision_retire_restore_and_supersede_preserve_history(tmp_path) -> Non
 
 def test_add_revives_retired_memory_with_new_revision_and_evidence(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-revive.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway)
     original_message = dream.build_source_snapshot("s_forest001").messages[0]
     fact_text = "封印的石门只会在月蚀时开启。"
@@ -371,6 +379,7 @@ def test_add_revives_retired_memory_with_new_revision_and_evidence(tmp_path) -> 
 
 def test_revive_counts_against_active_memory_limit(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-revive-limit.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway, max_active_memories=1)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     retired_text = "月蚀会开启石门。"
@@ -461,6 +470,7 @@ def test_revive_counts_against_active_memory_limit(tmp_path) -> None:
 
 def test_evidence_becomes_invalid_when_message_leaves_in_world_source(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-mode-evidence.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     proposal = _create_ready(
@@ -494,6 +504,7 @@ def test_context_projection_uses_batched_current_revision_queries(
     monkeypatch,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-context-query.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     proposal = _create_ready(
@@ -535,6 +546,7 @@ def test_context_projection_uses_batched_current_revision_queries(
 
 def test_ledger_guard_stales_second_ready_proposal(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-stale.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     first = _create_ready(
@@ -579,6 +591,7 @@ def test_ledger_guard_stales_second_ready_proposal(tmp_path) -> None:
 
 def test_active_limit_and_reset_clear_all_dream_rows(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-limit.sqlite3")
+    _clear_demo_memory_seed(gateway)
     with pytest.raises(ValueError, match="between 1 and 64"):
         DreamApplicationService(
             gateway.dream_memory,
@@ -633,6 +646,7 @@ def test_active_limit_and_reset_clear_all_dream_rows(tmp_path) -> None:
 
 def test_proposal_payload_limits_are_enforced_at_data_boundary(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-limits.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     snapshot = dream.build_source_snapshot("s_forest001")
@@ -682,6 +696,7 @@ def test_proposal_payload_limits_are_enforced_at_data_boundary(tmp_path) -> None
 
 def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-checkpoint.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway)
     story_memory = _story_memory(gateway).add_detail(
         "s_forest001",
@@ -774,6 +789,7 @@ def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> N
 
 def test_story_memory_checkpoint_does_not_change_source_fingerprint(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-checkpoint-fingerprint.sqlite3")
+    _clear_demo_memory_seed(gateway)
     story_memory = _story_memory(gateway).add_detail(
         "s_forest001",
         "封印发出蓝光",
@@ -790,6 +806,7 @@ def test_story_memory_checkpoint_does_not_change_source_fingerprint(tmp_path) ->
 
 def test_apply_rechecks_story_memory_version_inside_transaction(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-story-stale.sqlite3")
+    _clear_demo_memory_seed(gateway)
     dream = _dream(gateway)
     story = _story_memory(gateway).add_detail(
         "s_forest001",

@@ -254,6 +254,7 @@ def test_reset_without_valid_binding_does_not_append_first_message(tmp_path) -> 
 
 def test_core_reset_clears_plot_decision_ledger(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "session-reset-plot.sqlite3")
+    gateway.plot_scheduling.clear_decisions("s_forest001")
     gateway.plot_scheduling.append_decisions(
         "s_forest001",
         1,

@@ -182,10 +182,12 @@ def test_character_reference_reads_are_lightweight_paginated_and_scoped(
 
     first_page = data.list_characters(locator, page=1, page_size=1)
     second_page = data.list_characters(locator, page=2, page_size=1)
-    assert first_page.total == 2
-    assert first_page.total_pages == 2
+    third_page = data.list_characters(locator, page=3, page_size=1)
+    assert first_page.total == 3
+    assert first_page.total_pages == 3
     assert [item.name for item in first_page.items] == ["Bob"]
     assert [item.name for item in second_page.items] == ["Alice"]
+    assert [item.name for item in third_page.items] == ["伊芙"]
     assert first_page.items[0].details_count == 1
 
     character = data.get_character(locator, first_page.items[0].id)
@@ -322,12 +324,12 @@ def test_character_count_and_rows_share_one_read_snapshot(
         writer.close()
 
     assert mutation_done is True
-    assert current.total == 2
-    assert [item.name for item in current.items] == ["Bob", "Alice"]
+    assert current.total == 3
+    assert [item.name for item in current.items] == ["Bob", "Alice", "伊芙"]
 
     next_snapshot = data.list_characters(locator, page=1, page_size=8)
-    assert next_snapshot.total == 1
-    assert [item.name for item in next_snapshot.items] == ["Bob"]
+    assert next_snapshot.total == 2
+    assert [item.name for item in next_snapshot.items] == ["Bob", "伊芙"]
 
 
 def test_scope_lifecycle_is_stable_until_the_next_transaction(
@@ -364,6 +366,7 @@ def test_status_reference_reads_preserve_association_and_scope_document(
     assert alice is not None
     alice_row = next(item for item in alice if item.name == "Alice")
     bob_row = next(item for item in alice if item.name == "Bob")
+    eve_row = next(item for item in alice if item.name == "伊芙")
     source = gateway.status.create_story_table(
         "demo_workspace",
         1,
@@ -443,7 +446,11 @@ def test_status_reference_reads_preserve_association_and_scope_document(
         is None
     )
 
-    assert data.list_character_order_ids(locator) == (bob_row.id, alice_row.id)
+    assert data.list_character_order_ids(locator) == (
+        bob_row.id,
+        alice_row.id,
+        eve_row.id,
+    )
     assert gateway.character_management.delete_character(
         "demo_workspace",
         1,
@@ -458,7 +465,7 @@ def test_status_reference_reads_preserve_association_and_scope_document(
     assert [item.name for item in orphan_association.items] == [
         "Alice Reference"
     ]
-    assert data.list_character_order_ids(locator) == (bob_row.id,)
+    assert data.list_character_order_ids(locator) == (bob_row.id, eve_row.id)
     custom_order = SessionReferenceStatusOrder(
         status_kind_order=("scene", "normal"),
         ordered_character_ids=(bob_row.id,),
@@ -483,7 +490,14 @@ def test_summary_source_resolves_safe_path_and_stable_turn_ranges(
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "summaries.sqlite3")
     data = gateway.session_reference
-    locator = _locator()
+    session = gateway.sessions.create_session(
+        "demo_workspace",
+        1,
+        session_id="s_reference_summary",
+        title="Summary reference isolation",
+    )
+    assert session is not None
+    locator = _locator(session_id=session.id)
     first = gateway.messages.append(
         locator.session_id,
         models.MESSAGE_ROLE_USER,
@@ -506,7 +520,7 @@ def test_summary_source_resolves_safe_path_and_stable_turn_ranges(
 
     source = data.get_summary_source(locator)
     assert source.runtime_dir == (
-        tmp_path / "data/demo_workspace/stories/1/s_forest001"
+        tmp_path / "data/demo_workspace/stories/1/s_reference_summary"
     ).resolve()
     assert [
         (item.batch_id, item.turn_start, item.turn_end)
@@ -519,6 +533,12 @@ def test_scoped_story_and_persistent_memory_getters_do_not_cross_sessions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "memory-scope.sqlite3")
+    primary = gateway.sessions.create_session(
+        "demo_workspace",
+        1,
+        session_id="s_reference_primary",
+    )
+    assert primary is not None
     other = gateway.sessions.create_session(
         "demo_workspace",
         1,
@@ -527,7 +547,7 @@ def test_scoped_story_and_persistent_memory_getters_do_not_cross_sessions(
     assert other is not None
 
     story_memory = gateway.story_memory.create(
-        "s_forest001",
+        primary.id,
         models.StoryMemoryRowValues(
             turn_id=1,
             text="月蚀时石门开启。",
@@ -545,7 +565,7 @@ def test_scoped_story_and_persistent_memory_getters_do_not_cross_sessions(
     )
     assert (
         gateway.story_memory.get_for_session(
-            "s_forest001",
+            primary.id,
             story_memory.id,
         )
         == story_memory
@@ -554,7 +574,7 @@ def test_scoped_story_and_persistent_memory_getters_do_not_cross_sessions(
         gateway.story_memory.get_for_session(other.id, story_memory.id)
         is None
     )
-    locator = _locator()
+    locator = _locator(session_id=primary.id)
     with gateway.story_memory.transaction():
         gateway.story_memory.require_reference_scope(locator)
         story_page = gateway.story_memory.list_reference_page(
@@ -581,7 +601,7 @@ def test_scoped_story_and_persistent_memory_getters_do_not_cross_sessions(
     persistent = gateway.dream_memory.create_memory(
         models.PersistentMemoryCreateValues(
             id="reference-memory",
-            session_id="s_forest001",
+            session_id=primary.id,
             dedupe_key="b" * 64,
             lifecycle="active",
             current_revision_number=1,
@@ -634,7 +654,7 @@ def test_scoped_story_and_persistent_memory_getters_do_not_cross_sessions(
     with monkeypatch.context() as patch:
         patch.setattr(gateway.database, "execute_sql", _tracked_execute_sql)
         current = gateway.dream_memory.list_current_memories(
-            "s_forest001",
+            primary.id,
             lifecycle="active",
         )
     target = next(item for item in current if item.memory.id == persistent.id)
@@ -643,13 +663,13 @@ def test_scoped_story_and_persistent_memory_getters_do_not_cross_sessions(
     assert sum(sql.lstrip().upper().startswith("SELECT") for sql in statements) == 3
 
     scoped = gateway.dream_memory.get_memory_for_session(
-        "s_forest001",
+        primary.id,
         persistent.id,
     )
     assert scoped is not None
     assert [item.revision_number for item in scoped.revisions] == [1, 2]
     current_scoped = gateway.dream_memory.get_current_memory_for_session(
-        "s_forest001",
+        primary.id,
         persistent.id,
     )
     assert current_scoped is not None

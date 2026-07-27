@@ -236,7 +236,10 @@ def test_management_keeps_outline_time_rules_atomic_and_maps_in_use_errors() -> 
             )
         current = service.get_story_schedule("demo_workspace", 1)
         assert current is not None
-        assert current.outlines[0].nodes == (first,)
+        current_outline = next(
+            item for item in current.outlines if item.id == outline.id
+        )
+        assert current_outline.nodes == (first,)
 
         second = service.create_node(
             CreatePlotNodeCommand(
@@ -259,7 +262,10 @@ def test_management_keeps_outline_time_rules_atomic_and_maps_in_use_errors() -> 
             )
         refreshed = service.get_story_schedule("demo_workspace", 1)
         assert refreshed is not None
-        assert refreshed.outlines[0].nodes[1].scheduled_time == SceneTime(
+        refreshed_outline = next(
+            item for item in refreshed.outlines if item.id == outline.id
+        )
+        assert refreshed_outline.nodes[1].scheduled_time == SceneTime(
             1,
             1,
             3,
@@ -282,7 +288,10 @@ def test_management_keeps_outline_time_rules_atomic_and_maps_in_use_errors() -> 
             )
         refreshed = service.get_story_schedule("demo_workspace", 1)
         assert refreshed is not None
-        assert [item.id for item in refreshed.outlines[0].nodes] == [
+        refreshed_outline = next(
+            item for item in refreshed.outlines if item.id == outline.id
+        )
+        assert [item.id for item in refreshed_outline.nodes] == [
             first.id,
             second.id,
         ]

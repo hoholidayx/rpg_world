@@ -44,24 +44,43 @@ def test_gateway_initializes_migrations_and_exposes_services(
     scene_table = SceneStatusService(gateway.status).get_active_table("s_forest001")
 
     assert {workspace.id for workspace in workspaces} == {"demo_workspace"}
-    assert [character.name for character in characters] == ["Bob", "Alice"]
+    assert [character.name for character in characters] == ["Bob", "Alice", "伊芙"]
     assert [entry.name for entry in lorebook_entries] == ["炎心之木", "圆形封印祭坛"]
-    assert message_count == 16
-    assert backup_message_count == 16
+    assert message_count == 28
+    assert backup_message_count == 28
     assert messages[0].content == "我拨开覆盖在石林入口的霜藤，确认 Alice 是否跟在身后。"
     assert [message.turn_id for message in messages[:4]] == [1, 1, 2, 2]
     assert [message.seq_in_turn for message in messages[:4]] == [1, 2, 1, 2]
-    assert [message.content for message in backup_messages[:2]] == [message.content for message in messages[:2]]
+    assert {
+        (message.turn_id, message.seq_in_turn): message.content
+        for message in backup_messages
+    } == {
+        (message.turn_id, message.seq_in_turn): message.content
+        for message in messages
+    }
     assert [(item.name, item.status_kind) for item in forest_definitions] == [
         ("世界线索", "normal"),
+        ("调查进度", "normal"),
+        ("Alice 同行状态", "normal"),
         ("北境森林当前场景", "scene"),
     ]
     assert [(item.name, item.status_kind) for item in academy_definitions] == [
         ("世界线索", "normal"),
+        ("档案调查进度", "normal"),
+        ("莫兰协助状态", "normal"),
         ("奥术学院当前场景", "scene"),
     ]
-    assert [table.name for table in status_tables] == ["世界线索", "北境森林当前场景"]
-    assert [table.name for table in context_tables] == ["世界线索"]
+    assert [table.name for table in status_tables] == [
+        "世界线索",
+        "调查进度",
+        "Alice 同行状态",
+        "北境森林当前场景",
+    ]
+    assert [table.name for table in context_tables] == [
+        "世界线索",
+        "调查进度",
+        "Alice 同行状态",
+    ]
     assert scene_table is not None
     assert scene_table.name == "北境森林当前场景"
     story = gateway.catalog.get_session_story("s_forest001")
@@ -106,7 +125,12 @@ def test_gateway_bootstrap_recreates_missing_session_status_copies(tmp_path: Pat
     db_path = tmp_path / "recover.sqlite3"
     gateway = get_data_service_gateway(db_path)
     original = gateway.status.list_tables("s_forest001")
-    assert [table.name for table in original] == ["世界线索", "北境森林当前场景"]
+    assert [table.name for table in original] == [
+        "世界线索",
+        "调查进度",
+        "Alice 同行状态",
+        "北境森林当前场景",
+    ]
 
     SessionStatusTableRecord.delete().where(
         SessionStatusTableRecord.session == "s_forest001"
@@ -116,7 +140,12 @@ def test_gateway_bootstrap_recreates_missing_session_status_copies(tmp_path: Pat
     recovered_gateway = get_data_service_gateway(db_path)
 
     recovered = recovered_gateway.status.list_tables("s_forest001")
-    assert [table.name for table in recovered] == ["世界线索", "北境森林当前场景"]
+    assert [table.name for table in recovered] == [
+        "世界线索",
+        "调查进度",
+        "Alice 同行状态",
+        "北境森林当前场景",
+    ]
 
 
 def test_gateway_bootstrap_removes_unindexed_runtime_dirs_when_enabled(

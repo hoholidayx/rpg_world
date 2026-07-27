@@ -13,6 +13,7 @@ from rpg_core.rp_modules.constants import (
     RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
     RP_MODULE_PLOT_SCHEDULER_NAME,
+    RP_MODULE_PLOT_SCHEDULER_SECTION_ID,
 )
 from rpg_core.rp_modules.models import ModuleContextRequest
 from rpg_core.tooling.base import BaseTool
@@ -43,9 +44,11 @@ def test_registry_loads_default_modules(tmp_path):
         RP_MODULE_DICE_NAME,
         RP_MODULE_MESSAGE_MODE_NAME,
         RP_MODULE_NARRATIVE_OUTCOME_NAME,
+        RP_MODULE_PLOT_SCHEDULER_NAME,
     ]
     assert [section.id for section in runtime.get_fixed_sections()] == [
-        RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+        RP_MODULE_PLOT_SCHEDULER_SECTION_ID,
+        RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     ]
     assert [tool.name for tool in runtime.get_tools()] == ["rp_story_outcome"]
     assert runtime.get_runtime_sections(ModuleContextRequest(session_id="s_forest001")) == []
@@ -81,10 +84,12 @@ def test_registry_keeps_narrative_module_and_framework_commands_when_dice_disabl
 
     assert [module.name for module in runtime.enabled_modules()] == [
         RP_MODULE_MESSAGE_MODE_NAME,
-        RP_MODULE_NARRATIVE_OUTCOME_NAME
+        RP_MODULE_NARRATIVE_OUTCOME_NAME,
+        RP_MODULE_PLOT_SCHEDULER_NAME,
     ]
     assert [section.id for section in runtime.get_fixed_sections()] == [
-        RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+        RP_MODULE_PLOT_SCHEDULER_SECTION_ID,
+        RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     ]
     assert [command.name for command in registry.get_commands("s_forest001")] == [
         "/rp_modules",
@@ -106,7 +111,11 @@ def test_narrative_fixed_contract_uses_semantic_scene_gate(tmp_path):
         ),
     )
 
-    content = runtime.get_fixed_sections()[0].content
+    content = next(
+        section.content
+        for section in runtime.get_fixed_sections()
+        if section.id == RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+    )
 
     assert "每轮叙事前" in content
     assert "用户完整语义、当前场景和状态" in content
@@ -130,7 +139,11 @@ def test_narrative_fixed_contract_disables_only_implicit_auto_adjudication(tmp_p
         ),
     )
 
-    content = runtime.get_fixed_sections()[0].content
+    content = next(
+        section.content
+        for section in runtime.get_fixed_sections()
+        if section.id == RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+    )
 
     assert "自动剧情裁定已关闭" in content
     assert "用户明确要求" in content
@@ -349,9 +362,20 @@ def test_application_service_owns_empty_override_and_story_capability_ceiling(
         RP_MODULE_NARRATIVE_OUTCOME_NAME,
     ) is None
 
+    unmounted_story = gateway.catalog.create_story(
+        "demo_workspace",
+        title="未挂载剧情模块的隔离故事",
+    )
+    assert unmounted_story is not None
+    unmounted_session = gateway.catalog.create_session(
+        "demo_workspace",
+        unmounted_story.id,
+        session_id="s_unmounted_plot_module",
+    )
+    assert unmounted_session is not None
     with pytest.raises(ValueError, match="not mounted on Story"):
         service.patch_session_override(
-            "s_forest001",
+            unmounted_session.id,
             RP_MODULE_PLOT_SCHEDULER_NAME,
             enabled=True,
             replace_enabled=True,

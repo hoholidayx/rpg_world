@@ -239,11 +239,11 @@ def test_derivation_rejects_missing_or_incomplete_branch_turn(tmp_path: Path) ->
         "s_forest001",
         models.MESSAGE_ROLE_USER,
         "尚未得到回复",
-        turn_id=9,
+        turn_id=15,
         seq_in_turn=1,
     )
     with pytest.raises(SessionDerivationError) as incomplete:
-        service.create_job("s_forest001", 9)
+        service.create_job("s_forest001", 15)
     assert incomplete.value.code == "DERIVATION_TURN_INCOMPLETE"
 
 

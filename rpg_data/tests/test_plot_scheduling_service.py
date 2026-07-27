@@ -15,8 +15,19 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
     try:
         gateway.initialize()
         service = gateway.plot_scheduling
+        story = gateway.catalog.create_story(
+            "demo_workspace",
+            title="剧情定义 CRUD 隔离故事",
+        )
+        assert story is not None
+        session = gateway.catalog.create_session(
+            "demo_workspace",
+            story.id,
+            session_id="s_plot_crud",
+        )
+        assert session is not None
         pool = service.create_pool(
-            story_id=1,
+            story_id=story.id,
             name="日常事件",
             description="显式持久化参数",
             selection_mode=models.PLOT_POOL_SEQUENTIAL,
@@ -24,7 +35,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             enabled=True,
         )
         first = service.create_event(
-            story_id=1,
+            story_id=story.id,
             pool_id=pool.id,
             title="来信",
             directive="让信使送来一封信。",
@@ -39,7 +50,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             repeat_cooldown_minutes=0,
         )
         second = service.create_event(
-            story_id=1,
+            story_id=story.id,
             pool_id=pool.id,
             title="钟声",
             directive="远处响起钟声。",
@@ -54,14 +65,14 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             repeat_cooldown_minutes=60,
         )
         outline = service.create_outline(
-            story_id=1,
+            story_id=story.id,
             name="主线",
             description="",
             priority=10,
             enabled=True,
         )
         node = service.create_node(
-            story_id=1,
+            story_id=story.id,
             outline_id=outline.id,
             event_id=first.id,
             scheduled_time=SceneTime(1, 1, 1, 9),
@@ -117,22 +128,22 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
         assert service.get_pool(999, pool.id) is None
         assert service.get_event(999, first.id) is None
         assert service.get_outline(999, outline.id) is None
-        assert service.get_node(1, outline.id + 1, node.id) is None
+        assert service.get_node(story.id, outline.id + 1, node.id) is None
 
         service.set_event_positions((second.id, first.id))
         service.set_node_positions((node.id,))
-        schedule = service.get_story_schedule("demo_workspace", 1)
+        schedule = service.get_story_schedule("demo_workspace", story.id)
         assert schedule is not None
         assert [item.id for item in schedule.events] == [second.id, first.id]
         assert schedule.outlines[0].nodes[0].position == 0
 
         overrides = service.set_session_event_disabled(
-            "s_forest001",
+            session.id,
             second.id,
             True,
         )
         overrides = service.set_session_node_disabled(
-            "s_forest001",
+            session.id,
             node.id,
             True,
         )
@@ -153,8 +164,19 @@ def test_plot_data_constraints_and_transaction_rollback() -> None:
     try:
         gateway.initialize()
         service = gateway.plot_scheduling
+        story = gateway.catalog.create_story(
+            "demo_workspace",
+            title="剧情事务隔离故事",
+        )
+        assert story is not None
+        session = gateway.catalog.create_session(
+            "demo_workspace",
+            story.id,
+            session_id="s_plot_transaction",
+        )
+        assert session is not None
         pool = service.create_pool(
-            story_id=1,
+            story_id=story.id,
             name="约束池",
             description="",
             selection_mode=models.PLOT_POOL_RANDOM,
@@ -164,7 +186,7 @@ def test_plot_data_constraints_and_transaction_rollback() -> None:
 
         with pytest.raises(PlotScheduleDataIntegrityError):
             service.create_event(
-                story_id=1,
+                story_id=story.id,
                 pool_id=pool.id,
                 title="非法重复事件",
                 directive="不会保存。",
@@ -183,14 +205,14 @@ def test_plot_data_constraints_and_transaction_rollback() -> None:
         with pytest.raises(RuntimeError, match="rollback marker"):
             with service.transaction():
                 service.create_outline(
-                    story_id=1,
+                    story_id=story.id,
                     name="应回滚大纲",
                     description="",
                     priority=0,
                     enabled=True,
                 )
                 raise RuntimeError("rollback marker")
-        schedule = service.get_story_schedule_by_id(1)
+        schedule = service.get_story_schedule_by_id(story.id)
         assert schedule.outlines == ()
 
         with pytest.raises(FileNotFoundError):
@@ -222,11 +244,11 @@ def test_plot_data_constraints_and_transaction_rollback() -> None:
         )
         with pytest.raises(PlotScheduleDataIntegrityError):
             service.append_decisions(
-                "s_forest001",
+                session.id,
                 5,
                 (duplicate_lane, replace(duplicate_lane, source_id=2)),
             )
-        assert service.list_session_decisions("s_forest001") == []
+        assert service.list_session_decisions(session.id) == []
     finally:
         gateway.close()
 
@@ -238,6 +260,13 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy(
     try:
         gateway.initialize()
         service = gateway.plot_scheduling
+        source = gateway.catalog.create_session(
+            "demo_workspace",
+            1,
+            session_id="s_plot_ledger",
+            title="剧情账本隔离会话",
+        )
+        assert source is not None
         pool = service.create_pool(
             story_id=1,
             name="账本池",
@@ -273,9 +302,9 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy(
             event_snapshot={"eventTitle": event.title},
             reason="适合",
         )
-        triggered = service.append_decisions("s_forest001", 2, (staged,))
+        triggered = service.append_decisions(source.id, 2, (staged,))
         errored = service.append_decisions(
-            "s_forest001",
+            source.id,
             1,
             (
                 replace(
@@ -287,9 +316,9 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy(
             ),
         )
 
-        first_page = service.list_session_decisions("s_forest001", limit=1)
+        first_page = service.list_session_decisions(source.id, limit=1)
         second_page = service.list_session_decisions(
-            "s_forest001",
+            source.id,
             limit=1,
             before_id=first_page[0].id,
         )
@@ -313,18 +342,18 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy(
             _tracked_execute_sql,
         )
         assert service.list_session_decisions_for_turns(
-            "s_forest001",
+            source.id,
             (2, 999, 2),
         ) == triggered
         assert len(decision_selects) == 1
         assert service.list_session_decisions_for_turns(
-            "s_forest001",
+            source.id,
             (),
         ) == []
         with pytest.raises(FileNotFoundError):
             service.list_session_decisions_for_turns("missing_session", (1,))
 
-        service.set_session_event_disabled("s_forest001", event.id, True)
+        service.set_session_event_disabled(source.id, event.id, True)
         target = gateway.catalog.create_session(
             "demo_workspace",
             1,
@@ -332,9 +361,9 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy(
             title="剧情分支",
         )
         assert target is not None
-        service.copy_overrides("s_forest001", target.id)
+        service.copy_overrides(source.id, target.id)
         copied_count = service.copy_decisions(
-            "s_forest001",
+            source.id,
             target.id,
             2,
             decision_statuses=frozenset((models.PLOT_DECISION_ERROR,)),
@@ -350,13 +379,13 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy(
         assert copied[0].error_message == "judge unavailable"
         with pytest.raises(PlotScheduleDataIntegrityError):
             service.copy_decisions(
-                "s_forest001",
+                source.id,
                 target.id,
                 2,
                 decision_statuses=frozenset((models.PLOT_DECISION_ERROR,)),
             )
         assert service.copy_decisions(
-            "s_forest001",
+            source.id,
             target.id,
             2,
             decision_statuses=frozenset(),
@@ -377,6 +406,13 @@ def test_plot_data_aggregates_decisions_by_event_and_source(
     try:
         gateway.initialize()
         service = gateway.plot_scheduling
+        session = gateway.catalog.create_session(
+            "demo_workspace",
+            1,
+            session_id="s_plot_aggregate",
+            title="剧情聚合隔离会话",
+        )
+        assert session is not None
         scene_time = SceneTime(1, 1, 1, 12)
         pool_trigger = models.StagedPlotScheduleDecision(
             source_kind=models.PLOT_SOURCE_POOL,
@@ -400,9 +436,9 @@ def test_plot_data_aggregates_decisions_by_event_and_source(
             event_id=102,
             decision_status=models.PLOT_DECISION_DEFERRED,
         )
-        service.append_decisions("s_forest001", 1, (pool_trigger,))
-        service.append_decisions("s_forest001", 4, (outline_trigger,))
-        service.append_decisions("s_forest001", 5, (deferred,))
+        service.append_decisions(session.id, 1, (pool_trigger,))
+        service.append_decisions(session.id, 4, (outline_trigger,))
+        service.append_decisions(session.id, 5, (deferred,))
 
         decision_selects: list[str] = []
         original_execute_sql = gateway.database.execute_sql
@@ -421,7 +457,7 @@ def test_plot_data_aggregates_decisions_by_event_and_source(
             _tracked_execute_sql,
         )
         result = service.summarize_session_decisions(
-            "s_forest001",
+            session.id,
             decision_statuses=(models.PLOT_DECISION_TRIGGERED,),
         )
 
@@ -449,12 +485,12 @@ def test_plot_data_aggregates_decisions_by_event_and_source(
         assert len(decision_selects) == 2
 
         assert service.summarize_session_decisions(
-            "s_forest001",
+            session.id,
             decision_statuses=(),
         ) == models.SessionPlotDecisionAggregates()
         with pytest.raises(ValueError, match="unsupported plot decision statuses"):
             service.summarize_session_decisions(
-                "s_forest001",
+                session.id,
                 decision_statuses=("unknown",),
             )
         with pytest.raises(FileNotFoundError):

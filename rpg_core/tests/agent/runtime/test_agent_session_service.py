@@ -64,6 +64,7 @@ async def test_agent_reset_clears_plot_ledger_and_preserves_overrides(
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path / "workspaces"))
     reset_data_service_gateways()
     gateway = get_data_service_gateway()
+    gateway.plot_scheduling.clear_decisions("s_forest001")
     pool = gateway.plot_scheduling.create_pool(
         story_id=1,
         name="清理测试池",
