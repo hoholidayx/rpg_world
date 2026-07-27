@@ -1,166 +1,487 @@
 (() => {
   'use strict'
 
-  const INITIAL_RELATIONSHIPS = Object.freeze({
-    xiacheng: Object.freeze({
-      fields: Object.freeze({ trust: 64, intimacy: 58, dependence: 42 }),
-      phase: '默契期',
-      description: '相处自然，已经能读懂彼此话里的停顿。',
-      lastChange: '夏澄开始主动分享重要决定',
-    }),
-    sufu: Object.freeze({
-      fields: Object.freeze({ trust: 48, curiosity: 76, vigilance: 31 }),
-      phase: '试探期',
-      description: '彼此保留着好奇，最近的花束似乎另有用意。',
-      lastChange: '友善，但双方仍在观察彼此边界',
-    }),
-    linyu: Object.freeze({
-      fields: Object.freeze({ trust: 71, familiarity: 84, distance: 23 }),
-      phase: '旧友',
-      description: '多年默契仍在，但明日的约定可能改变相处方式。',
-      lastChange: '林羽尚未说明这次邀约的真正目的',
-    }),
+  const YQ_FIXTURE = Object.freeze({
+    source: '../YQDesignProject/design/current.json',
+    revision: 'r000028',
+    capturedAt: '2026-07-26',
+    story: {
+      title: '非公开行程-沁冉',
+      opening: '最后一个提问',
+      timeSetting: '2019年11月上旬',
+      quickReplyCount: 0,
+    },
+    characters: [
+      {
+        order: 1,
+        stableId: 'character-yan-qin',
+        name: '颜沁',
+        role: 'Team NII 成员 / 上财学生',
+        aliases: ['沁沁', '懒懒', 'N队歌姬'],
+        description: '1999年11月23日出生的湖南籍成年女性。开篇为上海财经大学2017级大三学生，同时承担团体排练、公演与 Vocal 工作。',
+        present: true,
+        player: false,
+      },
+      {
+        order: 2,
+        stableId: 'character-shen-tingzhou',
+        name: '沈听洲',
+        role: '投资人 / 内容合作顾问',
+        aliases: ['沈总', '沈顾问', '沈先生', '听洲哥'],
+        description: '1991年9月18日出生，上海本地成长。2019年前已积累文化娱乐、内容与消费项目投资履历，并以内容合作顾问身份进入制作现场。',
+        present: true,
+        player: true,
+      },
+      {
+        order: 3,
+        stableId: 'character-liu-jie',
+        name: '刘洁',
+        role: 'Team NII 成员 / Vocal 同伴',
+        aliases: [],
+        description: '2019年SNH48 Team NII成员，颜沁的队友与 Vocal 同伴。两人在排练、公演、代役和后台工作中长期共事。',
+        present: false,
+        player: false,
+      },
+      {
+        order: 4,
+        stableId: 'character-liu-shuxian',
+        name: '刘姝贤',
+        role: 'Team NII 成员',
+        aliases: [],
+        description: '2019年SNH48 Team NII成员，与颜沁在排练、公演、后台和团体日常中持续相处，是她较熟悉的队友之一。',
+        present: false,
+        player: false,
+      },
+      {
+        order: 5,
+        stableId: 'character-lu-tianhui',
+        name: '卢天惠',
+        role: 'Team NII 成员 / 室友',
+        aliases: [],
+        description: '2019年SNH48 Team NII成员，颜沁较熟悉的队友及成员生活中心室友，共享大量排练、公演、候场和晚归日常。',
+        present: false,
+        player: false,
+      },
+      {
+        order: 6,
+        stableId: 'character-song-xinran',
+        name: '宋昕冉',
+        role: 'Team X 成员',
+        aliases: ['冉冉'],
+        description: '1997年7月8日出生于山东。2015年加入SNH48 Team X；开篇为2019年11月，已积累多年公演、综艺、竞演与网剧拍摄经历。',
+        present: false,
+        player: false,
+      },
+      {
+        order: 7,
+        stableId: 'character-wang-lan',
+        name: '王岚',
+        role: '高级项目负责人',
+        aliases: ['王姐', '王负责人'],
+        description: '2019年丝芭传媒高级项目负责人之一，负责星梦剧院运营、成员项目与跨部门协调，熟悉日程、审批和现场风险处理。',
+        present: false,
+        player: false,
+      },
+      {
+        order: 8,
+        stableId: 'character-he-mingyuan',
+        name: '何明远',
+        role: '项目执行助理',
+        aliases: ['小何', '何助理'],
+        description: '2019年负责沈听洲的日程与项目执行，也是沈听洲和星星娱乐常设团队之间的日常协调接口。',
+        present: false,
+        player: false,
+      },
+      {
+        order: 9,
+        stableId: 'character-chen-jianing',
+        name: '陈嘉宁',
+        role: '上财同届学生',
+        aliases: ['嘉宁'],
+        description: '上海财经大学2017级学生，与颜沁同届，因共同课程、小组作业和校园日常逐渐熟悉，是稳定的校园同学。',
+        present: false,
+        player: false,
+      },
+    ],
+    relationships: [
+      {
+        id: 'yan-qin__shen-tingzhou',
+        stableId: 'status-relationship-yan-qin-shen-tingzhou',
+        title: '关系状态·颜沁与沈听洲',
+        rows: [
+          ['亲密', '0/100'],
+          ['激情', '0/100'],
+          ['信任', '0/100'],
+          ['维系意愿', '0/100'],
+          ['戒备', '0/100'],
+          ['当前状态', '初次留意｜对台上的行业嘉宾产生问题导向的注意，尚未形成私人关系。'],
+        ],
+      },
+      {
+        id: 'song-xinran__shen-tingzhou',
+        stableId: 'status-relationship-song-xinran-shen-tingzhou',
+        title: '关系状态·宋昕冉与沈听洲',
+        rows: [
+          ['亲密', '0/100'],
+          ['激情', '0/100'],
+          ['信任', '0/100'],
+          ['维系意愿', '0/100'],
+          ['戒备', '0/100'],
+          ['当前状态', '尚未建立｜尚无已确认的接触或关系倾向。'],
+        ],
+      },
+      {
+        id: 'yan-qin__song-xinran',
+        stableId: 'status-relationship-yan-qin-song-xinran',
+        title: '关系状态·颜沁与宋昕冉',
+        rows: [
+          ['颜沁→宋昕冉·亲密', '0/100'],
+          ['颜沁→宋昕冉·激情', '0/100'],
+          ['颜沁→宋昕冉·信任', '0/100'],
+          ['颜沁→宋昕冉·维系意愿', '0/100'],
+          ['颜沁→宋昕冉·戒备', '0/100'],
+          ['宋昕冉→颜沁·亲密', '0/100'],
+          ['宋昕冉→颜沁·激情', '0/100'],
+          ['宋昕冉→颜沁·信任', '0/100'],
+          ['宋昕冉→颜沁·维系意愿', '0/100'],
+          ['宋昕冉→颜沁·戒备', '0/100'],
+          ['当前状态', '礼貌前后辈｜存在公开身份上的认识，尚未形成稳定私交或活跃竞争。'],
+        ],
+      },
+    ],
+    projectFacts: [
+      ['当前阶段', '早期再遇｜2019年11月｜校园初见已经发生'],
+      ['颜沁·声音短片', '尚未公开征集'],
+      ['宋昕冉·个人样片', '首轮名单已确定｜第一版样片待内部看片'],
+      ['宋昕冉·《青春有你2》外务', '尚未进入公开外务阶段'],
+      ['成员职业观察内容', '尚未立项'],
+      ['2020年度总选', '尚未进入备战期｜结果未产生'],
+    ],
+    detailStates: [
+      {
+        title: '服装状态·颜沁',
+        category: 'wardrobe',
+        note: 'objective-current-state · 8 行',
+        visibleRows: [
+          ['外套/外搭', '奶白色针织开衫，正常穿着'],
+          ['上装', '浅灰色薄款圆领针织打底衫'],
+          ['下装', '烟灰色厚呢A字短裙'],
+          ['连身衣物', '未穿'],
+          ['袜装', '黑色厚款打底连裤袜'],
+          ['鞋履', '黑色圆头乐福鞋'],
+        ],
+        hiddenRows: [
+          ['内衣', '浅粉色蕾丝细边文胸，正常穿着'],
+          ['内裤', '奶白与浅粉配色的成套内裤，正常穿着'],
+        ],
+      },
+      {
+        title: '身体生理状态·颜沁',
+        category: 'physiology',
+        note: 'objective-private-state · 默认折叠',
+        visibleRows: [],
+        hiddenRows: [
+          ['月经期', '进行中｜第3天/5天｜2019年11月4日至11月8日'],
+          ['排卵期', '未开始｜预计2019年11月14日至11月23日'],
+        ],
+      },
+      {
+        title: '服装状态·宋昕冉',
+        category: 'wardrobe',
+        note: 'objective-current-state · 8 行',
+        visibleRows: [
+          ['外套/外搭', '浅驼色双排扣短西装'],
+          ['上装', '黑色方领贴身针织上衣'],
+          ['下装', '黑色高腰A字短裙'],
+          ['连身衣物', '未穿'],
+          ['袜装', '黑色薄款连裤丝袜'],
+          ['鞋履', '黑色尖头短靴'],
+        ],
+        hiddenRows: [
+          ['内衣', '酒红色蕾丝文胸，正常穿着'],
+          ['内裤', '酒红色成套蕾丝内裤，正常穿着'],
+        ],
+      },
+      {
+        title: '身体生理状态·宋昕冉',
+        category: 'physiology',
+        note: 'objective-private-state · 默认折叠',
+        visibleRows: [],
+        hiddenRows: [
+          ['月经期', '本周期已结束｜2019年10月23日至10月27日'],
+          ['排卵期', '进行中｜第5天/10天｜2019年11月2日至11月11日'],
+        ],
+      },
+    ],
+    events: {
+      'side-corridor': {
+        title: '散场后的课件',
+        description: '星梦剧院侧走廊中的第二次相遇场景。',
+        directive: '晚场散后，颜沁换下舞台服，手里压着准备带回学校的小组课件。最上面那页纸滑到沈听洲附近；让场景停在这件很小的事上。',
+        suitability: '校园 Opening 已成立、时间自然推进到剧场晚场散后、双方尚未形成私人联系时适宜。',
+        scheduled: '2019年11月7日 09:00',
+        deadline: null,
+        dispatch: 'soft',
+        injectedTurn: 12,
+      },
+      'voice-open-call': {
+        title: '公开征集说明',
+        description: '启动颜沁的冬季声音短片事业线。',
+        directive: '王岚发布冬季声音短片公开征集说明，成员可自行选择内容提交短 demo。',
+        suitability: '校园 Opening 与至少一次后续工作接触成立，时间到 2019 年 11 月下旬。',
+        scheduled: '2019年11月20日 09:00',
+        deadline: '2019年12月20日 00:00',
+        dispatch: 'soft',
+      },
+      'numbered-demo': {
+        title: '编号demo',
+        description: '颜沁以一份不完美但可判断的作品进入项目流程。',
+        directive: '颜沁在课程、公演和排练之间完成第一版短 demo，项目 staff 按统一流程生成编号。',
+        suitability: '公开征集已经成立，且仍在截止时间前。',
+        scheduled: '2019年12月5日 09:00',
+        deadline: '2020年1月31日 00:00',
+        dispatch: 'soft',
+      },
+      'interrupted-phrase': {
+        title: '被打断的一小节',
+        description: '一次自然排练习惯触碰 2010 年事故现场的模糊记忆。',
+        directive: '排练短暂中断时，颜沁下意识把被截断的一小节轻声唱完。',
+        suitability: '至少一次后续工作接触已经发生，且共同历史尚未确认。',
+        scheduled: '2019年12月10日 09:00',
+        deadline: null,
+        dispatch: 'soft',
+      },
+      'second-cut': {
+        title: '第二版样片',
+        description: '宋昕冉以个人内容样片主动进入星星娱乐合作线。',
+        directive: '内部看片会上，宋昕冉公开提出专业异议，项目团队等待内容判断。',
+        suitability: '2019 年 11 月后，内容合作已经进入正文且双方尚无私人接触。',
+        scheduled: '2019年11月15日 09:00',
+        deadline: null,
+        dispatch: 'soft',
+      },
+      'external-notice': {
+        title: '外务通知',
+        description: '建立宋昕冉进入《青春有你2》的现实工作转折。',
+        directive: '工作通知确认宋昕冉将参加外部女团竞演节目。',
+        suitability: '个人样片线已进入正文，故事时间进入 2020 年初。',
+        scheduled: '2020年1月15日 09:00',
+        deadline: '2020年3月12日 00:00',
+        dispatch: 'soft',
+      },
+      airing: {
+        title: '节目开播后的距离',
+        description: '以节目开播为固定公开节点。',
+        directive: '2020年3月12日，《青春有你2》开始公开播出。',
+        suitability: '',
+        scheduled: '2020年3月12日 20:00',
+        deadline: null,
+        dispatch: 'forced',
+      },
+      'rank-19': {
+        title: '第19名以后',
+        description: '固定第19名结果并送回团体与项目主线。',
+        directive: '2020年5月30日，节目公布最终结果，宋昕冉获得第19名。',
+        suitability: '',
+        scheduled: '2020年5月30日 22:00',
+        deadline: null,
+        dispatch: 'forced',
+      },
+      'return-review': {
+        title: '归来后的第一次看片',
+        description: '外务归来后重新取得个人内容线的主动位置。',
+        directive: '返沪后的第一次看片会上，第二版样片已经形成新的粗剪。',
+        suitability: '第19名已公布，宋昕冉已自然返沪。',
+        scheduled: '2020年6月3日 09:00',
+        deadline: '2020年7月15日 00:00',
+        dispatch: 'soft',
+      },
+      'project-kickoff': {
+        title: '成员观察内容立项',
+        description: '建立双女主事业线的汇流项目。',
+        directive: '项目团队提出成员职业观察内容方案，两条事业线分别列明。',
+        suitability: '两边事业线已有可使用的项目基础。',
+        scheduled: '2020年6月10日 09:00',
+        deadline: '2020年7月10日 00:00',
+        dispatch: 'soft',
+      },
+      'same-timeline': {
+        title: '同一条成片时间线',
+        description: '两位女主第一次在同一制作语境中看到彼此被如何观看。',
+        directive: '联合看片中，两人的素材先后出现在同一条剪辑时间线。',
+        suitability: '观察内容已立项，双方素材达到可看片程度。',
+        scheduled: '2020年6月20日 09:00',
+        deadline: '2020年8月1日 00:00',
+        dispatch: 'soft',
+      },
+      'two-positions': {
+        title: '总选前的两种位置',
+        description: '呈现两位女主不对称的位置与现实筹码。',
+        directive: '总选备战会议分别展示两份处境不同的材料。',
+        suitability: '观察内容已形成素材，2020 总选进入正式备战。',
+        scheduled: '2020年7月15日 09:00',
+        deadline: '2020年8月15日 00:00',
+        dispatch: 'soft',
+      },
+      'election-night': {
+        title: '总选之夜',
+        description: '以公开结果收束第一阶段事业线并打开关系后果。',
+        directive: '2020年8月15日公布结果：宋昕冉第3名；颜沁依据已成立事实确定第17至32名之间的具体名次。',
+        suitability: '',
+        scheduled: '2020年8月15日 20:00',
+        deadline: null,
+        dispatch: 'forced',
+      },
+      'old-scans': {
+        title: '一份旧扫描件',
+        description: '提供能够核实共同历史的旧档案证据。',
+        directive: '早期文化项目文件进入正常工作流，其中出现“颜沁”这个名字。',
+        suitability: '排练回声已经发生，且存在合理的旧档案清理。',
+        scheduled: null,
+        deadline: null,
+        dispatch: 'soft',
+      },
+      'hunan-box': {
+        title: '湖南旧纸箱',
+        description: '颜沁从家庭旧物中接近共同历史。',
+        directive: '家人从旧纸箱翻出小学合唱队照片与活动折页。',
+        suitability: '自然出现返乡或整理旧物的机会。',
+        scheduled: null,
+        deadline: null,
+        dispatch: 'soft',
+      },
+    },
+    outlines: [
+      { name: '第一阶段·颜沁事业线', description: '校园初见、剧场再遇、声音短片与共同历史回声。', nodes: ['side-corridor', 'voice-open-call', 'numbered-demo', 'interrupted-phrase'] },
+      { name: '第一阶段·宋昕冉事业线', description: '个人样片、外务、公开竞演与返沪后的内容选择。', nodes: ['second-cut', 'external-notice', 'airing', 'rank-19', 'return-review'] },
+      { name: '第一阶段·沁冉汇流与总选', description: '两条事业线汇流，并推进至 2020 年总选。', nodes: ['project-kickoff', 'same-timeline', 'two-positions', 'election-night'] },
+    ],
+    pools: [
+      { name: '颜沁早期再遇事件池', events: ['side-corridor'] },
+      { name: '旧疤与共同历史揭示', events: ['interrupted-phrase', 'old-scans', 'hunan-box'] },
+      { name: '宋昕冉个人内容样片', events: ['second-cut'] },
+      { name: '颜沁·冬季声音短片', events: ['voice-open-call', 'numbered-demo'] },
+      { name: '宋昕冉·2020外务', events: ['external-notice', 'airing', 'rank-19', 'return-review'] },
+      { name: '沁冉汇流与2020总选', events: ['project-kickoff', 'same-timeline', 'two-positions', 'election-night'] },
+    ],
+    visualSpecs: [
+      { title: '颜沁·核心视觉身份', subject: 'character-yan-qin', anchors: '稳定刘海、深棕长发、裙装主导、粉白浅蓝与黑红对照' },
+      { title: '成员生活中心·团体宿舍', subject: 'lore-place-member-living-center-2019', anchors: '普通双人宿舍、书桌、衣架、课程资料与化妆包' },
+      { title: '星梦剧院·演出后后台走廊', subject: 'lore-place-xingmeng-theater-2019', anchors: '暖白后台灯、深色防火门、磨损地胶与工作通道' },
+      { title: '沈听洲·核心视觉身份', subject: 'character-shen-tingzhou', anchors: '成年男性、简洁深色着装、右手腕内侧淡白旧疤' },
+      { title: '宋昕冉·核心视觉身份', subject: 'character-song-xinran', anchors: '鹅蛋脸、明亮眼睛、深色长发、纤细修长轮廓' },
+    ],
+    log: [
+      {
+        kind: 'user',
+        turn: 12,
+        label: '玩家输入',
+        meta: '沈听洲 · IC',
+        text: '我弯腰捡起那页纸，只看了一眼页眉便递向她。',
+      },
+      {
+        kind: 'decision',
+        turn: 12,
+        label: '状态目标路由',
+        meta: 'Status Preflight · evaluated',
+        text: '当前场景进入更新检查；普通状态表没有出现已确认的新值，本轮不调用普通状态写入工具。',
+        detail: '目标：当前场景\n结果：继续检查 Scene 字段；其他状态目标保持原值',
+      },
+      {
+        kind: 'tool',
+        turn: 12,
+        label: 'scene_attr',
+        meta: 'tool call + result · success',
+        text: '更新“当前事实”，记录课件已经归还、第二次接触进入对话。',
+        detail: 'CALL  {"当前事实":"课件已归还；第二次接触进入对话。"}\nRESULT  updated',
+      },
+      {
+        kind: 'decision',
+        turn: 12,
+        label: 'Plot Scheduler · outline lane',
+        meta: '散场后的课件 · triggered',
+        text: '候选已到调度时间且适合当前 Scene，本轮选择并注入该事件。',
+        detail: 'lane=outline · event=side-corridor · status=triggered',
+      },
+      {
+        kind: 'decision',
+        turn: 12,
+        label: 'Plot Scheduler · pool lane',
+        meta: '散场后的课件 · deferred',
+        text: '事件池命中同一 event_id；为避免同轮重复注入，保留大纲 lane 的选择。',
+        detail: 'lane=pool · event=side-corridor · status=deferred · reason=same-turn dedupe',
+      },
+      {
+        kind: 'plot',
+        turn: 12,
+        label: '剧情注入',
+        meta: '散场后的课件 · 已注入本轮',
+        text: '晚场散后，颜沁已经换下舞台服，手里压着准备带回学校的小组课件；最上面那页纸滑到沈听洲附近。',
+      },
+      {
+        kind: 'thinking',
+        turn: 12,
+        label: '公开 thinking 摘要',
+        meta: 'stream summary',
+        text: '把回应限制在已经发生的递还动作与 NPC 反应，不替玩家决定后续行动。',
+      },
+      {
+        kind: 'tool',
+        turn: 12,
+        label: 'rp_story_outcome',
+        meta: 'tool call + result · success',
+        text: '对递还课件能否自然建立第二次接触进行剧情裁定。',
+        detail: 'CALL  {"reason":"递还课件并自然建立第二次接触","actor":"沈听洲"}\nRESULT  success',
+      },
+      {
+        kind: 'outcome',
+        turn: 12,
+        label: '剧情裁定 · success',
+        meta: 'Narrative Outcome',
+        text: '课件被自然归还，第二次接触成立；没有替玩家决定后续行动。',
+      },
+      {
+        kind: 'assistant',
+        turn: 12,
+        label: 'assistant 正文',
+        meta: 'canonical content',
+        text: '纸页落在走廊边缘。颜沁先看见那页课件，又看见你胸前的内容合作顾问工作证，脚步停了很短的一瞬。',
+      },
+      {
+        kind: 'assistant',
+        turn: 12,
+        label: '颜沁',
+        meta: 'rp-character',
+        text: '“谢谢。我记得你——前天分享会最后那个问题。”',
+      },
+    ],
   })
-  const RELATIONSHIP_FIELD_LABELS = Object.freeze({
-    trust: '信任',
-    intimacy: '亲密',
-    dependence: '依赖',
-  })
-  const INITIAL_TURN = 18
-  const TYPE_INTERVAL_MS = 24
-  const AUTO_ADVANCE_MS = 2200
-  const DIALOGUE_PAGE_TARGET = 32
-  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-  const initialSequence = [
+  const DIALOGUE = Object.freeze([
     {
       speaker: '旁白',
-      role: 'Rainy afternoon',
+      role: '星梦剧院 · 晚场散后',
       character: 'narrator',
-      kind: 'narration',
-      text: '雨声刚刚停下。玻璃窗上的水珠把街灯揉成一片温柔的金色，靠窗第三桌依旧空着一把椅子。',
+      text: '纸页落在走廊边缘。观众散去后的喧闹已经退到防火门另一侧，最上方只印着一行课程小组的页眉。',
     },
     {
-      speaker: '夏澄',
-      role: '白鸢咖啡馆店长',
-      character: 'xiacheng',
-      kind: 'dialogue',
-      text: '你还是来了。我本来还在想，只写一句“老位置见”，会不会显得太任性。',
+      speaker: '颜沁',
+      role: 'Team NII 成员 / 上财学生',
+      character: 'yan-qin',
+      text: '她先看见那页课件，又看见你胸前的内容合作顾问工作证，停顿很短。“不好意思，能帮我捡一下吗？”',
     },
     {
-      speaker: '言沁',
-      role: '由你扮演',
-      character: 'yanqin',
-      kind: 'dialogue',
-      text: '因为是你发来的消息，我才不会装作没看见。况且，雨后的这里一直很好看。',
+      speaker: '颜沁',
+      role: '第二次见面',
+      character: 'yan-qin',
+      text: '接过纸页后，她重新看了你一眼。“谢谢。我记得你——前天分享会最后那个问题。”',
     },
-    {
-      speaker: '夏澄',
-      role: '白鸢咖啡馆店长',
-      character: 'xiacheng',
-      kind: 'dialogue',
-      choicesAfter: true,
-      text: '夏澄笑了一下，却把身后的纸袋藏得更严实了些。“最后一份莓果塔给你留着。不过在那之前，我有件事想听听你的答案。”',
-    },
-  ]
+  ])
 
-  const choices = [
-    {
-      id: 'listen',
-      title: '先坐到她对面，认真听她说',
-      meta: '温柔回应 · 多项关系状态变化',
-      relationshipChange: {
-        fields: { trust: 4, intimacy: 2, dependence: 2 },
-        phase: '信赖加深',
-        description: '信任正在变得明确，重要的决定已经愿意交给彼此。',
-        lastChange: '夏澄主动提出交付白鸢咖啡馆的备用钥匙',
-      },
-      toast: '夏澄明显放松了下来 · 关系状态已同步',
-      userLine: '我把伞靠在桌边，在她对面坐下。“好啊。你慢慢说，我今天没有别的安排。”',
-      response: '“那我就不绕弯了。”夏澄在你面前放下那只纸袋，声音轻得几乎被窗外的车声盖过去，“我想把白鸢的备用钥匙交给你。”',
-      epilogue: '纸袋里不是礼物，而是一把系着浅粉丝带的黄铜钥匙。你忽然意识到，这场约定比一份甜点郑重得多。',
-    },
-    {
-      id: 'observe',
-      title: '先观察她藏在身后的纸袋',
-      meta: '敏锐观察 · 发现新线索',
-      relationshipChange: {
-        fields: { trust: 2, intimacy: 1 },
-        phase: '默契期',
-        description: '你读懂了她藏东西时的犹豫，她也不再继续掩饰。',
-        lastChange: '言沁察觉纸袋线索，夏澄坦率说明钥匙的存在',
-      },
-      toast: '发现线索「粉色钥匙扣」· 关系描述已更新',
-      clue: {
-        title: '粉色钥匙扣',
-        detail: '纸袋边缘露出一枚白鸢形状的旧钥匙扣。',
-      },
-      userLine: '我没有立刻接话，视线落在她身后的纸袋上。“你今天藏东西的技术，好像没有平时那么好。”',
-      response: '夏澄顺着你的目光低头，忍不住笑出声。“被你发现了。不是惊喜，是一把我考虑了很久才决定交出去的钥匙。”',
-      epilogue: '她把纸袋推向桌子中央。白鸢形状的钥匙扣轻轻晃动，像替主人做了最后一次犹豫。',
-    },
-    {
-      id: 'dessert',
-      title: '笑着说：“先让我尝一口莓果塔”',
-      meta: '轻松打趣 · 氛围变得柔软',
-      relationshipChange: {
-        fields: { trust: 1, intimacy: 3 },
-        phase: '轻松相伴',
-        description: '紧张被熟悉的玩笑化开，彼此又回到自然亲近的节奏。',
-        lastChange: '夏澄重新露出平日的笑意，并愿意稍后坦白',
-      },
-      toast: '紧张的气氛被你化开了 · 亲密与描述状态已更新',
-      userLine: '我故意看向桌上的甜点。“重要的话也需要一点勇气。要不先让我尝一口莓果塔？”',
-      response: '“你总有办法把气氛变轻松。”夏澄把叉子递给你，眼里终于有了平日的笑意，“那就吃完再说。反正钥匙不会跑掉。”',
-      epilogue: '酸甜的莓果味在舌尖化开。窗外又落下几滴雨，却已经没有人急着离开。',
-    },
-  ]
-
-  const initialTrace = [
-    {
-      speaker: '系统事件',
-      kind: 'system',
-      turn: 17,
-      time: '17:39',
-      badge: '上下文已同步',
-      text: '已载入玩家角色、当前场景、3 组关系与 5 张运行中状态表。',
-      detail: '玩家角色：言沁 · 场景：白鸢咖啡馆/临窗座 · 在场角色：言沁、夏澄',
-    },
-    {
-      speaker: '玩家决策',
-      kind: 'choice',
-      turn: 17,
-      time: '17:40',
-      badge: '自由行动',
-      text: '言沁收起伞，走向两个人第一次见面的靠窗第三桌。',
-    },
-    {
-      speaker: '思考摘要',
-      kind: 'thinking',
-      turn: 17,
-      time: '17:40',
-      badge: '公开摘要',
-      text: '本轮重点是重逢后的情绪变化；场景与夏澄的角色状态可能需要更新。',
-      detail: '候选目标：当前场景状态表、夏澄·角色状态。未触发人物关系字段更新。',
-    },
-    {
-      speaker: '工具记录',
-      kind: 'tool',
-      turn: 17,
-      time: '17:40',
-      badge: 'scene_attr',
-      text: '更新当前场景「在场角色」与「氛围」。',
-      detail: '在场角色 → 言沁、夏澄\n氛围 → 安静、温暖、略有期待',
-    },
-    {
-      speaker: '剧情裁定',
-      kind: 'outcome',
-      turn: 17,
-      time: '17:41',
-      badge: '自然推进',
-      text: '重逢顺利发生，没有触发随机分支；夏澄愿意继续这次谈话。',
-    },
-  ]
+  const TYPE_INTERVAL_MS = 22
+  const AUTO_ADVANCE_MS = 2300
+  const PAGE_TARGET = 44
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
   const refs = {
     room: document.querySelector('#sessionRoom'),
@@ -170,798 +491,581 @@
     speakerName: document.querySelector('#speakerName'),
     speakerRole: document.querySelector('#speakerRole'),
     advanceLabel: document.querySelector('[data-advance-label]'),
-    choicePanel: document.querySelector('#choicePanel'),
-    choiceList: document.querySelector('#choiceList'),
     composer: document.querySelector('#actionComposer'),
     composerTrigger: document.querySelector('[data-action="composer"]'),
     actionInput: document.querySelector('#actionInput'),
-    storyLog: document.querySelector('#storyLog'),
     backdrop: document.querySelector('.drawer-backdrop'),
-    toast: document.querySelector('#toast'),
-    clueList: document.querySelector('#clueList'),
-    relationshipNote: document.querySelector('#relationshipNote'),
     stageMenu: document.querySelector('#stageMenu'),
     menuTrigger: document.querySelector('[data-action="menu"]'),
     cinematicReturn: document.querySelector('[data-action="restore-cinematic"]'),
+    toast: document.querySelector('#toast'),
   }
 
   const state = {
-    sequence: [],
     lineIndex: 0,
-    pages: [],
     pageIndex: 0,
+    pages: [],
     typing: false,
     typingTimer: null,
-    fullText: '',
     auto: false,
     autoTimer: null,
-    generating: false,
-    generationTimers: [],
-    relationships: cloneRelationships(),
-    turn: INITIAL_TURN,
     activeDrawer: null,
     drawerCloseTimer: null,
     lastFocus: null,
     toastTimer: null,
-    soundOn: true,
     menuOpen: false,
     cinematic: false,
-    cinematicReturnFocus: null,
+    spoilerProtection: true,
   }
 
-  function freshSequence() {
-    return initialSequence.map((line) => ({ ...line, logged: false, resolved: false }))
+  function element(tag, className, text) {
+    const node = document.createElement(tag)
+    if (className) node.className = className
+    if (text !== undefined) node.textContent = text
+    return node
   }
 
-  function cloneRelationships() {
-    return Object.fromEntries(Object.entries(INITIAL_RELATIONSHIPS).map(([id, relationship]) => [
-      id,
-      {
-        ...relationship,
-        fields: { ...relationship.fields },
-      },
-    ]))
+  function appendDefinitionList(target, rows) {
+    rows.forEach(([key, value]) => {
+      const row = element('div')
+      row.append(element('dt', '', key), element('dd', '', value))
+      target.append(row)
+    })
   }
 
-  function currentLine() {
-    return state.sequence[state.lineIndex]
+  function initials(name) {
+    return [...name].slice(0, 1).join('')
+  }
+
+  function renderCharacters() {
+    const target = document.querySelector('#characterRoster')
+    YQ_FIXTURE.characters.forEach((character) => {
+      const card = element('details', `status-character-card status-character-card--fixture${character.player ? ' status-character-card--player' : ''}`)
+      card.dataset.characterId = character.stableId
+      const summary = element('summary', 'status-character-card__summary')
+      summary.setAttribute('aria-label', `展开${character.name}角色卡`)
+      const portrait = element('div', 'status-character-card__portrait status-character-card__portrait--initial')
+      portrait.append(element('span', '', initials(character.name)))
+
+      const identity = element('div', 'status-character-card__identity')
+      identity.append(
+        element('span', '', character.player ? 'PLAYER CHARACTER' : 'STORY CHARACTER'),
+        element('h4', '', character.name),
+        element('p', '', `${character.role} · 设计顺序 ${String(character.order).padStart(2, '0')}`),
+      )
+      const stable = element('small', 'character-stable-id', character.stableId)
+      identity.append(stable)
+
+      const badge = element('span', `status-character-card__tag${character.present ? ' is-present' : ''}`, character.present ? '在场' : '未在场')
+      const affordance = element('span', 'status-character-card__affordance', '展开角色卡')
+      summary.append(portrait, identity, badge, affordance)
+
+      const expanded = element('section', 'status-character-card__expanded')
+      expanded.append(element('p', '', character.description))
+      const facts = element('dl')
+      appendDefinitionList(facts, [
+        ['设计引用', character.stableId],
+        ['运行时 ID', 'storyCharacterId 待导入'],
+        ['别名', character.aliases.length ? character.aliases.join('、') : '无'],
+        ['当前 Scene', character.present ? '在场' : '未在场'],
+      ])
+      expanded.append(facts)
+      card.append(summary, expanded)
+      card.addEventListener('toggle', () => {
+        const action = card.open ? '收起' : '展开'
+        summary.setAttribute('aria-label', `${action}${character.name}角色卡`)
+        affordance.textContent = `${action}角色卡`
+      })
+      target.append(card)
+    })
+  }
+
+  function renderRelationships() {
+    const target = document.querySelector('#relationshipList')
+    YQ_FIXTURE.relationships.forEach((relationship, index) => {
+      const card = element('article', `relationship-card${index === 0 ? ' relationship-card--focus' : ''}`)
+      const heading = element('div', 'relationship-card__heading relationship-card__heading--fixture')
+      const identity = element('div')
+      identity.append(
+        element('strong', '', relationship.title),
+        element('small', '', `${relationship.stableId} · ${relationship.rows.length} 行`),
+      )
+      heading.append(identity)
+      card.append(heading)
+
+      const fields = element('dl', 'relationship-raw-rows')
+      relationship.rows.forEach(([label, value]) => {
+        const row = element('div', label === '当前状态' ? 'is-summary' : '')
+        row.append(element('dt', '', label), element('dd', '', value))
+        fields.append(row)
+      })
+      card.append(fields)
+      target.append(card)
+    })
+  }
+
+  function renderProjectFacts() {
+    appendDefinitionList(document.querySelector('#projectFacts'), YQ_FIXTURE.projectFacts)
+  }
+
+  function renderDetailStates() {
+    const target = document.querySelector('#detailStates')
+    YQ_FIXTURE.detailStates.forEach((table) => {
+      const details = element('details', `detail-state detail-state--${table.category}`)
+      const summary = element('summary')
+      const title = element('span')
+      title.append(element('strong', '', table.title), element('small', '', table.note))
+      summary.append(title, element('i', '', '展开'))
+      details.append(summary)
+
+      if (table.visibleRows.length) {
+        const visible = element('section', 'detail-state__section')
+        visible.append(element('h4', '', '常用可见层'))
+        const list = element('dl')
+        appendDefinitionList(list, table.visibleRows)
+        visible.append(list)
+        details.append(visible)
+      }
+
+      const hidden = element('section', 'detail-state__section detail-state__section--advanced')
+      hidden.append(element('h4', '', table.category === 'wardrobe' ? 'normally-hidden · 详细层' : 'objective-private-state · 客观详细状态'))
+      const list = element('dl')
+      appendDefinitionList(list, table.hiddenRows)
+      hidden.append(list)
+      hidden.append(element('p', '', '默认折叠只影响信息层级，不代表权限或服务端脱敏。'))
+      details.append(hidden)
+      target.append(details)
+    })
+  }
+
+  function eventIsRevealed(eventId, position) {
+    if (!state.spoilerProtection) return true
+    const event = YQ_FIXTURE.events[eventId]
+    return position === 0 || Boolean(event.injectedTurn)
+  }
+
+  function eventBadge(event) {
+    if (event.injectedTurn) return `已注入 · Turn ${event.injectedTurn}`
+    if (event.dispatch === 'forced') return '强制调度'
+    return '适宜时调度'
+  }
+
+  function renderEventNode(eventId, position, sourceKind) {
+    const event = YQ_FIXTURE.events[eventId]
+    const revealed = eventIsRevealed(eventId, position)
+    const item = element('article', `plot-node${event.injectedTurn ? ' is-injected' : ''}${revealed ? '' : ' is-hidden'}`)
+    item.dataset.eventId = eventId
+
+    if (!revealed) {
+      item.append(
+        element('span', 'plot-node__index', String(position + 1)),
+        element('strong', 'plot-node__masked', '••••••••'),
+        element('small', '', '尚未注入 · 事件内容由服务端防剧透隐藏'),
+      )
+      return item
+    }
+
+    const top = element('div', 'plot-node__top')
+    top.append(element('span', 'plot-node__index', String(position + 1)))
+    const title = element('div')
+    title.append(element('strong', '', event.title), element('small', '', event.description))
+    top.append(title, element('b', '', eventBadge(event)))
+    item.append(top)
+
+    const timing = element('p', 'plot-node__timing')
+    timing.textContent = `${event.scheduled || '无起始时间'}${event.deadline ? ` → 截止 ${event.deadline}` : ' · 无截止'}`
+    item.append(timing)
+
+    const details = element('details', 'plot-node__details')
+    const summary = element('summary', '', '查看事件详情')
+    const body = element('div')
+    body.append(element('h5', '', '剧情指引'), element('p', '', event.directive))
+    if (event.suitability) body.append(element('h5', '', '适宜条件'), element('p', '', event.suitability))
+    body.append(element('small', '', `${sourceKind} · ${event.dispatch === 'forced' ? 'forced' : 'soft'} · 不重复`))
+    details.append(summary, body)
+    item.append(details)
+    return item
+  }
+
+  function renderPlot() {
+    const outlineTarget = document.querySelector('#outlineList')
+    const poolTarget = document.querySelector('#poolList')
+    outlineTarget.replaceChildren()
+    poolTarget.replaceChildren()
+
+    YQ_FIXTURE.outlines.forEach((outline) => {
+      const card = element('article', 'plot-line')
+      const header = element('header')
+      const title = element('div')
+      title.append(element('span', '', 'OUTLINE'), element('h4', '', outline.name), element('p', '', outline.description))
+      header.append(title, element('b', '', `${outline.nodes.length} 个节点`))
+      card.append(header)
+      const nodes = element('div', 'plot-nodes')
+      outline.nodes.forEach((eventId, position) => nodes.append(renderEventNode(eventId, position, '大纲节点')))
+      card.append(nodes)
+      outlineTarget.append(card)
+    })
+
+    YQ_FIXTURE.pools.forEach((pool) => {
+      const card = element('article', 'plot-line plot-line--pool')
+      const header = element('header')
+      const title = element('div')
+      title.append(element('span', '', 'EVENT POOL'), element('h4', '', pool.name))
+      header.append(title, element('b', '', `${pool.events.length} 个事件`))
+      card.append(header)
+      const nodes = element('div', 'plot-nodes plot-nodes--compact')
+      pool.events.forEach((eventId, position) => nodes.append(renderEventNode(eventId, position, '事件池')))
+      card.append(nodes)
+      poolTarget.append(card)
+    })
+  }
+
+  function renderVisualSpecs() {
+    const target = document.querySelector('#visualSpecList')
+    YQ_FIXTURE.visualSpecs.forEach((spec, index) => {
+      const card = element('article', 'visual-spec-card')
+      card.append(
+        element('span', '', String(index + 1).padStart(2, '0')),
+        element('h4', '', spec.title),
+        element('small', '', spec.subject),
+        element('p', '', spec.anchors),
+        element('b', '', 'ARCHIVE ONLY'),
+      )
+      target.append(card)
+    })
+  }
+
+  function renderLog() {
+    const target = document.querySelector('#storyLog')
+    YQ_FIXTURE.log.forEach((entry) => {
+      const item = element('li', `story-log__item story-log__item--${entry.kind}`)
+      const marks = {
+        assistant: '叙',
+        decision: '判',
+        outcome: '裁',
+        plot: '注',
+        thinking: '思',
+        tool: '工',
+        user: '玩',
+      }
+      const mark = element('span', 'story-log__mark', marks[entry.kind] || '记')
+      const content = element('div', 'story-log__content')
+      const meta = element('div', 'story-log__meta')
+      const identity = element('div', 'story-log__identity')
+      identity.append(element('strong', '', entry.label), element('span', '', entry.meta))
+      meta.append(identity, element('small', '', `Turn ${entry.turn}`))
+      content.append(meta, element('p', '', entry.text))
+      if (entry.detail) content.append(element('pre', 'story-log__detail', entry.detail))
+
+      if (entry.kind === 'assistant') {
+        const actions = element('div', 'log-actions')
+        ;['复制', 'TTS', '从此派生'].forEach((label) => {
+          const button = element('button', '', label)
+          button.type = 'button'
+          button.dataset.logAction = label
+          actions.append(button)
+        })
+        content.append(actions)
+      }
+
+      item.append(mark, content)
+      target.append(item)
+    })
   }
 
   function paginateText(text) {
-    if (text.length <= DIALOGUE_PAGE_TARGET) return [text]
-
-    const clauses = text.match(/[^，。！？；…]+[，。！？；…]?/g) ?? [text]
     const pages = []
-    let page = ''
-
-    clauses.forEach((clause) => {
-      if (
-        page
-        && page.length + clause.length > DIALOGUE_PAGE_TARGET
-        && page.length >= Math.floor(DIALOGUE_PAGE_TARGET * 0.52)
-      ) {
-        pages.push(page.trim())
-        page = ''
+    let cursor = 0
+    while (cursor < text.length) {
+      let end = Math.min(cursor + PAGE_TARGET, text.length)
+      if (end < text.length) {
+        const windowText = text.slice(cursor, end)
+        const boundary = Math.max(
+          windowText.lastIndexOf('。'),
+          windowText.lastIndexOf('！'),
+          windowText.lastIndexOf('？'),
+          windowText.lastIndexOf('；'),
+          windowText.lastIndexOf('，'),
+        )
+        if (boundary >= Math.floor(PAGE_TARGET * 0.58)) end = cursor + boundary + 1
       }
-      page += clause
-    })
-
-    if (page.trim()) pages.push(page.trim())
-    return pages.length ? pages : [text]
+      pages.push(text.slice(cursor, end))
+      cursor = end
+    }
+    return pages.length ? pages : ['']
   }
 
-  function hasMoreDialoguePages() {
-    return state.pageIndex < state.pages.length - 1
+  function currentLine() {
+    return DIALOGUE[state.lineIndex]
   }
 
-  function continueReadingLabel() {
-    return `继续阅读 · ${state.pageIndex + 1}/${state.pages.length}`
+  function clearTimer(name) {
+    if (state[name]) window.clearTimeout(state[name])
+    state[name] = null
   }
 
-  function clearTimer(key) {
-    if (!state[key]) return
-    window.clearTimeout(state[key])
-    window.clearInterval(state[key])
-    state[key] = null
-  }
-
-  function clearGenerationTimers() {
-    state.generationTimers.forEach((timer) => window.clearTimeout(timer))
-    state.generationTimers = []
-  }
-
-  function setActiveCharacter(character) {
+  function updateActiveCharacter(character) {
     refs.room.dataset.activeSpeaker = character
     document.querySelectorAll('[data-character]').forEach((figure) => {
-      figure.classList.toggle('is-active', figure.dataset.character === character)
+      figure.classList.toggle('is-active', character === 'narrator' ? figure.dataset.character === 'yan-qin' : figure.dataset.character === character)
     })
   }
 
-  function updateAdvanceLabel(label) {
-    refs.advanceLabel.textContent = label
+  function updateAdvanceLabel() {
+    if (state.typing) {
+      refs.advanceLabel.textContent = '点击补全'
+      return
+    }
+    if (state.pageIndex < state.pages.length - 1) {
+      refs.advanceLabel.textContent = `继续阅读 · ${state.pageIndex + 1}/${state.pages.length}`
+      return
+    }
+    if (state.lineIndex < DIALOGUE.length - 1) {
+      refs.advanceLabel.textContent = '下一段'
+      return
+    }
+    refs.advanceLabel.textContent = '等待你的行动'
   }
 
-  function finishTyping() {
+  function typePage(text) {
     clearTimer('typingTimer')
-    refs.dialogueText.textContent = state.fullText
-    refs.dialogueAnnouncement.textContent = state.fullText
     state.typing = false
-    const line = currentLine()
-    if (hasMoreDialoguePages()) {
-      updateAdvanceLabel(continueReadingLabel())
-      scheduleAutoAdvance()
-      return
-    }
-    if (line?.choicesAfter && !line.resolved) {
-      showChoices()
-      return
-    }
-    updateAdvanceLabel(state.lineIndex >= state.sequence.length - 1 ? '等待你的行动' : '点击继续')
-    scheduleAutoAdvance()
-  }
-
-  function typeText(text) {
-    clearTimer('typingTimer')
-    state.fullText = text
     refs.dialogueText.textContent = ''
-    refs.dialogueAnnouncement.textContent = ''
 
-    if (prefersReducedMotion || text.length < 4) {
+    if (prefersReducedMotion || !text) {
       refs.dialogueText.textContent = text
-      state.typing = false
-      finishTyping()
+      refs.dialogueAnnouncement.textContent = text
+      updateAdvanceLabel()
+      scheduleAuto()
       return
     }
 
     state.typing = true
     let cursor = 0
-    state.typingTimer = window.setInterval(() => {
+    const step = () => {
       cursor += 1
       refs.dialogueText.textContent = text.slice(0, cursor)
-      if (cursor >= text.length) finishTyping()
-    }, TYPE_INTERVAL_MS)
-  }
-
-  function lineMark(entry) {
-    const marks = {
-      choice: '选',
-      narration: '叙',
-      tool: '具',
-      thinking: '思',
-      outcome: '裁',
-      system: '系',
+      if (cursor < text.length) {
+        state.typingTimer = window.setTimeout(step, TYPE_INTERVAL_MS)
+        return
+      }
+      state.typing = false
+      state.typingTimer = null
+      refs.dialogueAnnouncement.textContent = currentLine().text
+      updateAdvanceLabel()
+      scheduleAuto()
     }
-    return marks[entry.kind] ?? entry.speaker.slice(0, 1)
+    step()
+    updateAdvanceLabel()
   }
 
-  function appendLog(entry) {
-    const item = document.createElement('li')
-    item.className = 'story-log__item'
-    item.dataset.kind = entry.kind
-    item.dataset.turn = String(entry.turn ?? state.turn)
-
-    const mark = document.createElement('span')
-    mark.className = 'story-log__mark'
-    mark.textContent = lineMark(entry)
-
-    const content = document.createElement('div')
-    content.className = 'story-log__content'
-
-    const meta = document.createElement('div')
-    meta.className = 'story-log__meta'
-    const identity = document.createElement('span')
-    identity.className = 'story-log__identity'
-    const speaker = document.createElement('strong')
-    speaker.textContent = entry.speaker
-    identity.append(speaker)
-    if (entry.badge) {
-      const badge = document.createElement('i')
-      badge.className = 'story-log__badge'
-      badge.textContent = entry.badge
-      identity.append(badge)
-    }
-    const turn = document.createElement('span')
-    turn.textContent = `Turn ${entry.turn ?? state.turn} · ${entry.time ?? '17:42'}`
-    meta.append(identity, turn)
-
-    const text = document.createElement('p')
-    text.textContent = entry.text
-    content.append(meta, text)
-    if (entry.detail) {
-      const detail = document.createElement('div')
-      detail.className = 'story-log__detail'
-      detail.textContent = entry.detail
-      content.append(detail)
-    }
-    item.append(mark, content)
-
-    refs.storyLog.append(item)
-  }
-
-  function seedInitialTrace() {
-    initialTrace.forEach((entry) => appendLog(entry))
-  }
-
-  function ensureLineLogged(line) {
-    if (!line || line.logged) return
-    appendLog({ speaker: line.speaker, text: line.text, kind: line.kind, turn: state.turn })
-    line.logged = true
-  }
-
-  function renderLine({ instant = false } = {}) {
-    clearTimer('autoTimer')
-    hideChoices()
+  function showLine(index, pageIndex = 0) {
+    state.lineIndex = index
+    state.pageIndex = pageIndex
     const line = currentLine()
-    if (!line) return
-
     state.pages = paginateText(line.text)
-    state.pageIndex = 0
-
     refs.speakerName.textContent = line.speaker
     refs.speakerRole.textContent = line.role
-    setActiveCharacter(line.character)
-    ensureLineLogged(line)
-    updateAdvanceLabel('点击完成')
+    updateActiveCharacter(line.character)
+    refs.composer.hidden = true
+    refs.dialogueBox.hidden = false
+    refs.composerTrigger.setAttribute('aria-expanded', 'false')
+    typePage(state.pages[state.pageIndex])
+  }
 
-    if (instant) {
-      state.fullText = state.pages[0]
-      refs.dialogueText.textContent = state.fullText
-      refs.dialogueAnnouncement.textContent = state.fullText
-      state.typing = false
-      if (hasMoreDialoguePages()) updateAdvanceLabel(continueReadingLabel())
-      else if (line.choicesAfter && !line.resolved) showChoices()
-      else updateAdvanceLabel(state.lineIndex >= state.sequence.length - 1 ? '等待你的行动' : '点击继续')
-      return
-    }
-
-    typeText(state.pages[0])
+  function completeTyping() {
+    if (!state.typing) return false
+    clearTimer('typingTimer')
+    state.typing = false
+    refs.dialogueText.textContent = state.pages[state.pageIndex]
+    refs.dialogueAnnouncement.textContent = currentLine().text
+    updateAdvanceLabel()
+    scheduleAuto()
+    return true
   }
 
   function advanceDialogue() {
-    if (state.generating) {
-      showToast('夏澄正在回应，请稍等片刻。')
-      return
-    }
-    if (!refs.composer.hidden) return
-    if (state.typing) {
-      finishTyping()
-      return
-    }
-
-    if (hasMoreDialoguePages()) {
+    if (state.activeDrawer || state.menuOpen || state.cinematic) return
+    if (completeTyping()) return
+    clearTimer('autoTimer')
+    if (state.pageIndex < state.pages.length - 1) {
       state.pageIndex += 1
-      updateAdvanceLabel('点击完成')
-      typeText(state.pages[state.pageIndex])
+      typePage(state.pages[state.pageIndex])
       return
     }
-
-    const line = currentLine()
-    if (line?.choicesAfter && !line.resolved) {
-      showToast('选择一个回应，或使用“自由行动”。')
-      showChoices()
+    if (state.lineIndex < DIALOGUE.length - 1) {
+      showLine(state.lineIndex + 1)
       return
     }
-
-    if (state.lineIndex >= state.sequence.length - 1) {
-      showToast('当前演示已推进到最新位置。你可以自由行动、查看日志，或重置体验。')
-      updateAdvanceLabel('等待你的行动')
-      return
-    }
-
-    state.lineIndex += 1
-    renderLine()
+    openComposer()
   }
 
-  function buildChoiceButton(choice, index) {
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.className = 'choice-button'
-    button.dataset.choiceId = choice.id
-
-    const number = document.createElement('span')
-    number.className = 'choice-button__number'
-    number.textContent = String(index + 1).padStart(2, '0')
-
-    const copy = document.createElement('span')
-    copy.className = 'choice-button__copy'
-    const title = document.createElement('strong')
-    title.textContent = choice.title
-    const meta = document.createElement('small')
-    meta.textContent = choice.meta
-    copy.append(title, meta)
-
-    const arrow = document.createElement('span')
-    arrow.className = 'choice-button__arrow'
-    arrow.setAttribute('aria-hidden', 'true')
-    arrow.textContent = '›'
-
-    button.append(number, copy, arrow)
-    button.addEventListener('click', () => selectChoice(choice))
-    return button
-  }
-
-  function showChoices() {
-    if (!refs.composer.hidden || state.generating) return
-    refs.choiceList.replaceChildren(...choices.map(buildChoiceButton))
-    refs.choicePanel.hidden = false
-    updateAdvanceLabel('请选择行动')
+  function scheduleAuto() {
     clearTimer('autoTimer')
-  }
-
-  function hideChoices() {
-    refs.choicePanel.hidden = true
-  }
-
-  function updateRelationship(change = {}, relationshipId = 'xiacheng') {
-    const relationship = state.relationships[relationshipId]
-    if (!relationship) return null
-
-    const before = {
-      ...relationship,
-      fields: { ...relationship.fields },
-    }
-    Object.entries(change.fields ?? {}).forEach(([field, delta]) => {
-      const currentValue = relationship.fields[field]
-      if (!Number.isFinite(currentValue) || !Number.isFinite(delta)) return
-      relationship.fields[field] = Math.max(0, Math.min(100, currentValue + delta))
-    })
-    ;['phase', 'description', 'lastChange'].forEach((field) => {
-      if (typeof change[field] === 'string' && change[field].trim()) {
-        relationship[field] = change[field].trim()
-      }
-    })
-
-    if (relationshipId === 'xiacheng') {
-      Object.entries(relationship.fields).forEach(([field, value]) => {
-        document.querySelectorAll(`[data-rel-field="${field}"]`).forEach((element) => {
-          element.textContent = String(value)
-        })
-      })
-      document.querySelectorAll('[data-rel-phase]').forEach((element) => {
-        element.textContent = relationship.phase
-      })
-      document.querySelectorAll('[data-rel-description]').forEach((element) => {
-        element.textContent = relationship.description
-      })
-      document.querySelectorAll('[data-rel-last-change]').forEach((element) => {
-        element.textContent = relationship.lastChange
-      })
-    }
-
-    return {
-      before,
-      after: {
-        ...relationship,
-        fields: { ...relationship.fields },
-      },
-    }
-  }
-
-  function describeRelationshipChange(result, change) {
-    if (!result) return '关系状态未发生变化。'
-    const fieldChanges = Object.keys(change.fields ?? {}).map((field) => {
-      const label = RELATIONSHIP_FIELD_LABELS[field] ?? field
-      return `${label} ${result.before.fields[field]} → ${result.after.fields[field]}`
-    })
-    if (result.before.phase !== result.after.phase) {
-      fieldChanges.push(`阶段 ${result.before.phase} → ${result.after.phase}`)
-    }
-    if (result.before.description !== result.after.description) {
-      fieldChanges.push('关系描述已更新')
-    }
-    return fieldChanges.join('；') || '关系状态保持不变。'
-  }
-
-  function updateTurn(delta = 0) {
-    state.turn += delta
-    document.querySelectorAll('[data-turn-value]').forEach((element) => {
-      element.textContent = String(state.turn)
-    })
-  }
-
-  function addClue(clue) {
-    if (!clue || refs.clueList.querySelector('[data-dynamic-clue]')) return
-    const item = document.createElement('li')
-    item.dataset.dynamicClue = 'true'
-    const number = document.createElement('span')
-    number.textContent = '03'
-    const text = document.createElement('p')
-    const title = document.createElement('strong')
-    title.textContent = clue.title
-    text.append(title, document.createTextNode(clue.detail))
-    item.append(number, text)
-    refs.clueList.append(item)
-    document.querySelectorAll('[data-clue-count]').forEach((element) => {
-      element.textContent = '3 条'
-    })
-  }
-
-  function selectChoice(choice) {
-    if (state.generating) return
-    const line = currentLine()
-    if (!line || line.resolved) return
-
-    line.resolved = true
-    hideChoices()
-    updateTurn(1)
-    const relationshipResult = updateRelationship(choice.relationshipChange)
-    addClue(choice.clue)
-    appendLog({
-      speaker: '玩家决策',
-      text: choice.title,
-      kind: 'choice',
-      badge: '预设行动',
-      turn: state.turn,
-    })
-    appendLog({
-      speaker: '思考摘要',
-      text: '本次回应会直接影响夏澄的情绪与当前关系，优先同步关系状态后继续叙事。',
-      kind: 'thinking',
-      badge: '公开摘要',
-      detail: '状态目标：人物关系状态表 / 夏澄。其余两组关系保持不变。',
-      turn: state.turn,
-    })
-    appendLog({
-      speaker: '工具记录',
-      text: '夏澄的人物关系状态表完成多字段同步。',
-      kind: 'tool',
-      badge: 'status_table_set_values',
-      detail: `人物关系状态表 · 夏澄：${describeRelationshipChange(relationshipResult, choice.relationshipChange)}`,
-      turn: state.turn,
-    })
-    appendLog({
-      speaker: '剧情裁定',
-      text: choice.toast,
-      kind: 'outcome',
-      badge: '分支结果',
-      turn: state.turn,
-    })
-
-    const branchLines = [
-      {
-        speaker: '言沁',
-        role: '由你扮演',
-        character: 'yanqin',
-        kind: 'dialogue',
-        text: choice.userLine,
-      },
-      {
-        speaker: '夏澄',
-        role: '白鸢咖啡馆店长',
-        character: 'xiacheng',
-        kind: 'dialogue',
-        text: choice.response,
-      },
-      {
-        speaker: '旁白',
-        role: 'Scene narration',
-        character: 'narrator',
-        kind: 'narration',
-        text: choice.epilogue,
-      },
-    ].map((entry) => ({ ...entry, logged: false, resolved: false }))
-
-    state.sequence.splice(state.lineIndex + 1, 0, ...branchLines)
-    showToast(choice.toast)
-    state.lineIndex += 1
-    renderLine()
-  }
-
-  function scheduleAutoAdvance() {
-    clearTimer('autoTimer')
-    if (!state.auto || state.generating || state.activeDrawer || state.menuOpen || state.cinematic || !refs.composer.hidden) return
-    const line = currentLine()
-    if (!line || (!hasMoreDialoguePages() && line.choicesAfter && !line.resolved)) return
-    if (!hasMoreDialoguePages() && state.lineIndex >= state.sequence.length - 1) return
+    if (!state.auto || state.typing || state.activeDrawer || state.menuOpen || state.cinematic) return
+    if (state.lineIndex === DIALOGUE.length - 1 && state.pageIndex === state.pages.length - 1) return
     state.autoTimer = window.setTimeout(advanceDialogue, AUTO_ADVANCE_MS)
   }
 
-  function setAuto(enabled) {
-    state.auto = enabled
-    document.querySelectorAll('[data-action="auto"]').forEach((button) => {
-      button.setAttribute('aria-pressed', String(enabled))
-    })
-    showToast(enabled ? '自动播放已开启' : '自动播放已暂停')
-    if (enabled && !state.typing) scheduleAutoAdvance()
-    else clearTimer('autoTimer')
+  function toggleAuto() {
+    state.auto = !state.auto
+    document.querySelector('[data-action="auto"]').setAttribute('aria-pressed', String(state.auto))
+    document.querySelector('[data-action="auto"]').classList.toggle('is-active', state.auto)
+    showToast(state.auto ? 'AUTO 已开启 · 工作台或输入出现时自动暂停' : 'AUTO 已关闭')
+    scheduleAuto()
   }
 
-  function toggleComposer(forceOpen) {
-    if (state.generating) return
-    const open = typeof forceOpen === 'boolean' ? forceOpen : refs.composer.hidden
-    refs.composer.hidden = !open
-    refs.dialogueBox.hidden = open
-    refs.composerTrigger.setAttribute('aria-expanded', String(open))
-
-    if (open) {
-      hideChoices()
-      clearTimer('autoTimer')
-      window.requestAnimationFrame(() => refs.actionInput.focus())
-    } else {
-      refs.actionInput.value = ''
-      const line = currentLine()
-      if (!hasMoreDialoguePages() && line?.choicesAfter && !line.resolved) showChoices()
-      refs.dialogueBox.focus()
-      scheduleAutoAdvance()
-    }
+  function openComposer() {
+    state.auto = false
+    clearTimer('autoTimer')
+    document.querySelector('[data-action="auto"]').setAttribute('aria-pressed', 'false')
+    document.querySelector('[data-action="auto"]').classList.remove('is-active')
+    refs.dialogueBox.hidden = true
+    refs.composer.hidden = false
+    refs.composerTrigger.setAttribute('aria-expanded', 'true')
+    refs.actionInput.focus()
   }
 
-  function setGenerating(enabled) {
-    state.generating = enabled
-    refs.room.dataset.roomState = enabled ? 'generating' : 'playing'
-    const submitButton = refs.composer.querySelector('button[type="submit"]')
-    submitButton.disabled = enabled
-    refs.actionInput.disabled = enabled
-  }
-
-  function submitFreeAction(text) {
-    const line = currentLine()
-    if (line?.choicesAfter) line.resolved = true
-    hideChoices()
-    toggleComposer(false)
-    updateTurn(1)
-    const relationshipChange = {
-      fields: { trust: 1, intimacy: 1 },
-      description: '夏澄认真听完了你的自由行动，并愿意用更坦率的方式继续谈话。',
-      lastChange: '言沁自由表达了此刻的行动，夏澄给予正面回应',
-    }
-    const relationshipResult = updateRelationship(relationshipChange)
-
-    appendLog({
-      speaker: '玩家决策',
-      text,
-      kind: 'choice',
-      badge: '自由行动',
-      turn: state.turn,
-    })
-    appendLog({
-      speaker: '思考摘要',
-      text: '自由行动已接收；下一步将结合当前场景、夏澄状态与关系网络生成回应。',
-      kind: 'thinking',
-      badge: '公开摘要',
-      detail: '候选状态目标：当前场景状态表、人物关系状态表。',
-      turn: state.turn,
-    })
-
-    const userLine = {
-      speaker: '言沁',
-      role: '由你扮演 · 自由行动',
-      character: 'yanqin',
-      kind: 'dialogue',
-      text,
-      logged: false,
-      resolved: false,
-    }
-    const responseLine = {
-      speaker: '夏澄',
-      role: '白鸢咖啡馆店长',
-      character: 'xiacheng',
-      kind: 'dialogue',
-      text: '夏澄认真听完，指尖在纸袋的折边上停了停。“嗯，我明白你的意思了。那这次，就让我也坦率一点吧。”',
-      logged: false,
-      resolved: false,
-    }
-
-    state.sequence.splice(state.lineIndex + 1, 0, userLine, responseLine)
-    state.lineIndex += 1
-    renderLine({ instant: true })
-    setGenerating(true)
-    refs.room.dataset.roomState = 'playing'
-    updateAdvanceLabel('等待回应')
-
-    state.generationTimers.push(window.setTimeout(() => {
-      refs.room.dataset.roomState = 'generating'
-      refs.speakerName.textContent = '夏澄'
-      refs.speakerRole.textContent = '正在回应'
-      refs.dialogueText.textContent = '夏澄垂下眼想了片刻'
-      setActiveCharacter('xiacheng')
-    }, 520))
-
-    state.generationTimers.push(window.setTimeout(() => {
-      setGenerating(false)
-      appendLog({
-        speaker: '工具记录',
-        text: '自由行动已写入会话轨迹，夏澄的关系字段与描述状态已同步。',
-        kind: 'tool',
-        badge: 'status_table_set_values',
-        detail: `人物关系状态表 · 夏澄：${describeRelationshipChange(relationshipResult, relationshipChange)}`,
-        turn: state.turn,
-      })
-      state.lineIndex += 1
-      renderLine()
-      showToast('自由行动已写入本次回忆')
-    }, 1450))
+  function closeComposer() {
+    refs.composer.hidden = true
+    refs.dialogueBox.hidden = false
+    refs.composerTrigger.setAttribute('aria-expanded', 'false')
+    updateAdvanceLabel()
+    refs.dialogueBox.focus()
   }
 
   function showToast(message) {
     clearTimer('toastTimer')
     refs.toast.textContent = message
     refs.toast.hidden = false
+    requestAnimationFrame(() => refs.toast.classList.add('is-visible'))
     state.toastTimer = window.setTimeout(() => {
-      refs.toast.hidden = true
-    }, 2300)
-  }
-
-  function stageMenuItems() {
-    return [...refs.stageMenu.querySelectorAll('[role="menuitem"]')]
-  }
-
-  function closeStageMenu({ returnFocus = false } = {}) {
-    if (!state.menuOpen) return
-    state.menuOpen = false
-    refs.stageMenu.hidden = true
-    refs.menuTrigger.setAttribute('aria-expanded', 'false')
-    if (returnFocus) refs.menuTrigger.focus()
-    scheduleAutoAdvance()
-  }
-
-  function openStageMenu() {
-    if (state.cinematic) return
-    if (state.activeDrawer) closeDrawer({ returnFocus: false, immediate: true })
-    state.menuOpen = true
-    clearTimer('autoTimer')
-    refs.stageMenu.hidden = false
-    refs.menuTrigger.setAttribute('aria-expanded', 'true')
-    window.requestAnimationFrame(() => stageMenuItems()[0]?.focus())
-  }
-
-  function toggleStageMenu() {
-    if (state.menuOpen) closeStageMenu({ returnFocus: true })
-    else openStageMenu()
-  }
-
-  function setCinematicMode(enabled) {
-    if (state.cinematic === enabled) return
-    state.cinematic = enabled
-
-    const layers = document.querySelectorAll(
-      '.scene-header, .scene-caption, .relationship-ribbon, .choice-panel, .dialogue-dock, .stage-menu, .drawer-backdrop, .info-drawer, .toast',
-    )
-
-    if (enabled) {
-      state.cinematicReturnFocus = refs.menuTrigger
-      clearTimer('autoTimer')
-      closeStageMenu()
-      if (state.activeDrawer) closeDrawer({ returnFocus: false, immediate: true })
-      if (!refs.composer.hidden) toggleComposer(false)
-      refs.room.dataset.cinematicMode = 'true'
-      document.body.classList.add('is-cinematic')
-      layers.forEach((element) => {
-        element.dataset.previousAriaHidden = element.getAttribute('aria-hidden') ?? ''
-        element.setAttribute('aria-hidden', 'true')
-        element.inert = true
-      })
-      refs.cinematicReturn.hidden = false
-      window.requestAnimationFrame(() => refs.cinematicReturn.focus())
-      return
-    }
-
-    delete refs.room.dataset.cinematicMode
-    document.body.classList.remove('is-cinematic')
-    layers.forEach((element) => {
-      element.inert = false
-      const previousValue = element.dataset.previousAriaHidden
-      if (previousValue) element.setAttribute('aria-hidden', previousValue)
-      else element.removeAttribute('aria-hidden')
-      delete element.dataset.previousAriaHidden
-    })
-    refs.cinematicReturn.hidden = true
-    const returnTarget = state.cinematicReturnFocus
-    state.cinematicReturnFocus = null
-    if (returnTarget instanceof HTMLElement) returnTarget.focus()
-    scheduleAutoAdvance()
+      refs.toast.classList.remove('is-visible')
+      state.toastTimer = window.setTimeout(() => {
+        refs.toast.hidden = true
+        state.toastTimer = null
+      }, 220)
+    }, 3200)
   }
 
   function drawerFor(name) {
     return document.querySelector(`[data-drawer="${name}"]`)
   }
 
-  function setDrawerTriggerState(name, expanded) {
+  function setDrawerTriggers(name, expanded) {
     document.querySelectorAll(`[data-drawer-trigger="${name}"]`).forEach((button) => {
       button.setAttribute('aria-expanded', String(expanded))
     })
   }
 
-  function closeDrawer({ returnFocus = true, immediate = false } = {}) {
-    if (!state.activeDrawer) return
-    clearTimer('drawerCloseTimer')
-    const name = state.activeDrawer
-    const drawer = drawerFor(name)
-    state.activeDrawer = null
-    drawer.classList.remove('is-open')
-    drawer.setAttribute('aria-hidden', 'true')
-    setDrawerTriggerState(name, false)
-    refs.backdrop.hidden = true
-
-    const finish = () => {
-      drawer.hidden = true
-      if (returnFocus && state.lastFocus instanceof HTMLElement) state.lastFocus.focus()
-      state.lastFocus = null
-      scheduleAutoAdvance()
-    }
-
-    if (immediate || prefersReducedMotion) finish()
-    else state.drawerCloseTimer = window.setTimeout(() => {
-      state.drawerCloseTimer = null
-      finish()
-    }, 280)
+  function closeMenu({ restoreFocus = false } = {}) {
+    if (!state.menuOpen) return
+    state.menuOpen = false
+    refs.stageMenu.hidden = true
+    refs.menuTrigger.setAttribute('aria-expanded', 'false')
+    if (restoreFocus) refs.menuTrigger.focus()
   }
 
   function openDrawer(name, trigger) {
-    if (state.activeDrawer === name) {
-      closeDrawer()
-      return
-    }
-    if (state.activeDrawer) closeDrawer({ returnFocus: false, immediate: true })
-
     const drawer = drawerFor(name)
     if (!drawer) return
-    const returnTarget = trigger?.closest('#stageMenu') ? refs.menuTrigger : trigger
-    closeStageMenu()
+    if (state.activeDrawer) closeDrawer({ restoreFocus: false, immediate: true })
+    closeMenu()
     clearTimer('drawerCloseTimer')
     state.activeDrawer = name
-    state.lastFocus = returnTarget ?? document.activeElement
-    clearTimer('autoTimer')
+    state.lastFocus = trigger || document.activeElement
     drawer.hidden = false
     drawer.setAttribute('aria-hidden', 'false')
     refs.backdrop.hidden = false
-    setDrawerTriggerState(name, true)
-    window.requestAnimationFrame(() => {
+    document.body.classList.add('has-open-drawer')
+    setDrawerTriggers(name, true)
+    requestAnimationFrame(() => {
       drawer.classList.add('is-open')
+      refs.backdrop.classList.add('is-visible')
       drawer.querySelector('.drawer-header button')?.focus()
     })
   }
 
-  function resetExperience({ announce = true } = {}) {
-    clearTimer('typingTimer')
-    clearTimer('autoTimer')
-    clearGenerationTimers()
-    setGenerating(false)
-    if (state.cinematic) setCinematicMode(false)
-    closeStageMenu()
-    if (state.activeDrawer) closeDrawer({ returnFocus: false, immediate: true })
-    refs.composer.hidden = true
-    refs.dialogueBox.hidden = false
-    refs.composerTrigger.setAttribute('aria-expanded', 'false')
-    refs.actionInput.value = ''
-    refs.storyLog.replaceChildren()
-    refs.clueList.querySelectorAll('[data-dynamic-clue]').forEach((item) => item.remove())
-    document.querySelectorAll('[data-clue-count]').forEach((element) => {
-      element.textContent = '2 条'
-    })
-
-    state.sequence = freshSequence()
-    state.lineIndex = 0
-    state.auto = false
-    state.relationships = cloneRelationships()
-    state.turn = INITIAL_TURN
-    document.querySelectorAll('[data-action="auto"]').forEach((button) => {
-      button.setAttribute('aria-pressed', 'false')
-    })
-    updateRelationship()
-    updateTurn(0)
-    seedInitialTrace()
-    renderLine()
-    if (announce) showToast('推演已经回到雨停后的初始状态。')
+  function closeDrawer({ restoreFocus = true, immediate = false } = {}) {
+    if (!state.activeDrawer) return
+    const name = state.activeDrawer
+    const drawer = drawerFor(name)
+    const focusTarget = state.lastFocus
+    state.activeDrawer = null
+    state.lastFocus = null
+    drawer.classList.remove('is-open')
+    drawer.setAttribute('aria-hidden', 'true')
+    refs.backdrop.classList.remove('is-visible')
+    document.body.classList.remove('has-open-drawer')
+    setDrawerTriggers(name, false)
+    const finish = () => {
+      drawer.hidden = true
+      refs.backdrop.hidden = true
+      if (restoreFocus && focusTarget instanceof HTMLElement) focusTarget.focus()
+    }
+    if (immediate || prefersReducedMotion) finish()
+    else state.drawerCloseTimer = window.setTimeout(finish, 260)
   }
 
-  function toggleSound(button) {
-    state.soundOn = !state.soundOn
-    button.setAttribute('aria-pressed', String(state.soundOn))
-    button.setAttribute('aria-label', state.soundOn ? '关闭环境音' : '开启环境音')
-    button.querySelector('[data-sound-icon]').textContent = state.soundOn ? '♪' : '∅'
-    showToast(state.soundOn ? '环境音已开启（静态演示）' : '环境音已关闭')
+  function toggleMenu() {
+    if (state.activeDrawer) closeDrawer({ restoreFocus: false, immediate: true })
+    state.menuOpen = !state.menuOpen
+    refs.stageMenu.hidden = !state.menuOpen
+    refs.menuTrigger.setAttribute('aria-expanded', String(state.menuOpen))
+    if (state.menuOpen) refs.stageMenu.querySelector('[role="menuitem"]')?.focus()
   }
 
-  function interactiveTarget(target) {
-    return target instanceof Element && Boolean(target.closest('button, textarea, input, select, a'))
+  function enterCinematic() {
+    if (state.activeDrawer) closeDrawer({ restoreFocus: false, immediate: true })
+    closeMenu()
+    closeComposer()
+    state.cinematic = true
+    refs.room.dataset.cinematicMode = 'true'
+    const hiddenLayers = document.querySelectorAll('.scene-header, .scene-caption, .stage-asset-notice, .dialogue-dock')
+    hiddenLayers.forEach((layer) => {
+      layer.setAttribute('aria-hidden', 'true')
+      layer.inert = true
+    })
+    refs.cinematicReturn.hidden = false
+    refs.cinematicReturn.focus()
+  }
+
+  function leaveCinematic() {
+    if (!state.cinematic) return
+    state.cinematic = false
+    refs.room.dataset.cinematicMode = 'false'
+    const hiddenLayers = document.querySelectorAll('.scene-header, .scene-caption, .stage-asset-notice, .dialogue-dock')
+    hiddenLayers.forEach((layer) => {
+      layer.removeAttribute('aria-hidden')
+      layer.inert = false
+    })
+    refs.cinematicReturn.hidden = true
+    refs.menuTrigger.focus()
+  }
+
+  function toggleSpoilerProtection() {
+    state.spoilerProtection = !state.spoilerProtection
+    const button = document.querySelector('[data-action="spoiler"]')
+    button.setAttribute('aria-pressed', String(state.spoilerProtection))
+    button.querySelector('[data-spoiler-label]').textContent = state.spoilerProtection ? '已开启' : '原型预览关闭'
+    renderPlot()
+    showToast(state.spoilerProtection ? '防剧透已开启 · 隐藏未注入内容' : '仅原型预览：生产环境应重新请求服务端投影')
+  }
+
+  function selectStoryTab(tabName) {
+    document.querySelectorAll('[data-story-tab]').forEach((button) => {
+      button.setAttribute('aria-selected', String(button.dataset.storyTab === tabName))
+    })
+    document.querySelectorAll('[data-story-panel]').forEach((panel) => {
+      panel.hidden = panel.dataset.storyPanel !== tabName
+    })
   }
 
   function trapDrawerFocus(event) {
     if (event.key !== 'Tab' || !state.activeDrawer) return
     const drawer = drawerFor(state.activeDrawer)
-    const focusable = [...drawer.querySelectorAll('button:not(:disabled), [href], textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
-      .filter((element) => element.offsetParent !== null)
+    const focusable = [...drawer.querySelectorAll('button:not(:disabled), [href], summary, textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+      .filter((node) => !node.hidden)
     if (!focusable.length) return
     const first = focusable[0]
     const last = focusable[focusable.length - 1]
@@ -974,17 +1078,70 @@
     }
   }
 
-  refs.dialogueBox.addEventListener('click', advanceDialogue)
+  function handleAction(action, trigger) {
+    if (action === 'close-drawer') closeDrawer()
+    if (action === 'menu') toggleMenu()
+    if (action === 'cinematic') enterCinematic()
+    if (action === 'restore-cinematic') leaveCinematic()
+    if (action === 'auto') toggleAuto()
+    if (action === 'advance') advanceDialogue()
+    if (action === 'composer') refs.composer.hidden ? openComposer() : closeComposer()
+    if (action === 'restart-demo') {
+      closeComposer()
+      showLine(0)
+      showToast('YQ 压力样例已从第一段重播；没有修改任何 Story 数据')
+    }
+    if (action === 'spoiler') toggleSpoilerProtection()
+    if (action === 'settings') {
+      closeMenu()
+      showToast('生产实现复用现有 SessionSettingsMenu；静态原型不复制设置业务')
+      trigger?.focus()
+    }
+    if (action === 'dream') showToast('生产实现跳转现有 Dream 管理页；Dream 故障不影响对话')
+    if (action === 'media-studio') showToast('生产实现打开现有 Session 图像工作室')
+    if (action === 'exit') showToast('静态设计稿：生产实现返回原 Session 来源页面')
+  }
+
+  renderCharacters()
+  renderRelationships()
+  renderProjectFacts()
+  renderDetailStates()
+  renderPlot()
+  renderVisualSpecs()
+  renderLog()
+  showLine(0)
+
+  document.querySelectorAll('[data-drawer-trigger]').forEach((button) => {
+    button.addEventListener('click', () => openDrawer(button.dataset.drawerTrigger, button))
+  })
+
+  document.addEventListener('click', (event) => {
+    const actionTarget = event.target.closest('[data-action]')
+    if (actionTarget) handleAction(actionTarget.dataset.action, actionTarget)
+
+    const logAction = event.target.closest('[data-log-action]')
+    if (logAction) showToast(`${logAction.dataset.logAction}：生产实现复用现有 Timeline action`)
+
+    if (
+      state.menuOpen
+      && !event.target.closest('#stageMenu')
+      && !event.target.closest('[data-action="menu"]')
+    ) closeMenu()
+  })
+
+  document.querySelectorAll('[data-story-tab]').forEach((button) => {
+    button.addEventListener('click', () => selectStoryTab(button.dataset.storyTab))
+  })
 
   refs.composer.addEventListener('submit', (event) => {
     event.preventDefault()
     const text = refs.actionInput.value.trim()
     if (!text) {
-      showToast('先写下一句行动或台词。')
-      refs.actionInput.focus()
+      showToast('请先写下行动；当前 Story 没有 QuickReply')
       return
     }
-    submitFreeAction(text)
+    refs.actionInput.value = ''
+    showToast('静态原型不发送 Turn；生产实现走共享 Composer / stream / commit 链路')
   })
 
   refs.actionInput.addEventListener('keydown', (event) => {
@@ -994,111 +1151,41 @@
     }
   })
 
-  refs.stageMenu.addEventListener('focusout', () => {
-    window.requestAnimationFrame(() => {
-      if (state.menuOpen && !refs.stageMenu.contains(document.activeElement)) closeStageMenu()
-    })
-  })
-
-  document.querySelectorAll('[data-drawer-trigger]').forEach((button) => {
-    button.addEventListener('click', () => openDrawer(button.dataset.drawerTrigger, button))
-  })
-
-  document.addEventListener('click', (event) => {
-    const action = event.target.closest('[data-action]')?.dataset.action
-    if (action === 'composer') toggleComposer()
-    if (action === 'close-drawer') closeDrawer()
-    if (action === 'reset') resetExperience()
-    if (action === 'auto') setAuto(!state.auto)
-    if (action === 'sound') toggleSound(event.target.closest('button'))
-    if (action === 'menu') toggleStageMenu()
-    if (action === 'cinematic') setCinematicMode(true)
-    if (action === 'restore-cinematic') setCinematicMode(false)
-    if (action === 'exit') showToast('静态设计稿不会离开页面；正式版本可在此返回会话中心。')
-
-    if (
-      state.menuOpen
-      && !refs.stageMenu.contains(event.target)
-      && !refs.menuTrigger.contains(event.target)
-    ) closeStageMenu()
-  })
-
   document.addEventListener('keydown', (event) => {
-    const key = event.key.toLowerCase()
-
-    if (state.cinematic) {
-      if (event.key === 'Escape' || key === 'h') {
-        event.preventDefault()
-        setCinematicMode(false)
-      }
-      return
-    }
-
     trapDrawerFocus(event)
-
     if (event.key === 'Escape') {
       if (state.activeDrawer) {
         event.preventDefault()
         closeDrawer()
-        return
-      }
-      if (state.menuOpen) {
+      } else if (state.menuOpen) {
         event.preventDefault()
-        closeStageMenu({ returnFocus: true })
-        return
-      }
-      if (!refs.composer.hidden) {
+        closeMenu({ restoreFocus: true })
+      } else if (state.cinematic) {
         event.preventDefault()
-        toggleComposer(false)
+        leaveCinematic()
+      } else if (!refs.composer.hidden) {
+        event.preventDefault()
+        closeComposer()
       }
       return
     }
 
-    if (state.menuOpen && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-      event.preventDefault()
-      const items = stageMenuItems()
-      const currentIndex = Math.max(0, items.indexOf(document.activeElement))
-      let nextIndex = currentIndex
-      if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % items.length
-      if (event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + items.length) % items.length
-      if (event.key === 'Home') nextIndex = 0
-      if (event.key === 'End') nextIndex = items.length - 1
-      items[nextIndex]?.focus()
-      return
-    }
-
-    if (interactiveTarget(event.target)) return
-
-    if (!refs.choicePanel.hidden && ['1', '2', '3'].includes(event.key)) {
-      event.preventDefault()
-      selectChoice(choices[Number(event.key) - 1])
-      return
-    }
-    if (key === 's') {
+    if (event.metaKey || event.ctrlKey || event.altKey || event.target.matches('textarea, input, select')) return
+    if (event.key.toLowerCase() === 's') {
       event.preventDefault()
       openDrawer('status', document.querySelector('[data-drawer-trigger="status"]'))
-      return
     }
-    if (key === 'l') {
+    if (event.key.toLowerCase() === 'l') {
       event.preventDefault()
       openDrawer('log', document.querySelector('[data-drawer-trigger="log"]'))
-      return
     }
-    if (key === 'h') {
+    if (event.key.toLowerCase() === 'h') {
       event.preventDefault()
-      setCinematicMode(true)
-      return
+      state.cinematic ? leaveCinematic() : enterCinematic()
     }
-    if (event.key === 'Enter') {
+    if (event.key === 'Enter' && !state.activeDrawer && !state.menuOpen && !state.cinematic) {
       event.preventDefault()
       advanceDialogue()
     }
   })
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) clearTimer('autoTimer')
-    else scheduleAutoAdvance()
-  })
-
-  resetExperience({ announce: false })
 })()

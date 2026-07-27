@@ -3,18 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#171b2a">
-  <meta name="description" content="Play WebUI 沉浸式 Galgame + RPG Session Room 静态交互设计稿">
-  <title>白鸢咖啡馆 · 沉浸式 Session Room</title>
-  <link rel="stylesheet" href="styles.css">
-  <script src="app.js" defer></script>
+  <meta name="theme-color" content="#101626">
+  <meta name="description" content="基于 YQ Story Design 复杂度校准的沉浸式 Session Room 静态交互设计稿">
+  <title>非公开行程-沁冉 · 沉浸式 Session Room</title>
+  <link rel="stylesheet" href="styles.css?v=20260727-yq5">
+  <script src="app.js?v=20260727-yq5" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#dialogueBox">跳到当前对白</a>
 
-  <main class="session-room" id="sessionRoom" data-active-speaker="xiacheng" data-room-state="playing">
-    <div class="scene-background" aria-hidden="true">
-      <img src="assets/cafe-rainy-afternoon.png" alt="">
+  <main class="session-room yq-room" id="sessionRoom" data-active-speaker="yan-qin" data-room-state="playing">
+    <div class="scene-background yq-background" aria-hidden="true">
+      <span class="yq-background__hall"></span>
+      <span class="yq-background__window"></span>
+      <span class="yq-background__lights"></span>
       <span class="scene-background__bloom"></span>
       <span class="scene-background__vignette"></span>
       <span class="scene-background__grain"></span>
@@ -26,8 +28,8 @@
           <span aria-hidden="true">‹</span>
         </button>
         <div class="session-title">
-          <span class="session-title__kicker">Live roleplay · 自由推演</span>
-          <h1>白鸢咖啡馆 <span>· 雨后约定</span></h1>
+          <span class="session-title__kicker">Live roleplay · YQ pressure fixture</span>
+          <h1>非公开行程-沁冉 <span>· 剧场再遇</span></h1>
         </div>
       </div>
 
@@ -35,7 +37,7 @@
         <span class="scene-location__mark" aria-hidden="true">⌖</span>
         <span>
           <small>Current scene</small>
-          <strong>临窗座 · 雨后 17:42</strong>
+          <strong>星梦剧院侧走廊 · 2019年11月8日 21:36</strong>
         </span>
       </div>
 
@@ -44,14 +46,11 @@
           <i aria-hidden="true"></i>
           <span>LIVE</span>
         </span>
-        <button class="round-button" type="button" data-action="sound" aria-pressed="true" aria-label="关闭环境音" title="环境音">
-          <span data-sound-icon aria-hidden="true">♪</span>
-        </button>
-        <button class="hud-button" type="button" data-drawer-trigger="status" aria-controls="statusDrawer" aria-expanded="false">
+        <button class="hud-button" type="button" data-drawer-trigger="status" aria-controls="statusDrawer" aria-expanded="false" aria-label="打开角色与状态">
           <span aria-hidden="true">◇</span>
-          <span>角色状态</span>
+          <span>角色与状态</span>
         </button>
-        <button class="hud-button" type="button" data-drawer-trigger="log" aria-controls="logDrawer" aria-expanded="false">
+        <button class="hud-button" type="button" data-drawer-trigger="log" aria-controls="logDrawer" aria-expanded="false" aria-label="打开推演日志">
           <span aria-hidden="true">≡</span>
           <span>推演日志</span>
         </button>
@@ -62,44 +61,35 @@
     </header>
 
     <section class="stage" aria-label="当前剧情舞台">
-      <div class="scene-caption" aria-hidden="true">
-        <span>RAINY AFTERNOON</span>
-        <strong>雨后的空气里，莓果与咖啡的香气正慢慢醒来。</strong>
+      <div class="scene-caption">
+        <span>SHANGHAI · NOVEMBER 2019</span>
+        <strong>晚场散去，后台工作声正在走廊尽头变轻。</strong>
       </div>
 
-      <button class="relationship-ribbon" type="button" data-drawer-trigger="status" aria-controls="statusDrawer" aria-expanded="false" aria-label="打开角色关系网络">
-        <span class="relationship-ribbon__avatars" aria-hidden="true">
-          <img src="assets/character-yanqin.png" alt="">
-          <img src="assets/character-xiacheng.png" alt="">
-          <i>+2</i>
-        </span>
-        <span class="relationship-ribbon__copy">
-          <small>RELATION NETWORK</small>
-          <strong>3 组关系 · 聚焦夏澄</strong>
-        </span>
-        <span class="relationship-ribbon__value"><b data-rel-phase>默契期</b><small>当前阶段</small></span>
+      <button class="stage-asset-notice" type="button" data-drawer-trigger="media" aria-controls="mediaDrawer" aria-expanded="false">
+        <span aria-hidden="true">◫</span>
+        <span><strong>立绘降级中</strong><small>VisualSpec 5 · Runtime sprite 0</small></span>
       </button>
 
-      <div class="character-stage" aria-live="off">
-        <figure class="character character--yanqin" data-character="yanqin">
-          <img src="assets/character-yanqin.png" alt="言沁，穿着粉色开衫与深蓝长裙，拿着一本笔记">
-          <figcaption>言沁</figcaption>
+      <div class="character-stage character-stage--fallback" aria-live="off">
+        <figure class="stage-avatar stage-avatar--player" data-character="shen-tingzhou">
+          <div class="stage-avatar__silhouette"><span>沈</span></div>
+          <figcaption><strong>沈听洲</strong><small>玩家角色 · storyCharacterId 待导入</small></figcaption>
         </figure>
-        <figure class="character character--xiacheng is-active" data-character="xiacheng">
-          <img src="assets/character-xiacheng.png" alt="夏澄，穿着咖啡色围裙，手里拿着菜单">
-          <figcaption>夏澄</figcaption>
+        <figure class="stage-avatar stage-avatar--npc is-active" data-character="yan-qin">
+          <div class="stage-avatar__silhouette"><span>颜</span></div>
+          <figcaption><strong>颜沁</strong><small>在场角色 · storyCharacterId 待导入</small></figcaption>
         </figure>
         <span class="stage-light stage-light--left" aria-hidden="true"></span>
         <span class="stage-light stage-light--right" aria-hidden="true"></span>
       </div>
 
-      <section class="choice-panel" id="choicePanel" aria-labelledby="choiceTitle" hidden>
+      <section class="choice-panel choice-panel--empty" id="choicePanel" aria-labelledby="choiceTitle" hidden>
         <div class="choice-panel__heading">
-          <span>YOUR CHOICE</span>
-          <h2 id="choiceTitle">此刻，你想怎样回应？</h2>
+          <span>STORY QUICK REPLIES</span>
+          <h2 id="choiceTitle">当前 Story 没有配置快捷回复</h2>
         </div>
-        <div class="choice-list" id="choiceList"></div>
-        <p>按下 <kbd>1</kbd>–<kbd>3</kbd> 快速选择</p>
+        <p>自由行动始终可用；不会补造固定三选项。</p>
       </section>
     </section>
 
@@ -113,9 +103,9 @@
           <span>LOG</span>
           <small>日志</small>
         </button>
-        <button type="button" data-action="reset">
-          <span>RESET</span>
-          <small>重来</small>
+        <button type="button" data-action="restart-demo">
+          <span>REPLAY</span>
+          <small>重播</small>
         </button>
       </div>
 
@@ -124,8 +114,8 @@
           <span class="dialogue-box__edge dialogue-box__edge--top" aria-hidden="true"></span>
           <span class="dialogue-box__edge dialogue-box__edge--bottom" aria-hidden="true"></span>
           <span class="speaker-plate">
-            <small id="speakerRole">白鸢咖啡馆店长</small>
-            <strong id="speakerName">夏澄</strong>
+            <small id="speakerRole">星梦剧院 · 晚场散后</small>
+            <strong id="speakerName">旁白</strong>
           </span>
           <span class="dialogue-copy">
             <span class="dialogue-text" id="dialogueText" aria-hidden="true"></span>
@@ -139,12 +129,12 @@
 
         <form class="action-composer" id="actionComposer" hidden>
           <div class="action-composer__meta">
-            <span class="mode-pill">IC · 言沁</span>
-            <span>自由行动</span>
+            <span class="mode-pill">IC · 沈听洲</span>
+            <span>0 个快捷回复 · 自由行动</span>
           </div>
           <div class="action-composer__input">
-            <label class="sr-only" for="actionInput">输入言沁的行动或台词</label>
-            <textarea id="actionInput" rows="2" maxlength="180" placeholder="写下言沁的行动或台词……"></textarea>
+            <label class="sr-only" for="actionInput">输入沈听洲的行动或台词</label>
+            <textarea id="actionInput" rows="2" maxlength="300" placeholder="写下沈听洲的行动或台词……"></textarea>
             <button type="submit">
               <span>发送行动</span>
               <b aria-hidden="true">↗</b>
@@ -157,7 +147,7 @@
           <button class="free-action-button" type="button" data-action="composer" aria-controls="actionComposer" aria-expanded="false">
             <span aria-hidden="true">✦</span>
             <span>
-              <small>不使用预设选项</small>
+              <small>StoryQuickReply · 0</small>
               <strong>自由行动</strong>
             </span>
           </button>
@@ -166,25 +156,33 @@
       </div>
     </section>
 
-    <div class="stage-menu" id="stageMenu" role="menu" aria-label="舞台显示菜单" hidden>
+    <div class="stage-menu" id="stageMenu" role="menu" aria-label="舞台菜单" hidden>
       <div class="stage-menu__heading">
-        <span>STAGE DISPLAY</span>
+        <span>SESSION WORKSPACES</span>
         <strong>舞台菜单</strong>
       </div>
       <button type="button" role="menuitem" data-action="cinematic">
         <span class="stage-menu__icon" aria-hidden="true">◫</span>
-        <span><strong>进入纯净舞台</strong><small>隐藏全部 HUD，只保留背景与立绘</small></span>
+        <span><strong>进入纯净舞台</strong><small>隐藏 HUD 与工作台，只保留舞台</small></span>
         <kbd>H</kbd>
       </button>
-      <button type="button" role="menuitem" data-drawer-trigger="status" aria-controls="statusDrawer" aria-expanded="false">
-        <span class="stage-menu__icon" aria-hidden="true">◇</span>
-        <span><strong>角色与世界状态</strong><small>关系网络、状态表、线索与待办</small></span>
+      <button type="button" role="menuitem" data-drawer-trigger="plot" aria-controls="plotDrawer" aria-expanded="false">
+        <span class="stage-menu__icon" aria-hidden="true">⌁</span>
+        <span><strong>剧情轨迹</strong><small>防剧透大纲、事件池与已注入 Turn</small></span>
       </button>
-      <button type="button" role="menuitem" data-drawer-trigger="log" aria-controls="logDrawer" aria-expanded="false">
-        <span class="stage-menu__icon" aria-hidden="true">≡</span>
-        <span><strong>全部推演日志</strong><small>对白、决策、工具、思考摘要与裁定</small></span>
+      <button type="button" role="menuitem" data-drawer-trigger="story" aria-controls="storyDrawer" aria-expanded="false">
+        <span class="stage-menu__icon" aria-hidden="true">▤</span>
+        <span><strong>故事与记忆</strong><small>故事归纳、剧情记忆、持久记忆与 Dream</small></span>
       </button>
-      <p><kbd>Esc</kbd> 关闭菜单 · 不保存显示偏好</p>
+      <button type="button" role="menuitem" data-drawer-trigger="media" aria-controls="mediaDrawer" aria-expanded="false">
+        <span class="stage-menu__icon" aria-hidden="true">▧</span>
+        <span><strong>图像工作室</strong><small>VisualSpec、Media Library 与生成入口</small></span>
+      </button>
+      <button type="button" role="menuitem" data-action="settings">
+        <span class="stage-menu__icon" aria-hidden="true">⚙</span>
+        <span><strong>会话设置</strong><small>复用标准页面设置、模型与 RP Module 动作</small></span>
+      </button>
+      <p><kbd>Esc</kbd> 关闭菜单 · 显示偏好不持久化</p>
     </div>
 
     <button class="cinematic-return" type="button" data-action="restore-cinematic" hidden>
@@ -198,180 +196,203 @@
       <header class="drawer-header">
         <div>
           <span class="drawer-kicker">LIVE WORLD STATE</span>
-          <h2 id="statusDrawerTitle">角色与世界状态</h2>
+          <h2 id="statusDrawerTitle">角色与状态</h2>
         </div>
-        <button type="button" data-action="close-drawer" aria-label="关闭角色状态面板">×</button>
+        <button type="button" data-action="close-drawer" aria-label="关闭角色与状态">×</button>
       </header>
-
       <nav class="status-index" aria-label="状态面板目录">
         <a href="#statusScene">场景</a>
-        <a href="#statusCharacters">角色</a>
-        <a href="#statusRelationships">关系</a>
-        <a href="#statusTables">状态表</a>
-        <a href="#statusClues">线索</a>
-        <a href="#statusTasks">待办</a>
+        <a href="#statusCharacters">9 名角色</a>
+        <a href="#statusRelationships">3 组关系</a>
+        <a href="#statusProject">项目事实</a>
+        <a href="#statusDetails">详细状态</a>
       </nav>
-
       <div class="drawer-scroll drawer-scroll--status">
         <section class="scene-card" id="statusScene">
           <div class="scene-card__topline">
-            <span>CURRENT SCENE · 当前场景状态表</span>
-            <i>实时同步</i>
+            <span>CURRENT SCENE · Story-owned scene copy</span>
+            <i>玩家友好时间</i>
           </div>
-          <h3>白鸢咖啡馆 · 临窗座</h3>
+          <h3>星梦剧院 · 后台侧走廊</h3>
           <dl>
-            <div><dt>时间</dt><dd>雨后 · 17:42</dd></div>
-            <div><dt>氛围</dt><dd>安静、温暖、略有期待</dd></div>
-            <div><dt>在场</dt><dd>言沁、夏澄 · 另有两名角色在世界中活动</dd></div>
-            <div><dt>目标</dt><dd>赴约，并弄清夏澄想说的话</dd></div>
+            <div><dt>时间</dt><dd>2019年11月8日 21:36</dd></div>
+            <div><dt>位置</dt><dd>晚场散后的后台侧走廊</dd></div>
+            <div><dt>在场人物</dt><dd>沈听洲、颜沁</dd></div>
+            <div><dt>当前事实</dt><dd>校园初见已经发生；第二次相遇刚刚进入对话。</dd></div>
           </dl>
         </section>
 
-        <div class="status-dashboard">
-        <section class="drawer-section status-dashboard__characters" id="statusCharacters" aria-labelledby="partyTitle">
+        <section class="drawer-section" id="statusCharacters" aria-labelledby="charactersTitle">
           <div class="drawer-section__title">
-            <div>
-              <span>CHARACTER ROSTER</span>
-              <h3 id="partyTitle">角色状态总览</h3>
-            </div>
-            <small>4 名角色 · 2 人在场</small>
+            <div><span>STORY CHARACTER ROSTER</span><h3 id="charactersTitle">角色</h3></div>
+            <small>Story-owned · 9 名 · 2 人在场</small>
           </div>
+          <div class="character-grid character-grid--compact" id="characterRoster"></div>
+        </section>
 
-          <div class="character-grid">
-          <article class="status-character-card status-character-card--player">
-            <div class="status-character-card__portrait"><img src="assets/character-yanqin.png" alt="言沁"></div>
-            <div class="status-character-card__identity">
-              <span>PLAYER CHARACTER</span>
-              <h4>言沁</h4>
-              <p>当前由你扮演 · 临窗座</p>
-              <div class="status-character-card__facts"><span>心绪 · 期待</span><span>体力 · 良好</span></div>
-            </div>
-            <span class="status-character-card__tag is-present">在场</span>
+        <section class="drawer-section" id="statusRelationships" aria-labelledby="relationshipsTitle">
+          <div class="drawer-section__title">
+            <div><span>SOURCE ROW PREVIEW</span><h3 id="relationshipsTitle">人物关系</h3></div>
+            <small>3 张表 · 原始行投影 · 不推导方向</small>
+          </div>
+          <div class="semantic-notice">
+            <strong>YQ 快照示意</strong>
+            <p>这里只按内嵌快照列出已知关系表的原始 key/value，不生成“单向/双向”徽标或方向分组；生产数据缺少明确分类时回退到通用状态表。</p>
+          </div>
+          <div class="relationship-list" id="relationshipList"></div>
+        </section>
+
+        <section class="drawer-section" id="statusProject" aria-labelledby="projectTitle">
+          <div class="drawer-section__title">
+            <div><span>CURRENT FACTS · NOT PLOT COMPLETION</span><h3 id="projectTitle">项目与当前事实</h3></div>
+            <small>mainline-progress · 6 行</small>
+          </div>
+          <article class="state-table-card state-table-card--project">
+            <header><div><span>主线与项目状态·第一阶段</span><strong>当前已经成立的事实</strong></div><i class="table-mode">状态表</i></header>
+            <dl id="projectFacts"></dl>
           </article>
-
-          <article class="status-character-card">
-            <div class="status-character-card__portrait"><img src="assets/character-xiacheng.png" alt="夏澄"></div>
-            <div class="status-character-card__identity">
-              <span>STORY CHARACTER</span>
-              <h4>夏澄</h4>
-              <p>咖啡馆店长 · 临窗座</p>
-              <div class="status-character-card__facts"><span>情绪 · 放松</span><span>行动 · 等待回应</span></div>
-            </div>
-            <span class="status-character-card__tag is-present">在场</span>
-          </article>
-
-          <article class="status-character-card">
-            <div class="status-character-card__portrait status-character-card__portrait--initial"><span>苏</span></div>
-            <div class="status-character-card__identity">
-              <span>STORY CHARACTER</span>
-              <h4>苏芙</h4>
-              <p>常客 · 花店街</p>
-              <div class="status-character-card__facts"><span>情绪 · 好奇</span><span>线索 · 1 条</span></div>
-            </div>
-            <span class="status-character-card__tag">离场</span>
-          </article>
-
-          <article class="status-character-card">
-            <div class="status-character-card__portrait status-character-card__portrait--initial status-character-card__portrait--blue"><span>林</span></div>
-            <div class="status-character-card__identity">
-              <span>STORY CHARACTER</span>
-              <h4>林羽</h4>
-              <p>旧友 · 城南车站</p>
-              <div class="status-character-card__facts"><span>情绪 · 平静</span><span>约定 · 明日</span></div>
-            </div>
-            <span class="status-character-card__tag">离场</span>
-          </article>
-          </div>
         </section>
 
-        <section class="drawer-section status-dashboard__relationships" id="statusRelationships" aria-labelledby="relationshipTitle">
+        <section class="drawer-section" id="statusDetails" aria-labelledby="detailsTitle">
           <div class="drawer-section__title">
-            <div>
-              <span>RELATION NETWORK</span>
-              <h3 id="relationshipTitle">言沁的关系网络</h3>
-            </div>
-            <small>3 组进行中</small>
+            <div><span>PROGRESSIVE DISCLOSURE</span><h3 id="detailsTitle">详细状态</h3></div>
+            <small>折叠是界面层级，不是权限</small>
           </div>
-
-          <div class="relationship-list">
-            <article class="relationship-card relationship-card--focus">
-              <div class="relationship-card__heading"><span><i>言</i><i>夏</i></span><div><strong>言沁 × 夏澄</strong><small>最近互动 · 雨后赴约</small></div><b data-rel-phase>默契期</b></div>
-              <div class="relation-fields"><span><small>信任</small><b data-rel-field="trust">64</b></span><span><small>亲密</small><b data-rel-field="intimacy">58</b></span><span><small>依赖</small><b data-rel-field="dependence">42</b></span></div>
-              <p id="relationshipNote" data-rel-description>相处自然，已经能读懂彼此话里的停顿。</p>
-              <div class="relationship-card__change"><span>最近变化</span><strong data-rel-last-change>夏澄开始主动分享重要决定</strong></div>
-            </article>
-            <article class="relationship-card">
-              <div class="relationship-card__heading"><span><i>言</i><i>苏</i></span><div><strong>言沁 × 苏芙</strong><small>最近互动 · 神秘花束</small></div><b>试探期</b></div>
-              <div class="relation-fields"><span><small>信任</small><b>48</b></span><span><small>好奇</small><b>76</b></span><span><small>戒备</small><b>31</b></span></div>
-              <p>彼此保留着好奇，最近的花束似乎另有用意。</p>
-              <div class="relationship-card__change"><span>关系状态</span><strong>友善，但双方仍在观察彼此边界</strong></div>
-            </article>
-            <article class="relationship-card">
-              <div class="relationship-card__heading"><span><i>言</i><i>林</i></span><div><strong>言沁 × 林羽</strong><small>最近互动 · 明日之约</small></div><b>旧友</b></div>
-              <div class="relation-fields"><span><small>信任</small><b>71</b></span><span><small>熟悉</small><b>84</b></span><span><small>疏离</small><b>23</b></span></div>
-              <p>多年默契仍在，但明日的约定可能改变相处方式。</p>
-              <div class="relationship-card__change"><span>未解状态</span><strong>林羽尚未说明这次邀约的真正目的</strong></div>
-            </article>
-          </div>
+          <div class="detail-state-grid" id="detailStates"></div>
         </section>
 
-        <section class="drawer-section status-dashboard__tables" id="statusTables" aria-labelledby="tablesTitle">
-          <div class="drawer-section__title">
-            <div>
-              <span>STATE TABLES</span>
-              <h3 id="tablesTitle">运行中状态表</h3>
-            </div>
-            <small>5 张 · 按来源独立更新</small>
-          </div>
-          <div class="state-table-grid">
-            <article class="state-table-card state-table-card--relations">
-              <header><div><span>人物关系状态表</span><strong>攻略关系总览</strong></div><i class="table-mode">即时 · 规则辅助</i></header>
-              <dl><div><dt>夏澄</dt><dd><b>信任 <em data-rel-field="trust">64</em></b><b>亲密 <em data-rel-field="intimacy">58</em></b><b>依赖 <em data-rel-field="dependence">42</em></b><span data-rel-phase>默契期</span></dd></div><div><dt>苏芙</dt><dd><b>好奇 76</b><b>戒备 31</b><span>试探期</span></dd></div><div><dt>林羽</dt><dd><b>熟悉 84</b><b>疏离 23</b><span>旧友</span></dd></div></dl>
-            </article>
-            <article class="state-table-card">
-              <header><div><span>言沁 · 个人状态</span><strong>行动者状态</strong></div><i class="table-mode">即时更新</i></header>
-              <dl><div><dt>心绪</dt><dd>期待</dd></div><div><dt>持有物</dt><dd>旧笔记、折伞</dd></div><div><dt>短期目标</dt><dd>听完夏澄的话</dd></div></dl>
-            </article>
-            <article class="state-table-card">
-              <header><div><span>夏澄 · 角色状态</span><strong>可见状态</strong></div><i class="table-mode">即时更新</i></header>
-              <dl><div><dt>情绪</dt><dd>放松中</dd></div><div><dt>所在</dt><dd>临窗座</dd></div><div><dt>正在做</dt><dd>藏着纸袋等待回应</dd></div></dl>
-            </article>
-            <article class="state-table-card">
-              <header><div><span>线索推进状态表</span><strong>雨后约定</strong></div><i class="table-mode">即时 · 规则辅助</i></header>
-              <dl><div><dt>短信</dt><dd>已确认</dd></div><div><dt>纸袋</dt><dd>待调查</dd></div><div><dt>备用钥匙</dt><dd>未揭示</dd></div></dl>
-            </article>
-          </div>
+        <section class="generic-fallback">
+          <strong>通用回退始终存在</strong>
+          <p>缺少明确 semantic、版本或量纲时，原始 key/value 会完整显示，不由 WebUI 猜测业务含义。</p>
         </section>
+      </div>
+    </aside>
 
-        <section class="drawer-section status-dashboard__clues" id="statusClues" aria-labelledby="clueTitle">
-          <div class="drawer-section__title">
-            <div>
-              <span>CLUES</span>
-              <h3 id="clueTitle">线索簿</h3>
-            </div>
-            <small data-clue-count>2 条</small>
-          </div>
-          <ul class="clue-list" id="clueList">
-            <li><span aria-hidden="true">01</span><p><strong>雨中的短信</strong>夏澄只写了“老位置见”。</p></li>
-            <li><span aria-hidden="true">02</span><p><strong>靠窗第三桌</strong>两个人第一次见面的座位。</p></li>
-          </ul>
-        </section>
-
-        <section class="drawer-section status-dashboard__tasks" id="statusTasks" aria-labelledby="taskTitle">
-          <div class="drawer-section__title">
-            <div>
-              <span>OPEN THREADS</span>
-              <h3 id="taskTitle">待完成事项</h3>
-            </div>
-            <small>2 项进行中</small>
-          </div>
-          <ul class="task-list">
-            <li class="is-active"><span>01</span><p><strong>听夏澄说完</strong>当前目标 · 白鸢咖啡馆</p><i>进行中</i></li>
-            <li><span>02</span><p><strong>确认纸袋里的物品</strong>由当前互动触发</p><i>待推进</i></li>
-            <li class="is-later"><span>03</span><p><strong>赴林羽的明日之约</strong>明日 · 城南车站</p><i>稍后</i></li>
-          </ul>
-        </section>
+    <aside class="info-drawer info-drawer--plot" id="plotDrawer" data-drawer="plot" role="dialog" aria-modal="true" aria-labelledby="plotDrawerTitle" aria-hidden="true" hidden>
+      <header class="drawer-header">
+        <div>
+          <span class="drawer-kicker">SESSION PLOT STORY</span>
+          <h2 id="plotDrawerTitle">剧情轨迹</h2>
         </div>
+        <button type="button" data-action="close-drawer" aria-label="关闭剧情轨迹">×</button>
+      </header>
+      <div class="plot-toolbar">
+        <div>
+          <strong>服务端防剧透</strong>
+          <small>隐藏事件详情不会先下发到浏览器</small>
+        </div>
+        <button class="spoiler-toggle" type="button" data-action="spoiler" aria-pressed="true">
+          <span aria-hidden="true">◉</span>
+          <span data-spoiler-label>已开启</span>
+        </button>
+      </div>
+      <div class="drawer-scroll">
+        <section class="plot-summary">
+          <article><small>剧情大纲</small><strong>3</strong></article>
+          <article><small>事件池</small><strong>6</strong></article>
+          <article><small>事件</small><strong>15</strong></article>
+          <article><small>本 Session 已注入</small><strong>1</strong></article>
+        </section>
+        <section class="drawer-section">
+          <div class="drawer-section__title">
+            <div><span>OUTLINES</span><h3>剧情大纲</h3></div>
+            <small>首节点与已注入事件可见</small>
+          </div>
+          <div class="plot-line-list" id="outlineList"></div>
+        </section>
+        <section class="drawer-section">
+          <div class="drawer-section__title">
+            <div><span>EVENT POOLS</span><h3>事件池</h3></div>
+            <small>6 池 · soft / forced</small>
+          </div>
+          <div class="plot-line-list plot-line-list--pools" id="poolList"></div>
+        </section>
+        <p class="plot-disclaimer"><strong>“已注入”不是“剧情完成”。</strong>它只表示 directive 已进入对应 Turn；本原型不显示完成百分比。</p>
+      </div>
+    </aside>
+
+    <aside class="info-drawer info-drawer--story" id="storyDrawer" data-drawer="story" role="dialog" aria-modal="true" aria-labelledby="storyDrawerTitle" aria-hidden="true" hidden>
+      <header class="drawer-header">
+        <div>
+          <span class="drawer-kicker">STORY &amp; MEMORY</span>
+          <h2 id="storyDrawerTitle">故事与记忆</h2>
+        </div>
+        <button type="button" data-action="close-drawer" aria-label="关闭故事与记忆">×</button>
+      </header>
+      <nav class="workspace-tabs" aria-label="故事与记忆分类">
+        <button type="button" data-story-tab="summary" aria-selected="true">故事归纳</button>
+        <button type="button" data-story-tab="story-memory" aria-selected="false">剧情记忆</button>
+        <button type="button" data-story-tab="persistent" aria-selected="false">持久记忆</button>
+        <button type="button" data-story-tab="dream" aria-selected="false">Dream</button>
+      </nav>
+      <div class="drawer-scroll story-workspace">
+        <section data-story-panel="summary">
+          <article class="memory-hero">
+            <span>STORY SUMMARY · TURN 1–12</span>
+            <h3>校园初见之后，第二次相遇发生在剧场工作现场</h3>
+            <p>沈听洲在上财分享会回答了颜沁的公开提问。两天后的晚场散后，一页课件滑到剧院侧走廊，构成双方尚未进入私人关系前的第二次接触。</p>
+            <small>示例投影 · Summary 不是章节，也不写回当前状态表</small>
+          </article>
+          <article class="opening-card">
+            <span>OPENING · DEFAULT</span>
+            <h3>最后一个提问</h3>
+            <p>2019年11月6日，上财产业观察分享会。Story 仅有 1 个 Opening；角色与 Opening 通过 `/role_bind` 原子确认。</p>
+          </article>
+        </section>
+        <section data-story-panel="story-memory" hidden>
+          <div class="memory-list">
+            <article><span>剧情事实 · Evidence Turn 1</span><strong>颜沁在分享会公开提问，沈听洲注意到她的问题。</strong><p>来源仍有效；Story Memory 按事实积累，不承担当前状态更新。</p></article>
+            <article><span>剧情事实 · Evidence Turn 12</span><strong>两人在星梦剧院侧走廊再次相遇。</strong><p>来源为已提交 user/assistant Turn。</p></article>
+          </div>
+        </section>
+        <section data-story-panel="persistent" hidden>
+          <div class="memory-list">
+            <article><span>ACTIVE · WORLD FACT</span><strong>沈听洲与颜沁的第一次接触发生在公开校园活动。</strong><p>Persistent Memory 只投影 Evidence 有效的当前 revision。</p></article>
+          </div>
+        </section>
+        <section data-story-panel="dream" hidden>
+          <article class="dream-state">
+            <span>DREAM SERVICE</span>
+            <h3>无生成中的 Proposal</h3>
+            <p>Dream 采用 proposal-first。用户可前往独立管理页生成、检查、编辑与 Apply；服务不可用不会影响对话。</p>
+            <button type="button" data-action="dream">前往 Dream 管理</button>
+          </article>
+        </section>
+      </div>
+    </aside>
+
+    <aside class="info-drawer info-drawer--media" id="mediaDrawer" data-drawer="media" role="dialog" aria-modal="true" aria-labelledby="mediaDrawerTitle" aria-hidden="true" hidden>
+      <header class="drawer-header">
+        <div>
+          <span class="drawer-kicker">VISUAL PIPELINE</span>
+          <h2 id="mediaDrawerTitle">图像工作室</h2>
+        </div>
+        <button type="button" data-action="close-drawer" aria-label="关闭图像工作室">×</button>
+      </header>
+      <div class="drawer-scroll">
+        <section class="visual-pipeline" aria-label="视觉资源链路">
+          <article class="is-ready"><span>01</span><strong>VisualSpec</strong><small>5 个归档规格</small></article>
+          <i aria-hidden="true">→</i>
+          <article><span>02</span><strong>生成 / 上传</strong><small>尚未执行</small></article>
+          <i aria-hidden="true">→</i>
+          <article><span>03</span><strong>Media Asset</strong><small>sprite 0</small></article>
+          <i aria-hidden="true">→</i>
+          <article><span>04</span><strong>角色绑定</strong><small>尚无契约</small></article>
+          <i aria-hidden="true">→</i>
+          <article><span>05</span><strong>Stage Projection</strong><small>当前降级</small></article>
+        </section>
+        <section class="drawer-section">
+          <div class="drawer-section__title">
+            <div><span>ARCHIVED VISUAL SPECS</span><h3>可生图规格</h3></div>
+            <small>不是 runtime Asset</small>
+          </div>
+          <div class="visual-spec-grid" id="visualSpecList"></div>
+        </section>
+        <article class="media-boundary">
+          <strong>媒体边界</strong>
+          <p>实际页面复用现有 VisualBrief、userPrompt、编辑重试/重抽和 Media Library。Play WebUI 不读取 DesignProject 或工作区图片文件。</p>
+          <button type="button" data-action="media-studio">打开现有图像工作室</button>
+        </article>
       </div>
     </aside>
 
@@ -379,31 +400,28 @@
       <header class="drawer-header">
         <div>
           <span class="drawer-kicker">SESSION TRACE</span>
-          <h2 id="logDrawerTitle">全部推演日志</h2>
+          <h2 id="logDrawerTitle">推演日志</h2>
         </div>
         <button type="button" data-action="close-drawer" aria-label="关闭推演日志">×</button>
       </header>
-
       <div class="log-filter" aria-label="日志显示范围：全部记录">
         <span class="log-filter__active">全部记录</span>
-        <small>对白 · 决策 · 工具 · 思考摘要 · 裁定 · 系统事件</small>
+        <small>不筛选、不折叠：正文、调度决策、剧情裁定、thinking 摘要、tool call/result 全部展开</small>
       </div>
-
       <div class="drawer-scroll drawer-scroll--log">
         <section class="session-summary">
           <span>LIVE SESSION</span>
           <h3>本次推演速览</h3>
-          <p>本次会话不依赖固定剧本，内容由玩家行动、模型回应、工具调用和世界状态共同实时推进。</p>
+          <p>第一期完整显示服务端实际提供的决策、工具调用与结果；不提供隐藏开关，也不把未公开的模型思考链伪装成日志。下列记录是目标契约的静态投影示意。</p>
           <div class="session-summary__grid">
-            <article><small>当前场景</small><strong>临窗座 · 雨后 17:42</strong></article>
-            <article><small>最新回合</small><strong>Turn <b data-turn-value>18</b></strong></article>
-            <article><small>玩家角色</small><strong>言沁</strong></article>
-            <article><small>在场角色</small><strong>言沁、夏澄</strong></article>
+            <article><small>当前场景</small><strong>星梦剧院侧走廊</strong></article>
+            <article><small>最新回合</small><strong>Turn 12</strong></article>
+            <article><small>玩家角色</small><strong>沈听洲</strong></article>
+            <article><small>在场角色</small><strong>沈听洲、颜沁</strong></article>
           </div>
-          <div class="session-summary__focus"><span>当前目标</span><strong>弄清夏澄想交付什么，并决定如何回应</strong></div>
         </section>
-
-        <ol class="story-log" id="storyLog"></ol>
+        <ol class="story-log story-log--canonical" id="storyLog"></ol>
+        <p class="log-boundary">“全部显示”指完整呈现服务端已经公开并持久化或随本轮流送的记录；不绕过服务端边界，也不展示随机样本、权重、密钥或隐藏思考链。</p>
       </div>
     </aside>
 

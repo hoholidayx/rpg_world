@@ -1,522 +1,317 @@
-# 独立沉浸式 Session 页面后续迭代计划
+# 独立沉浸式 Session 页面迭代路线图
 
-> 原则：新增独立沉浸式页面，从标准 SessionRoom 抽取共享前端领域运行时；两个页面并行消费同一业务链路。沉浸分页只在前端视图层发生，不修改正文 SSE。每一阶段都能独立验收和回滚。
+> 原则：独立路由、共享 Session 前端领域运行时、标准页面长期可用、正文/SSE 不变、每阶段可独立验收和回滚。
+>
+> 2026-07-26 校准后路线：契约与原型 → 独立页面/runtime → 现有工作台接入 → 类型化状态投影 → sprite 舞台 → 可选建议与生产硬化。
 
-## 1. 目标与优先级
-
-### P0：先解决核心游玩体验
-
-- 舞台化背景与 HUD。
-- 不遮挡立绘的窄幅分页对白。
-- 2K / 4K 可读性。
-- 自由行动与现有快捷回复。
-- 单一“全部推演日志”。
-- 大尺寸角色与世界状态工作台。
-- 纯净舞台。
-- 人物关系按多字段和文本状态展示。
-
-### P1：补齐可靠的角色舞台数据
-
-- 角色与 sprite Asset 的稳定绑定。
-- 多角色站位、层级、姿势和焦点。
-- 无资产或媒体故障时的完整降级。
-
-### P2：可选增强
-
-- 每 turn 动态行动建议。
-- 更丰富的关系网络投影。
-- 性能、无障碍、移动端和独立入口灰度优化。
-
-## 2. 阶段依赖
+## 1. 总体依赖
 
 ```text
-Phase 0 设计与契约冻结
-   └─ Phase 1 独立沉浸式页面与共享运行时
-       ├─ Phase 2 状态工作台与关系投影
-       └─ Phase 3 角色立绘舞台契约
-             └─ Phase 5 整体验收与双页面灰度
-
-Phase 4 动态行动建议为独立可选项，可在 Phase 1 后单独决策。
+Phase 0 设计契约与原型校准
+  └─ Phase 1 独立页面与共享 Session Runtime
+       └─ Phase 2 Plot / Memory / Media / 日志工作台接入
+            └─ Phase 3 类型化 Status semantic
+                 └─ Phase 4 Sprite 绑定与 Stage Projection
+                      └─ Phase 5 可选行动建议与生产硬化
 ```
 
-## 3. Phase 0：设计与数据决策冻结
+Phase 3 与 Phase 4 可以分别设计，但生产灰度前必须都具备明确的通用降级。动态行动建议不是上线沉浸式页面的前置条件。
+
+## 2. Phase 0：设计契约与原型校准
 
 ### 目标
 
-在进入生产代码前，把不会随实现人员变化的产品语义和数据边界写清楚。
+让三份文档、静态原型、当前生产能力和 Story Design 2.0 数据保持一致，消除实现人员需要自行猜测的语义。
 
-### 变更范围
+### 交付
 
-- 以本目录静态稿和三份文档作为设计基线。
-- 完成独立沉浸式 Session 页面的简短 ADR / 技术设计。
-- 确认以下决策：
-  - 没有章节和支线概念。
-  - assistant 完整正文是真源，分页是临时展示投影。
-  - 沉浸式体验使用独立路由与页面组件树，不嵌入 `SessionRoom.tsx`。
-  - 标准与沉浸式页面通过共享前端领域 runtime/provider/hooks/service 复用业务逻辑。
-  - 沉浸分页建立在现有 SSE parser/reducer 组装的 canonical content 之上，不改变 SSE event type、payload 或完成语义，也不按 chunk 分页。
-  - 人物关系是通用多字段状态，不是单值好感度。
-  - 纯净舞台是临时 UI 状态。
-  - thinking 只代表可公开摘要/诊断，不承诺跨刷新完整恢复。
-  - 第一阶段使用现有 StoryQuickReply，不承诺动态分支。
-- 决定关系专用投影是否需要 typed semantic；没有决定时采用通用状态表展示。
-- 为角色舞台投影和动态建议分别建立“需要 / 不需要”的产品决策记录。
+- 固定 Story-owned `storyCharacterId` 身份，不再使用角色挂载概念。
+- 固定 HUD 与舞台菜单的信息架构：顶部保留“角色与状态”“推演日志”，菜单不重复状态入口，舞台不显示固定关系 HUD。
+- 固定 Plot Story、防剧透、Plot Injection 和 mainline Status 的分工。
+- 固定 Memory、Dream、Opening、派生、TTS 与 Media 的入口位置。
+- 固定 Status semantic 的“服务端校验、前端渐进增强、通用回退”方向。
+- 固定 VisualSpec → Asset → binding → Stage Projection 的链路。
+- 用 YQ 复杂度快照更新静态原型。
 
-### 依赖
+### 验收
 
-- 产品、设计、Play WebUI 和数据/媒体边界负责人共同确认。
-- 不依赖后端改动。
+- 文档和原型不出现过时角色身份、可用环境音、固定三分支或剧情完成百分比。
+- 时间显示为 `2019年…`，内部 `SceneTime` 约束说明仍准确。
+- 原型覆盖 9 张可展开角色卡、8 状态表、一张 11 行关系表、3/6/15 Plot、5 VisualSpec、0 QuickReply。
+- 关系卡不生成单向/双向徽标，剧情轨迹文字至少放大 1.5 倍。
+- 推演日志不筛选、不折叠，完整展示原型提供的 decision 与 tool call/result。
+- 无 sprite 时舞台明确降级，不把 VisualSpec 当 Asset。
+- 原型不读写 YQDesignProject。
 
-### 验收门槛
+### 回滚
 
-- 所有参与者对“章节、关系、thinking、立绘、分支”的定义一致。
-- 独立页面、共享运行时和正文 SSE 不变的架构边界已写入 ADR。
-- Phase 1 不需要临时猜测任何后端字段。
-- 视觉稿中的假数据均标注为展示数据或已有真源。
+仅回滚设计目录，无生产影响。
+
+## 3. Phase 1：独立页面与共享 Session Runtime
+
+### 目标
+
+建立独立沉浸式路由和组件树，同时让标准页面与沉浸式页面共享全部核心 Session 行为。
+
+### 实现
+
+- 按领域抽取 `SessionExperienceRuntime`：
+  - Session/role/opening。
+  - history window、消息动作和派生。
+  - stream、requestId stop 与 Context 门禁。
+  - Composer mode/style/model/quick replies。
+  - status、plot、memory、media、TTS query/action。
+- 标准 `SessionRoom` 与 `ImmersiveSessionExperience` 分别成为 runtime 消费者。
+- 沉浸式页面交付 HUD、Stage、Dialogue Dock、Composer、工作台容器和纯净舞台。
+- 新建 DialoguePager，只消费 reducer 组装后的 canonical content。
+- 保持角色 → Opening 原子门禁。
+- StoryQuickReply 按 0–N 渲染；自由行动始终存在。
+
+### 不做
+
+- 不修改 SSE。
+- 不复制发送、停止、历史或角色绑定链路。
+- 不接真实 sprite 绑定。
+- 不直接解释 Status metadata。
+- 不实现动态行动建议。
+
+### 验收
+
+- 两个页面可独立直达、刷新、返回。
+- 普通发送、流式、停止、取消、Context 拒绝和角色失效行为一致。
+- Opening 为 0、1、3 条时流程正确。
+- 不同 SSE chunk 切分不改变最终分页。
+- resize/字号变化后正文无丢失、重复或改写。
+- 纯净舞台隐藏区域 inert，Esc/H 可恢复。
+- Media 故障不阻断发送。
 
 ### 测试
 
-- 文档审计：逐条对照 `AGENTS.md`、SessionRoom 组件、类型和 API。
-- 原型走查：桌面、2K、移动端、键盘和 reduced motion。
+- 共享 runtime 双消费者契约测试。
+- DialoguePager 单元与属性测试。
+- role/opening、Composer、stop、history-page 回归。
+- 1440×900、2560×1440、3840×2160、390×844 视觉测试。
+- 键盘、200% 字号和 reduced motion。
+- Play WebUI build。
 
-### 回滚方式
+### 回滚
 
-本阶段无生产变更，只需修订 ADR 和设计基线。
+隐藏独立路由入口；标准 SessionRoom 保持可用。按领域回退 runtime 抽取，禁止复制第二套链路作为临时补丁。
 
-### 明确不做
-
-- 不新建章节模型。
-- 不新建单值 Relationship 实体。
-- 不先写 sprite 名称匹配逻辑。
-- 不把静态原型假数据接入生产。
-- 不把独立页面误实现为 `SessionRoom.tsx` 内的条件布局。
-- 不为 DialoguePager 设计新的 SSE 分页事件或字段。
-
-## 4. Phase 1：独立沉浸式页面与共享运行时，不改后端/SSE
+## 4. Phase 2：现有工作台接入
 
 ### 目标
 
-使用现有会话 hooks、store 与 API 交付一个可独立进入的沉浸式页面，同时把两个页面都需要的业务逻辑抽入共享前端领域运行时。标准 SessionRoom 保持独立，不承载沉浸式布局和页面状态。
+把已经存在的 Session 能力完整带入沉浸式体验，不新增后端模型。
 
-### 变更范围
+### 实现
 
-#### 4.1 页面与共享运行时
+- 顶部只保留“角色与状态”“推演日志”。
+- 舞台菜单接入：
+  - 剧情轨迹。
+  - 故事与记忆。
+  - 图像工作室。
+  - 会话设置。
+- 剧情轨迹复用 `SessionPlotStory`：
+  - 服务端防剧透。
+  - outlines/pools。
+  - 调度/截止、禁用、注入次数和 Turn。
+- 日志复用 history-page，并加入现有 Narrative Outcome、Plot Injection，以及服务端实际公开的 decision/tool trace；第一期不提供筛选、隐藏或默认折叠。
+- 故事与记忆复用 Summary、Story Memory、Persistent Memory、Evidence 和 Dream 管理入口。
+- 图像工作室复用 VisualBrief、userPrompt、编辑重试/重抽和 Library。
+- 日志消息菜单保留复制、编辑、重试、删除、TTS 和派生。
+- 增加共享玩家友好 SceneTime formatter。
 
-- 新建独立沉浸式 route/page，拥有自己的 composition root 和组件树。
-- 从现有 SessionRoom 组合中抽取共享 `SessionExperienceRuntime` 概念边界，按领域组织 provider、hooks、controller 和 service，而不是建立单一 God hook。
-- 共享运行时统一负责 Session 数据与 history window、stream/stop、角色绑定、Composer actions、主模型、Context Preview、status/media/TTS 等能力。
-- 标准 SessionRoom 与沉浸式页面分别消费同一类型化 runtime；`SessionRoom.tsx` 不引入沉浸式组件、布局分支或 DialoguePager/HUD/抽屉/纯净舞台状态。
-- “共享中间层”是前端领域层，不是 Next.js `middleware.ts`。
-- 沉浸式页面内部新建 `ImmersiveSessionExperience`、`ImmersiveStage`、`ImmersiveHud`、`ActiveDialogueDock`、`SessionTraceDrawer`、`WorldStateDrawer` 和 `CinematicModeController`。
-- 复用 Composer、Timeline 与 Status Rail 的 controller、消息映射、动作和可共享内容层；两个页面可保留各自的视觉组件。
+### 明确语义
 
-#### 4.2 对白与纯前端二次分页
+- Plot 注入不等于剧情完成。
+- mainline Status 是当前事实，Plot Story 是作者轨迹。
+- Plot Injection 第一版只按 Turn 定位，不按标题反向匹配事件。
+- TTS 只使用已提交 assistant message ID。
+- Memory/Dream/Media/Plot 故障局部展示。
 
-分页流水线固定为：
+### 验收
 
-```text
-现有 SSE 事件
-→ 现有 parser/reducer 组装 canonical assistant content
-→ parseAssistantTextSegments()
-→ 前端视图测量 + 沉浸分页策略
-→ 临时视觉页面
-```
-
-- 不新增或修改 SSE event type、payload、顺序、完成语义和 chunk 方式。
-- 为已提交历史和当前流式 assistant 使用同一 canonical content 展示投影；流式期间输入是 reducer 已组装的正文前缀，不直接消费 chunk 边界。
-- 按对白容器实际宽高、字体、字号、行高、段落类型、中文标点和最大行数进行视觉二次分页。
-- 视口、字体缩放、浏览器缩放或屏幕方向变化时重新测量；阅读位置用字符偏移锚定，不依赖旧页码。
-- 流式增长时保持已展示和已读页面稳定，只重算未读尾部，避免当前页抖动。
-- `pageIndex`、`pageCount`、字符页边界和测量缓存只驻留当前页面内存，不写 SSE、API、message metadata、数据库或 localStorage。
-- `history-page` 继续只负责服务端 turn 历史窗口，不能与 DialoguePager 的视觉页状态混用。
-- 对话 Dock 设响应式宽度和像素上限：
-  - 普通桌面约 58%–62%。
-  - 2K 约 48%–54%。
-  - 4K 继续使用像素上限。
-- 默认仅遮挡人物下肢；允许多次“继续阅读”。点击正在显示的页面先补全，再翻页。
-- 支持 AUTO 和 reduced motion。
-
-#### 4.3 操作
-
-- 保留现有 IC/OOC/GM、命令、叙事风格、主模型和 Context Preview。
-- 沉浸式 Composer 视图通过共享 runtime 调用既有 actions，并嵌入 Dialogue Dock。
-- 使用现有 StoryQuickReply 绘制选项卡。
-- 保留 requestId stop、编辑、重试、删除、复制和 TTS。
-
-#### 4.4 工作台
-
-- 沉浸式页面把状态和日志设计为大抽屉；标准 SessionRoom 的现有栏位不受影响。
-- 桌面抽屉目标宽度约 66vw，并设置约 1200–1320px 上限。
-- 移动端使用近全屏 bottom sheet。
-- 日志只保留“全部”，复用 `history-page` 的 turn 加载和共享消息动作。
-
-#### 4.5 纯净舞台
-
-- 菜单进入纯净舞台。
-- 隐藏层同时 `aria-hidden` + `inert`。
-- 保留按钮、H 和 Esc 三种恢复方式。
-- 不写 localStorage。
-
-### 依赖
-
-- Phase 0 语义与页面边界冻结。
-- 现有 `SessionRoom`、`SessionComposer`、`SessionTimeline`、`SessionStatusRail` 中的领域逻辑和内容层可被安全抽取。
-- 不依赖新后端接口，也不依赖 SSE 协议改动。
-
-### 验收门槛
-
-- 标准 SessionRoom 和沉浸式页面可分别直接进入、刷新、离开，且拥有独立组件树。
-- 两个页面对普通发送、流式、停止、角色绑定、Context 门禁和模型切换使用同一共享 runtime 契约，行为一致。
-- `SessionRoom.tsx` 不包含沉浸式 UI 分支和页面状态。
-- assistant 原始 `content`、SSE event type/payload/顺序/完成语义和数据库写入完全不变。
-- 改变同一正文的 SSE chunk 切法不会改变最终视觉分页结果。
-- 同一份完整正文在不同视口可以产生不同页数，但所有页面重组后与原正文逐字符一致，没有丢失、重复或改写。
-- 视口或字体变化后可以重分页；流式增长时已读页保持稳定。
-- 2K 下双角色面部和大部分上半身可见。
-- 4K 下对白不横跨整屏，字号清晰但不无限放大。
-- 长段落能稳定显示 `1/N`、`2/N`。
-- 日志能加载更早/更新记录并跳到最新。
-- 纯净舞台没有隐藏焦点。
-- 媒体背景失败仍能发送消息。
+- 防剧透开启时，浏览器从响应中拿不到应隐藏的事件详情。
+- 可见 Plot 节点能跳到已有 last injection Turn。
+- 日志中 Outcome 与 Plot Injection 各自独立，不污染正文。
+- 2019/2020 时间显示不带序数“第”。
+- Memory/Dream/Media 任一失败，历史与 Composer 仍可用。
+- 从历史 Turn 派生、编辑、重试、删除和 TTS 不丢失。
 
 ### 测试
 
-- 共享 runtime 契约测试：两个页面复用 history、stream/stop、role、Composer actions、模型与 Context Preview。
-- DialoguePager 单元测试：容器 resize、字体/行高、标点、长文本、emoji、方向变化和字符偏移锚定。
-- 分页不变量测试：多种 viewport 页数可不同，页内容重组必须与 canonical content 逐字符一致。
-- SSE chunk 独立性测试：对同一正文使用不同 `text_delta` 切分，最终分页结果一致且协议 fixture 不增加字段。
-- Active Dialogue 与现有流式 reducer 集成测试。
-- 两条页面路由的直达、刷新、返回和 UI 状态隔离测试。
-- Composer 发送/停止回归。
-- `history-page` 前后分页回归，并验证其状态不影响 DialoguePager。
-- role-required、Context 门禁、TTS message ID 回归。
-- Playwright 视觉回归：1440×900、1920×1080、2560×1440、3840×2160、390×844。
-- 键盘、焦点、reduced motion、200% 字体缩放。
-- `cd play_webui && npm run build`。
+- SessionPlotStory 查询与防剧透合约。
+- history Plot Injection 映射。
+- SceneTime formatter。
+- 各工作台 loading/empty/error。
+- history 分页与 Turn 跳转。
+- Media/TTS/Memory 故障隔离。
+- Play WebUI build。
 
-### 回滚方式
+### 回滚
 
-- 隐藏或关闭沉浸式入口/路由即可停止灰度。
-- 标准 SessionRoom 始终保持可用，无需切换其布局、回滚其组件树或迁移数据。
-- 共享 runtime 的变更必须保持标准页面契约测试通过；如需回退，按领域回退抽取，不引入双实现。
-- 不迁移或重写历史数据。
+逐个隐藏菜单入口，标准页面对应能力继续可用。共享 API 和数据不迁移。
 
-### 明确不做
-
-- 不把沉浸式页面实现为 `SessionRoom.tsx` 中的条件分支。
-- 不复制 stream、stop、history、role binding 或 Composer 业务链路。
-- 不为视觉分页新增 SSE 事件、payload 字段或后端分页参数，也不按 chunk 分页。
-- 不做真实多立绘 Asset 绑定。
-- 不做动态 turn 分支。
-- 不做跨刷新 thinking 补写。
-- 不做专用关系网络图。
-- 不删除标准 Timeline 具备的消息操作能力。
-
-## 5. Phase 2：状态工作台与多关系投影
+## 5. Phase 3：类型化 Status semantic
 
 ### 目标
 
-让多角色、多状态表、多组关系、线索和待办在沉浸式 UI 中可浏览，并确保关系语义不退化为单一数字。
+在不破坏通用 Status v2 的前提下，为常见语义提供可靠的渐进增强。
 
-### 变更范围
+### 实现
 
-#### 5.1 通用状态工作台
+- 在 `rpg_core` 定义保留 semantic parser 与 typed contracts：
+  - relationship。
+  - wardrobe。
+  - physiology。
+  - mainline-progress。
+- Play API 输出解析后的只读投影和可选非阻断诊断。
+- `rpg_data` 继续保存原始 metadata/document，不决定展示。
+- WebUI 根据投影选择专用卡，任何缺失或错误退回通用 key/value。
+- 状态工作台按 Scene、角色、常用状态、关系、项目事实、详细状态、其他表渐进披露。
+- normally-hidden / objective-private-state 默认折叠并显示说明，不当作权限。
+- 关系第一期只确认表类型并保留任意多维度、文本摘要与独立 scale；现有契约不足以生成端点或方向视图。
 
-- 当前 scene 独立展示，不与 normal 表混合。
-- 角色卡按玩家、在场、相关离场角色分组。
-- 每个角色展示 0–多张绑定 normal 状态表。
-- 未绑定表继续出现在“其他状态表”。
-- 保留按 session 的 pin 能力。
+### 不做
 
-#### 5.2 人物关系
+- 不创建单值 Relationship 表。
+- 不计算总好感度或自动关系阶段。
+- 不按表名猜 semantic。
+- 不通过 CSS 实现权限。
+- 不让 WebUI 直接修改运行时状态。
 
-- 首先支持一张关系表中的任意 KV：数字、枚举、长文本、未知值。
-- 支持同一关系更新多个字段，例如：
-  - 信任 64 → 68。
-  - 亲密 58 → 60。
-  - 依赖 42 → 44。
-  - 阶段“默契期”→“信赖加深”。
-  - 关系描述和最近变化同步更新。
-- 不默认计算总分，不默认画 0–100 进度条。
-- 没有关系 semantic 时按通用状态表显示。
+### 验收
 
-#### 5.3 可选 typed semantic
-
-如果产品确认需要专用关系卡：
-
-- 在 API / 数据层定义并校验关系表 semantic。
-- 使用 character mount ID 标识关系对象。
-- 明确字段排序、数值范围、单位和失效降级。
-- 为旧表提供“仍按普通表展示”的零迁移回退。
-
-线索和待办同理：只有显式 semantic 才绘制专用卡片；不匹配表名。
-
-### 依赖
-
-- Phase 1 独立沉浸式页面中的 `WorldStateDrawer` 与共享状态领域 runtime。
-- 现有状态表 API 和角色绑定信息。
-- 专用关系卡依赖 typed semantic ADR；通用表版本不依赖后端。
-
-### 验收门槛
-
-- 4 名及以上角色时仍能找到每个角色的状态表。
-- 同一玩家可以有至少 3 组同时进行的关系。
-- 关系卡能显示多个数值、枚举和长文本字段。
-- value 为“未知”“不可见”或任意文本时不报错、不显示错误进度条。
-- 关系字段缺失时不补 0。
-- 自定义普通表不会因名字相似而被误判为关系、线索或任务。
+- YQ 三张关系表均正确投影，其中一张完整显示 11 行原始语义，不显示单向/双向徽标。
+- 非数值、缺失范围、未知 category 和未知版本均安全回退。
+- wardrobe 可见层与详细层分组正确。
+- physiology 默认折叠但可浏览。
+- mainline Status 不与 Plot Story 重复命名或重复表示完成度。
+- 任意旧 Story 无迁移即可继续显示通用表。
 
 ### 测试
 
-- 关系投影单元测试：多字段、文本、缺失、非数值、长值、排序。
-- 多角色、多绑定表、无绑定表、失效角色绑定测试。
-- scene 与 normal 表分离测试。
-- 角色改名、同名角色、无 mount ID 降级测试。
-- 状态表 API 契约测试；若引入 typed semantic，补 `play_api/tests/`。
-- `cd play_webui && npm run build`。
+- Core parser：有效、缺字段、未知版本、非法范围、非法角色引用。
+- Play API typed contract 与 generic fallback。
+- WebUI 专用卡与通用卡。
+- 11 行、多字段、长文本和任意字符串 value。
+- 角色删除/改名/绑定失效。
+- Play WebUI build。
 
-### 回滚方式
+### 回滚
 
-- 专用投影可退回通用状态表卡片。
-- 不改变原状态表 `rows[].key/value` 真源。
-- 不删除或迁移已有用户状态表。
+关闭专用投影后全部退回通用 Status 卡；不改原始 document，不做数据回滚。
 
-### 明确不做
-
-- 不将关系压成一个“好感度”。
-- 不从数值自动生成阶段或关系文案。
-- 不用角色名称替代稳定 ID。
-- 不让 WebUI 绕过 Agent 工具直接修改运行时状态。
-
-## 6. Phase 3：角色立绘资产与舞台投影
+## 6. Phase 4：Sprite 绑定与 Stage Projection
 
 ### 目标
 
-提供与静态稿相当的可靠多立绘舞台，而不是把头像强行放大。
+让多角色立绘舞台建立在真实 Media Asset 和稳定 Story Character 身份上。
 
-### 变更范围
+### 实现
 
-#### 6.1 数据契约
-
-- 定义角色舞台只读投影：
-  - character mount ID。
-  - sprite Asset ID。
-  - pose key。
+- 为 Story Character 建立默认 sprite Asset 绑定。
+- 可选增加 Session 舞台覆盖。
+- 提供只读 `StageCharacterProjection`：
+  - storyCharacterId。
+  - displayName。
+  - spriteAssetId。
+  - poseKey。
   - placement。
-  - z-index。
-  - focus。
-- 决定投影由 scene 返回旁路信息还是经过评审的新只读资源提供。
-- 明确 sprite 选择来源和优先级，例如 session override、story default、角色默认。
+  - zIndex。
+  - focused。
+- 明确优先级：Session override > Story default > 降级。
+- Media Application Service 负责绑定引用保护、Asset 删除门禁和缺失处理。
+- Play WebUI 通过 Play API/Media Client 获取授权资源。
+- 支持 0/1/2/3+ 角色的确定性布局与 speaker focus。
 
-#### 6.2 媒体边界
+### 不做
 
-- 复用 `character_sprite` 媒体类型。
-- Play WebUI 仍只通过 Play API → MediaClient 获取资源。
-- 不直接读取工作区图片文件。
-- 不把 sprite 引用写入消息正文、metadata 或 localStorage。
-- 删除被舞台引用的 Asset 时遵循媒体引用保护。
+- 不从 VisualSpec 直接显示图片。
+- 不按角色名匹配 sprite。
+- 不把 sprite/pose/placement 写进正文或消息 metadata。
+- 不让 Play API 直接读工作区文件。
 
-#### 6.3 前端舞台
+### 验收
 
-- `StageCharacterLayer` 使用稳定 mount ID 渲染。
-- 根据当前结构化说话人切换 focus。
-- 支持 0/1/2/3+ 角色的确定性布局。
-- 资源加载使用预加载、占位和淡入，避免角色闪烁。
-- 缺少 sprite 时降级到头像卡、剪影或首字母。
-
-### 依赖
-
-- 媒体、Play API、数据和 WebUI 对舞台投影契约达成一致。
-- Phase 1 独立沉浸式页面中的 `ImmersiveStage`。
-- 稳定 character mount ID 可从 scene/投影中获得。
-
-### 验收门槛
-
-- 同名角色不会拿错立绘。
-- 角色改名后绑定仍然稳定。
-- 2–5 名角色站位不覆盖关键面部和对白主要区域。
-- speaker 无法匹配时安全降级，不随机聚焦。
-- sprite 缺失、加载失败、媒体服务不可用时聊天仍可用。
-- 纯净舞台只展示可用背景和立绘，不显示加载错误面板。
+- 同名角色、角色改名不会拿错立绘。
+- 删除被绑定 Asset 时被正确阻止或先解除引用。
+- 无 sprite、加载失败和 Media Service 故障时使用降级舞台。
+- 2–5 名角色不遮挡关键面部与主要对白区域。
+- speaker 无 ID 映射时不随机聚焦。
+- 聊天链路不依赖 sprite 成功。
 
 ### 测试
 
-- 舞台投影 API 契约测试。
-- Asset 权限、引用保护、缺失和媒体故障测试。
-- 同名、改名、解除挂载、角色删除测试。
-- 不同角色数量与站位的视觉回归。
-- 背景和 sprite 同时切换时的性能与闪烁测试。
-- `cd play_webui && npm run build`。
+- 绑定 CRUD、归属校验和引用保护。
+- Stage Projection API 合约。
+- 同名、改名、删除、失效 Asset。
+- 多角色站位视觉回归。
+- 背景/sprite 预加载、闪烁和内存上限。
+- Play WebUI build。
 
-### 回滚方式
+### 回滚
 
-- 关闭 sprite 层后继续使用背景 + 头像/说话人铭牌。
-- 舞台投影是只读附加数据，不修改历史和状态表。
-- Media service 故障自动进入降级模式。
+关闭 sprite layer，继续使用背景、头像或剪影。绑定和投影是附加能力，不迁移历史。
 
-### 明确不做
-
-- 不用 `presentCharacters` 名称数组当永久绑定键。
-- 不在 Play API 直接读本地图片。
-- 不让 Media service 导入 Agent runtime。
-- 不把姿势或站位写进 assistant 正文。
-
-## 7. Phase 4：可选的动态行动建议
+## 7. Phase 5：可选行动建议与生产硬化
 
 ### 目标
 
-在确认确有产品价值后，为每 turn 提供结构化、可失败、可回退的行动建议，增强 Galgame 感，但不削弱自由行动。
+在核心体验稳定后，决定是否增加 turn-scoped 动态行动建议，并完成性能、无障碍、移动端和双页面灰度。
 
-### 启动条件
-
-只有同时满足以下条件才进入实施：
+### 动态建议启动条件
 
 - 产品明确区分 StoryQuickReply 与动态建议。
-- 已定义建议生成成本和延迟预算。
-- 已定义是否持久化、刷新恢复和来源展示。
-- 已确定不会泄露内部 reasoning。
-- 自由行动仍是始终可用的第一等入口。
+- 明确生成服务、成本、延迟和故障预算。
+- 明确是否持久化及刷新恢复语义。
+- 自由行动始终可用。
+- 不泄露内部 reasoning。
 
-### 变更范围
+建议最小结构：
 
-- 定义 turn-scoped suggestion 结构：id、label、prompt、mode。
-- 明确建议通过独立受控资源/API 还是既有完成结果的旁路数据交付；无论选哪种方式，都不把 DialoguePager 的视觉页信息加入正文 SSE。
-- 点击建议前允许预览或编辑最终 prompt。
-- 建议失败、为空或超时直接隐藏建议区，保留自由行动。
-- 日志只有在后端有明确来源字段时才标记“预设决策”。
+```ts
+type TurnSuggestion = {
+  id: string
+  label: string
+  prompt: string
+  mode: 'ic' | 'ooc' | 'gm'
+}
+```
 
-### 依赖
+建议失败、为空或超时直接隐藏；点击后仍走标准 Composer 和门禁。不得把建议写进 assistant 正文再解析。
 
-- 独立的 suggestion 数据、服务和前端 client 类型契约。
-- 建议 transport 的单独架构决策；正文 SSE 和沉浸分页不依赖该决策。
-- 生成成本、并发和故障隔离评审。
-
-### 验收门槛
-
-- 建议不从 assistant 自然语言解析。
-- 建议失败不影响正文交付。
-- 正文 SSE 不增加视觉分页事件或字段。
-- 点击建议最终仍走标准 turn 发送与 stop 链路。
-- Context 门禁、角色 invalid 和命令规则不被绕开。
-- assistant `content`、message metadata 和历史正文保持既有真源。
-
-### 测试
-
-- 建议成功、为空、超时、服务失败、重复点击。
-- 建议出现后切换自由行动。
-- 发送后 stop、retry、edit、truncate。
-- 刷新后的既定恢复语义。
-- 成本和延迟监控。
-
-### 回滚方式
-
-- 关闭建议能力后回到 StoryQuickReply + 自由行动。
-- 不迁移历史正文。
-- 不影响 Phase 1–3 的沉浸式舞台。
-
-### 明确不做
-
-- 不把选项嵌进 assistant 正文再用正则提取。
-- 不把模型内部推理直接展示成选项依据。
-- 不因为建议不可用而禁用自由行动。
-
-## 8. Phase 5：性能、无障碍、移动端与双页面灰度
-
-### 目标
-
-完成生产硬化与独立入口灰度，验证标准 SessionRoom 和沉浸式页面长期并存时共享业务逻辑不会分叉。不把“下线标准页面”作为本阶段目标。
-
-### 变更范围
-
-#### 8.1 性能
+### 生产硬化
 
 - 大历史继续使用 turn 分页和窗口缓存。
-- 对立绘与背景做尺寸适配、预加载和内存上限。
-- 避免流式每个字符触发全舞台重排。
-- DialoguePager 缓存稳定消息的测量结果，但缓存只在内存中；流式期间只重算未读尾部。
-- 视口、字体和方向变化时使相关测量缓存失效，并用字符偏移恢复阅读位置。
+- DialoguePager 只重算未读尾部。
+- 背景与 sprite 做尺寸适配、预加载和内存上限。
+- 移动端单焦点角色、bottom sheet 和软键盘适配。
+- 完整键盘、焦点、颜色对比、200% 字号与 reduced motion。
+- 内部环境先开放独立路由，再灰度入口。
+- 对比两页面发送成功率、stop 成功率、首屏稳定时间和局部服务错误率。
 
-#### 8.2 无障碍
+### 验收
 
-- 完整键盘导航、焦点圈、模态焦点管理。
-- 逐字显示与 `aria-live` 分离。
-- 纯净舞台 inert 验证。
-- 颜色对比、200% 字号和 reduced motion。
+- 两个页面核心行为通过同一契约测试。
+- 标准页面无需布局切换即可继续使用。
+- 动态建议关闭后回到 QuickReply + 自由行动。
+- 媒体和工作台错误不影响正文成功率。
+- 390×844 与 4K 均无关键操作不可达。
 
-#### 8.3 移动端
+### 回滚
 
-- 单焦点角色。
-- 底部 Dialogue Dock。
-- 接近全屏的日志/状态 sheet。
-- 软键盘弹起后输入与停止按钮仍可见。
-- 不照搬桌面超大抽屉与多角色横向站位。
+关闭建议能力和沉浸式入口；不迁移或改写历史，标准页面继续服务。
 
-#### 8.4 独立入口灰度
+## 8. 全程架构红线
 
-- 先在内部 / 开发环境开放独立沉浸式路由。
-- 再对可控范围用户展示沉浸式入口；标准 SessionRoom 入口持续可用。
-- 对比发送成功率、stop 成功率、首屏稳定时间、历史加载错误和媒体错误。
-- 对共享 runtime 建立双消费者契约测试和依赖边界检查，防止任一页面复制业务链路。
-- 根据产品反馈决定两个入口的默认优先级，但不把标准页面组件并入或迁移到沉浸式页面。
-
-### 依赖
-
-- Phase 1–3 稳定；Phase 4 可选。
-- 有独立路由入口开关或等价灰度机制。
-
-### 验收门槛
-
-- 两个页面的核心发送、停止、历史和角色绑定行为通过同一契约测试，线上指标无显著差异。
-- 隐藏沉浸式入口后，标准 SessionRoom 不需要切换布局即可继续工作。
-- 正文 SSE 在灰度前后保持同一协议，DialoguePager 结果不受 chunk 切分方式影响。
-- 2K、4K、移动端和低高度横屏均通过视觉回归。
-- 键盘与读屏关键路径通过。
-- 媒体服务不可用时核心聊天 SLA 不受影响。
-- `npm run build` 与相关 Play API 契约测试通过。
-
-### 测试
-
-- 完整回归矩阵和真实长 Session 压力测试。
-- 浏览器缩放、系统字体、触摸和键盘测试。
-- 网络慢速、SSE 中断、Media/TTS 故障注入。
-- 多窗口或快速切换 Session 的 UI 状态隔离。
-
-### 回滚方式
-
-- 关闭或隐藏独立沉浸式入口；标准 SessionRoom 始终保持可用。
-- 保留所有数据和 API 兼容性。
-- 优先关闭有问题的 sprite、动态建议或纯净舞台子能力，不回滚核心聊天。
-
-### 明确不做
-
-- 不以“视觉已经接近原型”为由删除故障降级。
-- 不在没有监控证据时一次性全量切换。
-- 不让 UI 状态污染 Session 业务数据。
-- 不以沉浸式页面完成为由下线标准 SessionRoom，也不把两个页面重新合并成条件布局。
-
-## 9. 建议交付批次
-
-| 批次 | 内容 | 预计风险 | 可见价值 |
-| --- | --- | --- | --- |
-| A | 独立路由、共享 runtime、舞台、HUD、背景、窄幅前端分页对白 | 中 | 高 |
-| B | Composer 嵌入、全部日志、大抽屉、纯净舞台 | 中 | 高 |
-| C | 通用多角色状态工作台、多字段关系展示 | 中 | 高 |
-| D | typed relationship semantic（若需要） | 中 | 中 |
-| E | sprite 绑定与舞台投影 | 高 | 高 |
-| F | 动态行动建议（可选） | 高 | 中 |
-| G | 移动端、无障碍、性能与灰度收尾 | 中 | 高 |
-
-## 10. Definition of Done
-
-独立沉浸式 Session 页面只有同时满足以下条件才算完成：
-
-- 架构上拥有独立路由和 composition root；`SessionRoom.tsx` 不包含沉浸式 UI 分支或页面状态。
-- 标准与沉浸式页面通过共享领域 runtime 复用 Session、history、stream/stop、角色绑定、Composer、模型、Context Preview、status/media/TTS 等能力，不存在两套业务实现。
-- 视觉上以背景、角色和当前对白为中心。
-- 功能上没有丢失标准 SessionRoom 已有的发送、停止、历史、状态、模型、TTS 和管理能力。
-- 分页只发生在现有 parser/reducer 组装 canonical content 之后；不修改 SSE、不按 chunk 分页、不持久化页状态。
-- 同一正文在不同视口允许得到不同页数，但视觉页重组后必须与原文逐字符一致。
-- 数据上不引入章节假设，不改写 assistant 真源，不简化关系，不绕过既有服务边界。
-- 2K / 4K 清晰，移动端可用，键盘和 reduced motion 完整。
-- 所有新增媒体与高级投影都可以失败并降级，核心聊天仍可继续。
-- 生产构建、双页面契约测试和视觉回归通过；关闭沉浸式入口即可回滚，标准页面无需改版或迁移。
+- 不修改正文 SSE 来服务视觉分页。
+- 不把沉浸式页面做成 `SessionRoom.tsx` 的条件布局。
+- 不复制 Agent/Session/Composer 业务链路。
+- 不让 Play WebUI 直接解释未校验 metadata。
+- 不把 Scene 人名数组当持久身份。
+- 不把 VisualSpec 当 runtime Asset。
+- 不把详细状态折叠当权限。
+- 不恢复环境音假能力。
+- 不把 Plot 注入解释为剧情完成。
