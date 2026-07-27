@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_service import main as service_main
+from agent_service import runtime as service_runtime
 from commons.errors import (
     LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
     LLM_SERVICE_UNAVAILABLE_STATUS_CODE,
@@ -594,6 +595,14 @@ class FakeGateway:
     messages = FakeMessages
     sessions = FakeSessions
 
+    @staticmethod
+    def initialize() -> None:
+        return None
+
+    @staticmethod
+    def close() -> None:
+        return None
+
 
 class FakeSessionCatalogApplication:
     def __init__(self, _data: object) -> None:
@@ -621,28 +630,28 @@ class FakeSessionCatalogApplication:
 @pytest.fixture(autouse=True)
 def _patch_session_application_services(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        service_main,
+        service_runtime,
         "SessionCatalogService",
         FakeSessionCatalogApplication,
     )
     monkeypatch.setattr(
-        service_main,
+        service_runtime,
         "SessionRoleService",
         lambda _data: FakeSessionRoles,
     )
     monkeypatch.setattr(
-        service_main,
+        service_runtime,
         "SessionDeletionService",
         lambda _data: FakeSessionDeletion,
     )
     monkeypatch.setattr(
-        service_main,
+        service_runtime,
         "SessionDerivationService",
         lambda _data: FakeSessionDerivations,
     )
 
 
-class InvalidHistoryGateway:
+class InvalidHistoryGateway(FakeGateway):
     catalog = FakeCatalog
     messages = InvalidTurnMessages
     sessions = FakeSessions
@@ -707,7 +716,7 @@ def test_agent_service_contracts(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        service_main.MainLLMSelectionService,
+        service_runtime.MainLLMSelectionService,
         "get_provider_catalog",
         fake_provider_catalog,
     )

@@ -9,8 +9,10 @@ from fastapi.testclient import TestClient
 
 from agent_service import derivation_worker as worker_module
 from agent_service import main as service_main
+from agent_service import runtime as service_runtime
 from agent_service.derivation_notifications import SessionDerivationNotification
 from agent_service.derivation_worker import SessionDerivationWorker
+from commons.runtime_lifecycle import RuntimeCleanupError
 from rpg_core.agent.runtime.derivation import SessionDerivationPreparationError
 from rpg_core.session.deletion import (
     SessionDeleteResult,
@@ -503,6 +505,19 @@ async def test_lifespan_runs_stale_and_llm_cleanup_when_agent_reset_fails(
 ) -> None:
     events: list[str] = []
 
+    class Gateway:
+        catalog = object()
+        sessions = object()
+        messages = object()
+
+        @staticmethod
+        def initialize() -> None:
+            events.append("gateway_initialize")
+
+        @staticmethod
+        def close() -> None:
+            events.append("gateway_close")
+
     class Worker:
         def __init__(
             self,
@@ -536,21 +551,32 @@ async def test_lifespan_runs_stale_and_llm_cleanup_when_agent_reset_fails(
         del args, kwargs
         events.append("llm_reset")
 
+    settings = SimpleNamespace(
+        llm_client=SimpleNamespace(
+            base_url="http://127.0.0.1:1/llm/v1",
+            token="token",
+            request_timeout_ms=1,
+            stream_timeout_ms=1,
+        ),
+        play_events=SimpleNamespace(enabled=False),
+    )
     monkeypatch.setattr(service_main, "SessionDerivationWorker", Worker)
     monkeypatch.setattr(service_main, "AgentManager", Manager)
+    monkeypatch.setattr(service_main, "process_settings", settings)
     monkeypatch.setattr(
         service_main,
         "get_data_service_gateway",
-        lambda: SimpleNamespace(sessions=object()),
+        Gateway,
     )
     monkeypatch.setattr(service_main.LLMClientManager, "aconfigure", configure)
     monkeypatch.setattr(service_main.LLMClientManager, "areset", reset)
 
-    with pytest.raises(RuntimeError, match="agent reset failed"):
+    with pytest.raises(RuntimeCleanupError, match="agent_manager") as exc_info:
         async with service_main.lifespan(service_main.app):
             events.append("yield")
 
     assert events == [
+        "gateway_initialize",
         "llm_configure",
         "worker_start",
         "yield",
@@ -558,8 +584,10 @@ async def test_lifespan_runs_stale_and_llm_cleanup_when_agent_reset_fails(
         "agent_reset",
         "interrupt_stale",
         "llm_reset",
+        "gateway_close",
     ]
-    assert service_main._derivation_worker is None
+    assert str(exc_info.value.failures[0].error) == "agent reset failed"
+    assert not hasattr(service_main.app.state, "agent_service_runtime")
 
 
 def test_derivation_create_query_and_error_contracts(monkeypatch) -> None:
@@ -575,12 +603,15 @@ def test_derivation_create_query_and_error_contracts(monkeypatch) -> None:
     gateway = SimpleNamespace(
         catalog=FakeCatalog(),
         sessions=service,
+        messages=object(),
+        initialize=lambda: None,
+        close=lambda: None,
     )
     monkeypatch.setattr(service_main, "SessionDerivationWorker", FakeLifespanWorker)
     monkeypatch.setattr(service_main, "AgentManager", FakeLifespanAgentManager)
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: gateway)
     monkeypatch.setattr(
-        service_main,
+        service_runtime,
         "SessionDerivationService",
         lambda _gateway: service,
     )

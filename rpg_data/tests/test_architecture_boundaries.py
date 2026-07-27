@@ -176,6 +176,7 @@ CORE_GATEWAY_LOOKUP_ALLOWLIST = frozenset({
 # do not perform a global lookup. Freeze that legacy surface independently so a
 # new caller cannot bypass the lookup guard through constructor injection.
 WHOLE_GATEWAY_REFERENCE_ALLOWLIST = frozenset({
+    "agent_service/runtime.py",
     "media_service/main.py",
     "play_api/data_runtime.py",
     "rpg_mcp/composition.py",
@@ -300,6 +301,23 @@ def test_gateway_lookup_surface_does_not_grow() -> None:
     }
 
     assert actual - GATEWAY_LOOKUP_ALLOWLIST == set()
+
+
+def test_agent_service_gateway_lookup_is_limited_to_lifespan() -> None:
+    path = ROOT / "agent_service/main.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    callers = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(
+            isinstance(child, ast.Name)
+            and child.id == "get_data_service_gateway"
+            for child in ast.walk(node)
+        )
+    }
+
+    assert callers == {"lifespan"}
 
 
 def test_rpg_core_gateway_lookup_is_limited_to_composition_roots() -> None:

@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Literal, cast
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -58,7 +58,8 @@ from agent_service.schemas import (
     AgentTurnCancelResponse,
 )
 from agent_service.derivation_worker import SessionDerivationWorker
-from agent_service.play_event_notifications import SessionDerivationPlayEventSink
+from agent_service.dependencies import get_agent_service_runtime
+from agent_service.runtime import AgentServiceRuntime
 from agent_service.settings import settings as process_settings
 from commons.errors import (
     LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
@@ -77,7 +78,6 @@ from commons.types import JsonObject, JsonValue
 from llm_client.manager import LLMClientManager
 from llm_client.client import LLMServiceClientError
 from play_events import PlayEventPublisher
-from play_events.auth import uses_default_play_event_token
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.telemetry import TurnStats
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload, usage_payload_from_records
@@ -88,22 +88,15 @@ from rpg_core.agent.runtime.main_llm import (
     InvalidMainLLMProviderKey,
     MainLLMProviderCatalog,
     MainLLMSelection,
-    MainLLMSelectionService,
 )
 from rpg_core.session import InvalidTurnMetadataError, SessionManager, validate_turn_metadata
-from rpg_core.session.catalog import SessionCatalogService
 from rpg_core.session.derivation import (
     SessionDerivationError,
     SessionDerivationErrorCode,
-    SessionDerivationService,
 )
-from rpg_core.session.deletion import SessionDeletionService
-from rpg_core.session.role import PlayerCharacterBindingStatus, SessionRoleService
+from rpg_core.session.role import PlayerCharacterBindingStatus
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway
-
-
-_derivation_worker: SessionDerivationWorker | None = None
 
 
 def _service_prefix() -> str:
@@ -112,55 +105,23 @@ def _service_prefix() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _derivation_worker
-    cfg = process_settings.llm_client
-    await LLMClientManager.aconfigure(
-        base_url=cfg.base_url,
-        token=cfg.token,
-        request_timeout_ms=cfg.request_timeout_ms,
-        stream_timeout_ms=cfg.stream_timeout_ms,
+    runtime = await AgentServiceRuntime.create(
+        gateway=get_data_service_gateway(),
+        settings=process_settings,
+        agent_manager=AgentManager,
+        llm_manager=LLMClientManager,
+        derivation_worker_factory=SessionDerivationWorker,
+        event_publisher_factory=PlayEventPublisher,
     )
-    event_cfg = process_settings.play_events
-    event_publisher: PlayEventPublisher | None = None
-    notification_sink = None
-    if event_cfg.enabled:
-        if uses_default_play_event_token(event_cfg.token_env):
-            logger.warning(
-                "{} is not set; using the local Play event token fallback",
-                event_cfg.token_env,
-            )
-        event_publisher = PlayEventPublisher(
-            endpoint_url=event_cfg.endpoint_url,
-            token=event_cfg.token,
-            timeout_ms=event_cfg.timeout_ms,
-        )
-        notification_sink = SessionDerivationPlayEventSink(event_publisher)
-    _derivation_worker = SessionDerivationWorker(
-        session_data=get_data_service_gateway().sessions,
-        notification_sink=notification_sink,
-    )
+    app.state.agent_service_runtime = runtime
     try:
-        await _derivation_worker.start()
         yield
     finally:
-        worker = _derivation_worker
         try:
-            if worker is not None:
-                await worker.stop()
+            await runtime.close()
         finally:
-            try:
-                await AgentManager.areset()
-            finally:
-                try:
-                    if worker is not None:
-                        await worker.interrupt_stale_jobs()
-                finally:
-                    _derivation_worker = None
-                    try:
-                        if event_publisher is not None:
-                            await event_publisher.close()
-                    finally:
-                        await LLMClientManager.areset()
+            if hasattr(app.state, "agent_service_runtime"):
+                del app.state.agent_service_runtime
 
 
 app = FastAPI(title="RPG World Agent Service", lifespan=lifespan)
@@ -190,15 +151,16 @@ async def health() -> AgentHealthResponse:
 @app.get(f"{_service_prefix()}/chat/history", response_model=AgentHistoryResponse)
 async def get_history(
     session_id: str = Query(...),
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentHistoryPayload:
-    agent = _get_agent(session_id)
+    agent = _get_agent(session_id, runtime)
     try:
         await agent.initialize()
     except LLMServiceClientError as exc:
         raise _llm_dependency_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Agent initialization failed: {exc}") from exc
-    rows = get_data_service_gateway().messages.list(session_id)
+    rows = runtime.messages.list(session_id)
     try:
         validate_turn_metadata(rows, label="history")
     except InvalidTurnMetadataError as exc:
@@ -209,8 +171,9 @@ async def get_history(
 @app.get(f"{_service_prefix()}/chat/commands", response_model=AgentCommandsResponse)
 async def list_commands(
     session_id: str = Query(...),
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentCommandsPayload:
-    agent = _get_agent(session_id)
+    agent = _get_agent(session_id, runtime)
     try:
         await agent.initialize()
     except LLMServiceClientError as exc:
@@ -230,8 +193,9 @@ async def get_context_preview(
     session_id: str = Query(...),
     mode: str | None = Query(default=None),
     narrative_style_id: int | None = Query(default=None, gt=0),
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentContextPreviewResponse:
-    agent = _get_agent(session_id)
+    agent = _get_agent(session_id, runtime)
     try:
         if mode is None and narrative_style_id is None:
             payload = await agent.get_context_payload()
@@ -258,10 +222,12 @@ async def get_context_preview(
     f"{_service_prefix()}/chat/main-llm/options",
     response_model=AgentMainLLMProviderCatalogResponse,
 )
-async def get_main_llm_options() -> AgentMainLLMProviderCatalogPayload:
+async def get_main_llm_options(
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> AgentMainLLMProviderCatalogPayload:
     try:
         return _main_llm_catalog_payload(
-            await _main_llm_selection_service().get_provider_catalog()
+            await runtime.main_llm_selection.get_provider_catalog()
         )
     except LLMServiceClientError as exc:
         raise _llm_dependency_http_error(exc) from exc
@@ -274,10 +240,11 @@ async def get_main_llm_options() -> AgentMainLLMProviderCatalogPayload:
 async def get_story_main_llm(
     workspace_id: str = Query(...),
     story_id: int = Query(...),
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentMainLLMSelectionPayload:
     workspace_id = _require_workspace(workspace_id)
     try:
-        selection = await _main_llm_selection_service().resolve_story(
+        selection = await runtime.main_llm_selection.resolve_story(
             workspace_id,
             story_id,
         )
@@ -294,10 +261,11 @@ async def get_story_main_llm(
 )
 async def set_story_main_llm(
     body: AgentMainLLMStoryUpdateRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentMainLLMSelectionPayload:
     workspace_id = _require_workspace(body.workspace_id)
     try:
-        selection = await _main_llm_selection_service().set_story_provider_key(
+        selection = await runtime.main_llm_selection.set_story_provider_key(
             workspace_id,
             body.story_id,
             body.provider_key,
@@ -317,11 +285,12 @@ async def set_story_main_llm(
 )
 async def get_session_main_llm(
     session_id: str = Query(...),
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentMainLLMSelectionPayload:
     session_id = _require_session_id(session_id)
-    _require_ready_catalog_session(session_id)
+    _require_ready_catalog_session(session_id, runtime)
     try:
-        selection = await _main_llm_selection_service().resolve_session(session_id)
+        selection = await runtime.main_llm_selection.resolve_session(session_id)
     except LLMServiceClientError as exc:
         raise _llm_dependency_http_error(exc) from exc
     if selection is None:
@@ -335,10 +304,11 @@ async def get_session_main_llm(
 )
 async def set_session_main_llm(
     body: AgentMainLLMSessionUpdateRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentMainLLMSelectionPayload:
-    _require_ready_catalog_session(_require_session_id(body.session_id))
+    _require_ready_catalog_session(_require_session_id(body.session_id), runtime)
     try:
-        selection = await _main_llm_selection_service().set_session_provider_key(
+        selection = await runtime.main_llm_selection.set_session_provider_key(
             body.session_id,
             body.provider_key,
         )
@@ -355,9 +325,10 @@ async def set_session_main_llm(
 async def list_sessions(
     workspace_id: str = Query(...),
     story_id: int = Query(...),
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentSessionsPayload:
     workspace_id = _require_workspace(workspace_id)
-    sessions = get_data_service_gateway().catalog.list_sessions(workspace_id, story_id)
+    sessions = runtime.catalog.list_sessions(workspace_id, story_id)
     if sessions is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return {
@@ -374,20 +345,23 @@ async def list_sessions(
 )
 async def get_session_overview(
     session_id: str = Query(...),
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentSessionOverviewPayload:
     session_id = _require_session_id(session_id)
-    gateway = get_data_service_gateway()
-    session = _require_ready_catalog_session(session_id)
-    story = gateway.catalog.get_session_story(session_id)
+    session = _require_ready_catalog_session(session_id, runtime)
+    story = runtime.catalog.get_session_story(session_id)
     if story is None:
         raise HTTPException(status_code=404, detail=f"Story for session {session_id!r} not found")
     workspace = next(
-        (item for item in gateway.catalog.list_workspaces() if item.id == session.workspace_id),
+        (
+            item
+            for item in runtime.catalog.list_workspaces()
+            if item.id == session.workspace_id
+        ),
         None,
     )
-    role_service = SessionRoleService(gateway.sessions)
-    state = role_service.get_state(session_id)
-    options = role_service.list_options(session_id)
+    state = runtime.session_roles.get_state(session_id)
+    options = runtime.session_roles.list_options(session_id)
     player = state.player
     player_status: Literal["bound", "invalid"] = (
         "bound"
@@ -418,30 +392,40 @@ async def get_session_overview(
 
 
 @app.post(f"{_service_prefix()}/chat/sessions", response_model=AgentSessionCreateResponse)
-async def create_session(body: AgentSessionCreateRequest) -> AgentSessionCreatePayload:
+async def create_session(
+    body: AgentSessionCreateRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> AgentSessionCreatePayload:
     session = _create_catalog_session(
         body.workspace_id,
         int(body.story_id),
         title=str(body.title or ""),
         description=str(body.description or ""),
+        runtime=runtime,
     )
-    await _bind_session_player_character_if_present(session.id, body.player_character_id)
+    await _bind_session_player_character_if_present(
+        session.id,
+        body.player_character_id,
+        runtime,
+    )
     return {"status": "created", **_session_payload(session)}
 
 
 @app.post(f"{_service_prefix()}/chat/session/ensure", response_model=AgentSessionPayload)
-async def ensure_session(body: AgentSessionEnsureRequest) -> AgentSessionPayloadDict:
+async def ensure_session(
+    body: AgentSessionEnsureRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> AgentSessionPayloadDict:
     workspace_id = _require_workspace(body.workspace_id)
     story_id = int(body.story_id)
-    gateway = get_data_service_gateway()
 
     if body.session_id:
         normalized_session_id = _require_session_id(body.session_id)
-        session = _require_ready_catalog_session(normalized_session_id)
+        session = _require_ready_catalog_session(normalized_session_id, runtime)
         if str(session.workspace_id) != workspace_id or int(session.story_id) != story_id:
             raise HTTPException(status_code=400, detail=f"Session {body.session_id!r} does not belong to workspace/story")
     else:
-        session = SessionCatalogService(gateway.sessions).create_session(
+        session = runtime.session_catalog.create_session(
             workspace_id,
             story_id,
             title=str(body.title or ""),
@@ -449,13 +433,20 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> AgentSessionPayload
         if session is None:
             raise HTTPException(status_code=404, detail="story not found in workspace")
 
-    await _bind_session_player_character_if_present(session.id, body.player_character_id)
+    await _bind_session_player_character_if_present(
+        session.id,
+        body.player_character_id,
+        runtime,
+    )
     return _session_payload(session)
 
 
 @app.post(f"{_service_prefix()}/chat/send")
-async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
-    agent = _get_agent(body.session_id)
+async def chat_send(
+    body: AgentMessageRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> AgentReplyPayload:
+    agent = _get_agent(body.session_id, runtime)
     try:
         if body.mode == "neutral" and body.narrative_style_id is None:
             reply = await agent.send(body.message)
@@ -483,8 +474,11 @@ async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
 
 
 @app.post(f"{_service_prefix()}/chat/session/reload-history")
-async def reload_history(body: AgentSessionMutationRequest) -> JsonObject:
-    agent = _get_agent(body.session_id)
+async def reload_history(
+    body: AgentSessionMutationRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> JsonObject:
+    agent = _get_agent(body.session_id, runtime)
     try:
         await agent.reload_history()
     except FileNotFoundError as exc:
@@ -507,14 +501,14 @@ async def reload_history(body: AgentSessionMutationRequest) -> JsonObject:
 )
 async def create_session_derivation(
     body: AgentSessionDerivationCreateRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentSessionDerivationJobPayload:
-    gateway = get_data_service_gateway()
-    if gateway.catalog.get_session(body.session_id) is None:
+    if runtime.catalog.get_session(body.session_id) is None:
         raise HTTPException(
             status_code=404,
             detail=f"Session {body.session_id!r} not found",
         )
-    service = SessionDerivationService(gateway.sessions)
+    service = runtime.derivations
     try:
         job = service.create_job(
             body.session_id,
@@ -532,7 +526,7 @@ async def create_session_derivation(
         if exc.code == SessionDerivationErrorCode.SOURCE_BUSY.value:
             status_code = 409
         raise _session_derivation_http_error(exc, status_code=status_code) from exc
-    worker = _derivation_worker
+    worker = runtime.derivation_worker
     if worker is None or not worker.running:
         service.fail_job(
             job.id,
@@ -551,8 +545,11 @@ async def create_session_derivation(
     f"{_service_prefix()}/chat/session/derivations/{{job_id}}",
     response_model=AgentSessionDerivationJobResponse,
 )
-async def get_session_derivation(job_id: str) -> AgentSessionDerivationJobPayload:
-    job = SessionDerivationService(get_data_service_gateway().sessions).get_job(job_id)
+async def get_session_derivation(
+    job_id: str,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> AgentSessionDerivationJobPayload:
+    job = runtime.derivations.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Derivation job not found: {job_id}")
     return _derivation_job_payload(job)
@@ -564,13 +561,11 @@ async def get_session_derivation(job_id: str) -> AgentSessionDerivationJobPayloa
 )
 async def delete_session(
     session_id: str = Query(...),
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentSessionDeletePayload:
     normalized_session_id = _require_session_id(session_id)
-    gateway = get_data_service_gateway()
     try:
-        session = SessionDeletionService(gateway.sessions).validate_regular_deletion(
-            normalized_session_id
-        )
+        session = runtime.deletion.validate_regular_deletion(normalized_session_id)
     except SessionDerivationError as exc:
         raise _session_derivation_http_error(exc) from exc
     if session is None:
@@ -580,7 +575,7 @@ async def delete_session(
         )
 
     try:
-        await AgentManager.begin_session_deletion(normalized_session_id)
+        await runtime.agent_manager.begin_session_deletion(normalized_session_id)
     except SessionDeletionInProgressError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
@@ -594,7 +589,7 @@ async def delete_session(
         ) from exc
 
     try:
-        result = SessionDeletionService(gateway.sessions).delete(normalized_session_id)
+        result = runtime.deletion.delete(normalized_session_id)
         if result is None:
             raise HTTPException(
                 status_code=404,
@@ -624,7 +619,7 @@ async def delete_session(
             detail=f"Session deletion failed: {exc}",
         ) from exc
     finally:
-        AgentManager.finish_session_deletion(normalized_session_id)
+        runtime.agent_manager.finish_session_deletion(normalized_session_id)
 
 
 @app.post(
@@ -633,6 +628,7 @@ async def delete_session(
 )
 async def bind_player_character(
     body: AgentPlayerCharacterBindRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> AgentPlayerCharacterBindPayload:
     logger.info(
         "[AgentService] player character bind requested: session_id={}, character_id={}",
@@ -643,6 +639,7 @@ async def bind_player_character(
         result = await _bind_agent_player_character(
             body.session_id,
             body.player_character_id,
+            runtime,
             story_opening_id=body.story_opening_id,
         )
     except HTTPException:
@@ -685,8 +682,12 @@ async def bind_player_character(
 
 
 @app.post(f"{_service_prefix()}/chat/session/turns/{{turn_id}}/truncate")
-async def truncate_history(turn_id: int, body: AgentSessionMutationRequest) -> JsonObject:
-    agent = _get_agent(body.session_id)
+async def truncate_history(
+    turn_id: int,
+    body: AgentSessionMutationRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> JsonObject:
+    agent = _get_agent(body.session_id, runtime)
     try:
         result = await agent.truncate_history_from_turn(turn_id)
     except FileNotFoundError as exc:
@@ -714,7 +715,7 @@ async def truncate_history(turn_id: int, body: AgentSessionMutationRequest) -> J
             turn_id,
             result.get("agent_sync_status"),
         )
-        await AgentManager.drop_session(body.session_id)
+        await runtime.agent_manager.drop_session(body.session_id)
     return result
 
 
@@ -722,8 +723,9 @@ async def truncate_history(turn_id: int, body: AgentSessionMutationRequest) -> J
 async def delete_message(
     message_id: int,
     session_id: str = Query(...),
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
 ) -> JsonObject:
-    agent = _get_agent(session_id)
+    agent = _get_agent(session_id, runtime)
     try:
         deleted = await agent.delete_message(message_id)
     except FileNotFoundError as exc:
@@ -744,8 +746,11 @@ async def delete_message(
 
 
 @app.post(f"{_service_prefix()}/chat/command")
-async def chat_command(body: AgentCommandRequest) -> AgentCommandResultPayload:
-    agent = _get_agent(body.session_id)
+async def chat_command(
+    body: AgentCommandRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> AgentCommandResultPayload:
+    agent = _get_agent(body.session_id, runtime)
     command = body.command.strip()
     try:
         result = await agent.execute_command(command)
@@ -763,8 +768,11 @@ async def chat_command(body: AgentCommandRequest) -> AgentCommandResultPayload:
 
 
 @app.post(f"{_service_prefix()}/chat/stream")
-async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
-    agent = _get_agent(body.session_id)
+async def chat_stream(
+    body: AgentMessageRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> StreamingResponse:
+    agent = _get_agent(body.session_id, runtime)
 
     async def event_generator() -> AsyncIterator[str]:
         try:
@@ -813,23 +821,32 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
 
 
 @app.post(f"{_service_prefix()}/chat/stop", response_model=AgentTurnCancelResponse)
-async def chat_stop(body: AgentStopRequest) -> AgentTurnCancelResponse:
-    agent = _get_agent(body.session_id)
+async def chat_stop(
+    body: AgentStopRequest,
+    runtime: AgentServiceRuntime = Depends(get_agent_service_runtime),
+) -> AgentTurnCancelResponse:
+    agent = _get_agent(body.session_id, runtime)
     result = await agent.cancel_current_turn(request_id=body.request_id)
     return AgentTurnCancelResponse.model_validate(result.to_dict())
 
 
-def _get_agent(session_id: str):
+def _get_agent(
+    session_id: str,
+    runtime: AgentServiceRuntime,
+):
     session_id = _require_session_id(session_id)
-    _require_ready_catalog_session(session_id)
+    _require_ready_catalog_session(session_id, runtime)
     try:
-        return AgentManager.get_or_create(session_id=session_id)
+        return runtime.agent_manager.get_or_create(session_id=session_id)
     except SessionDeletionInProgressError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-def _require_ready_catalog_session(session_id: str) -> models.Session:
-    session = get_data_service_gateway().catalog.get_session(session_id)
+def _require_ready_catalog_session(
+    session_id: str,
+    runtime: AgentServiceRuntime,
+) -> models.Session:
+    session = runtime.catalog.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
     if session.lifecycle != models.SESSION_LIFECYCLE_READY:
@@ -847,10 +864,10 @@ def _create_catalog_session(
     *,
     title: str,
     description: str = "",
+    runtime: AgentServiceRuntime,
 ) -> models.Session:
     workspace_id = _require_workspace(workspace_id)
-    gateway = get_data_service_gateway()
-    session = SessionCatalogService(gateway.sessions).create_session(
+    session = runtime.session_catalog.create_session(
         workspace_id,
         story_id,
         title=title,
@@ -861,7 +878,11 @@ def _create_catalog_session(
     return session
 
 
-async def _bind_session_player_character_if_present(session_id: str, player_character_id: int | None) -> None:
+async def _bind_session_player_character_if_present(
+    session_id: str,
+    player_character_id: int | None,
+    runtime: AgentServiceRuntime,
+) -> None:
     if player_character_id is None:
         logger.debug("[AgentService] skip optional player character bind: session_id={}", session_id)
         return
@@ -871,7 +892,11 @@ async def _bind_session_player_character_if_present(session_id: str, player_char
         player_character_id,
     )
     try:
-        await _bind_agent_player_character(session_id, int(player_character_id))
+        await _bind_agent_player_character(
+            session_id,
+            int(player_character_id),
+            runtime,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except LLMServiceClientError as exc:
@@ -883,6 +908,7 @@ async def _bind_session_player_character_if_present(session_id: str, player_char
 async def _bind_agent_player_character(
     session_id: str,
     player_character_id: int,
+    runtime: AgentServiceRuntime,
     *,
     story_opening_id: int | None = None,
 ) -> CommandResult:
@@ -891,6 +917,7 @@ async def _bind_agent_player_character(
     command = _role_bind_command_for_character_id(
         session_id,
         character_id,
+        runtime,
         story_opening_id=story_opening_id,
     )
     logger.debug(
@@ -899,7 +926,7 @@ async def _bind_agent_player_character(
         character_id,
         command,
     )
-    agent = _get_agent(session_id)
+    agent = _get_agent(session_id, runtime)
     result = await agent.execute_command(command)
     if not result.handled:
         logger.error(
@@ -911,7 +938,7 @@ async def _bind_agent_player_character(
         )
         raise ValueError(f"role bind command was not handled: {command}")
 
-    state = SessionRoleService(get_data_service_gateway().sessions).get_state(session_id)
+    state = runtime.session_roles.get_state(session_id)
     bound_character_id = (
         state.player.character_id if state.player is not None else None
     )
@@ -942,11 +969,11 @@ async def _bind_agent_player_character(
 def _role_bind_command_for_character_id(
     session_id: str,
     player_character_id: int,
+    runtime: AgentServiceRuntime,
     *,
     story_opening_id: int | None = None,
 ) -> str:
-    gateway = get_data_service_gateway()
-    options = SessionRoleService(gateway.sessions).list_options(session_id)
+    options = runtime.session_roles.list_options(session_id)
     logger.debug(
         "[AgentService] resolving role bind index: session_id={}, character_id={}, option_count={}",
         session_id,
@@ -957,7 +984,7 @@ def _role_bind_command_for_character_id(
         if int(option.snapshot.character_id) == int(player_character_id):
             if story_opening_id is None:
                 return f"/role_bind {index}"
-            story = gateway.catalog.get_session_story(session_id)
+            story = runtime.catalog.get_session_story(session_id)
             if story is None:
                 raise FileNotFoundError(f"Story not found for session: {session_id}")
             for opening in story.openings:
@@ -997,10 +1024,6 @@ def _main_llm_option_payload(option) -> AgentMainLLMProviderOptionPayload:  # no
         "model": option.model,
         "context_window": option.context_window,
     }
-
-
-def _main_llm_selection_service() -> MainLLMSelectionService:
-    return MainLLMSelectionService(get_data_service_gateway().catalog)
 
 
 def _main_llm_catalog_payload(
