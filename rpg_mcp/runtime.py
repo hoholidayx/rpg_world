@@ -1864,6 +1864,7 @@ class RuntimeApplication:
                     description=spec.description,
                     selection_mode=spec.selection_mode,
                     priority=spec.priority,
+                    cooldown_minutes=spec.cooldown_minutes,
                     enabled=spec.enabled,
                 ))
             elif action in {"update", "adopt_update"}:
@@ -1875,6 +1876,7 @@ class RuntimeApplication:
                     description=spec.description,
                     selection_mode=spec.selection_mode,
                     priority=spec.priority,
+                    cooldown_minutes=spec.cooldown_minutes,
                     enabled=spec.enabled,
                 ))
             if current is None:
@@ -2478,6 +2480,7 @@ class RuntimeApplication:
                 "description": item.description,
                 "selectionMode": item.selection_mode,
                 "priority": item.priority,
+                "cooldownMinutes": item.cooldown_minutes,
                 "enabled": item.enabled,
             }
             for item in sorted(

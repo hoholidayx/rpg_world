@@ -447,6 +447,7 @@ class PlotPoolSpec(ContractModel):
     description: str = ""
     selection_mode: Literal["random", "sequential"] = "random"
     priority: int = 0
+    cooldown_minutes: int = Field(default=0, ge=0)
     enabled: bool = True
 
     @field_validator("stable_id")

@@ -21,7 +21,7 @@ from rpg_mcp.contracts import (
     digest_json,
 )
 
-AUTHORING_RULES_VERSION = "1.2"
+AUTHORING_RULES_VERSION = "1.3"
 AUTHORING_RULES_SCHEMA_VERSION = "story-authoring-rules/1.0"
 AUTHORING_RULES_RELATIVE_PATH = (
     "schemas/story-authoring-rules-v1.json"
@@ -150,7 +150,10 @@ _MODEL_INFO: dict[str, dict[str, str]] = {
         "domain": "plot",
         "path": "/resources/plotSchedule/pools/*",
         "title": "剧情事件池",
-        "description": "在一次 Scene 调度机会中共享启用、排序和抽取策略的一组剧情事件。",
+        "description": (
+            "在一次 Scene 调度机会中共享启用、排序、抽取和池级冷却策略的一组"
+            "剧情事件。"
+        ),
     },
     "PlotEventSpec": {
         "token": "plot-event",
@@ -265,6 +268,10 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "outlines": "顺序大纲定义。",
     "selectionMode": "有 Scene 调度机会时，池内候选的 random 或 sequential 抽取方式。",
     "priority": "一次 Scene 调度机会内，同类候选之间的相对优先级。",
+    "cooldownMinutes": (
+        "事件池最近一次由自动调度成功注入任意池内事件后，需要经过的"
+        " SceneTime 分钟冷却；0 表示不启用池级冷却。"
+    ),
     "poolRef": "该事件所属事件池的 stableId。",
     "directive": "触发后主 Agent 必须落实的世界与 NPC 行动要求。",
     "suitabilityHint": "自动 soft 候选通过 judge 判断此刻是否适合开始事件的补充条件。",
@@ -351,10 +358,17 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
         "“事实明确且值实际变化”的通用规则。"
     ),
     ("PlotPoolSpec", "description"): (
-        "说明池的主题、用途和自动候选边界，不写单个事件指令。"
+        "说明池的主题、用途、自动候选边界和建议冷却档位，不写单个事件指令。"
     ),
     ("PlotPoolSpec", "enabled"): (
         "是否允许该池参与有 Scene 调度机会的自动候选；手动标记忽略此字段。"
+    ),
+    ("PlotPoolSpec", "cooldownMinutes"): (
+        "池内任意事件最近一次以 scheduler 来源在 pool lane 成功注入后，整个池"
+        "需等待的 SceneTime 分钟；0 表示关闭。手动标记、大纲注入、延期和错误"
+        "都不启动、刷新或清除池级冷却。创作时可按强度分池：日常现实扰动建议"
+        "半天到一天，人际/信息/工作压力建议数天，改变关系结构的戏剧性巧合"
+        "建议十天到数周；这些只是调参建议，不是 schema 默认值。"
     ),
     ("PlotEventSpec", "description"): "管理摘要：事件是什么、为什么存在；不承担触发指令。",
     ("PlotEventSpec", "directive"): (
@@ -365,7 +379,12 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
         "事实和安全边界；不重复 directive，手动标记不会执行该判断。"
     ),
     ("PlotEventSpec", "enabled"): (
-        "是否允许事件参与自动候选；Session 手动标记的临时注入忽略此字段。"
+        "是否允许事件参与自动 pool lane 候选；大纲节点是否候选由大纲与节点"
+        "自身开关决定，Session 手动标记的临时注入也忽略此字段。"
+    ),
+    ("PlotEventSpec", "poolRef"): (
+        "该事件所属事件池的 stableId，用于归属、展示及未绑定大纲时的 pool lane"
+        "调度；只要仍被任意大纲节点引用，就不参与自动 pool lane。"
     ),
     ("PlotEventSpec", "allowRepeat"): (
         "事件自动触发后是否可在后续 Scene 调度机会再次候选；手动标记忽略"
@@ -373,7 +392,8 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
     ),
     ("PlotEventSpec", "repeatCooldownMinutes"): (
         "重复事件两次自动触发之间的 SceneTime 分钟冷却；手动标记忽略冷却，"
-        "且无 SceneTime 的手动注入会解除已有冷却锚点。"
+        "且无 SceneTime 的手动注入会解除该事件已有的事件级冷却锚点，但不"
+        "影响池级冷却。"
     ),
     ("PlotOutlineSpec", "description"): (
         "说明大纲线的主题、节点顺序与用途；节点仍只在 Scene 调度机会中成为"
@@ -512,6 +532,7 @@ _EXAMPLES: dict[str, Any] = {
     "outlines": [],
     "selectionMode": "sequential",
     "priority": 10,
+    "cooldownMinutes": 1440,
     "poolRef": "pool-main",
     "directive": "让停电警报响起，并由在场 NPC 提出两种可调查方向。",
     "suitabilityHint": "玩家已抵达旧城区，且尚未取得录音笔中的第二段录音。",
@@ -624,6 +645,7 @@ _EXAMPLE_OVERRIDES: dict[tuple[str, str], Any] = {
     ("PlotPoolSpec", "stableId"): "pool-main",
     ("PlotPoolSpec", "name"): "主线事件池",
     ("PlotPoolSpec", "description"): "承载推动失踪案调查的主线事件。",
+    ("PlotPoolSpec", "cooldownMinutes"): 4320,
     ("PlotEventSpec", "stableId"): "event-blackout-warning",
     ("PlotEventSpec", "title"): "停电警报",
     ("PlotEventSpec", "description"): "停电前第一次公开警报，为调查线提供转向机会。",
@@ -761,6 +783,36 @@ _PRINCIPLES: tuple[dict[str, str], ...] = (
         ),
     },
     {
+        "ruleId": "principle.plot-outline-binding-isolates-pool-lane",
+        "domain": "plot",
+        "title": "大纲绑定事件不占事件池调度",
+        "description": (
+            "只要剧情事件仍被任意大纲节点引用，就永久从自动 pool lane 候选中"
+            "排除，不受大纲、节点或 Session 覆盖当前是否启用影响。删除该事件"
+            "的全部节点引用后，它才重新成为池内候选。"
+        ),
+        "runtimeEffect": (
+            "大纲 lane 仍按自身节点独立调度；结构绑定避免同一事件同时消耗大纲"
+            "和事件池额度。Session 手动标记仍可绕过该结构隔离。"
+        ),
+    },
+    {
+        "ruleId": "principle.plot-pool-cooldown",
+        "domain": "plot",
+        "title": "事件池共享自动注入冷却",
+        "description": (
+            "cooldownMinutes 是非负 SceneTime 分钟。池内任意事件最近一次由自动"
+            " scheduler 在 pool lane 成功注入后，只要 elapsed 小于当前池配置，"
+            "整个池都不参与候选；elapsed 大于或等于配置时恢复。高强度巧合还应"
+            "只在已有关系、信息或利益张力时通过 suitabilityHint 表达适宜性。"
+        ),
+        "runtimeEffect": (
+            "冷却锚点只认 sourceKind=pool、selectionOrigin=scheduler、"
+            "decisionStatus=triggered 的已提交决策及其 containerId。手动注入、"
+            "大纲注入、deferred 和 error 均不启动、刷新或清除池级冷却。"
+        ),
+    },
+    {
         "ruleId": "principle.plot-manual-snapshot-runtime-only",
         "domain": "plot",
         "title": "手动下一轮标记是 Session 临时快照",
@@ -772,8 +824,9 @@ _PRINCIPLES: tuple[dict[str, str], ...] = (
         ),
         "runtimeEffect": (
             "快照在下一次 neutral、ic 或 gm turn 强制注入，忽略 Scene 调度"
-            "机会、SceneTime、enabled、时间窗、重复和冷却等全部自动规则；"
-            "即使无 SceneTime 也可触发并解除该事件已有冷却锚点。"
+            "机会、SceneTime、enabled、时间窗、大纲绑定、重复和冷却等全部"
+            "自动规则；即使无 SceneTime 也可触发并解除该事件已有的事件级冷却"
+            "锚点，但不会启动、刷新或清除事件池级冷却锚点。"
         ),
     },
     {
@@ -1351,10 +1404,16 @@ creates one opportunity for the next non-OOC turn; `scheduledTime` and
 `deadlineTime` only gate candidates inside that opportunity. Do not author
 no-op Scene changes to poll Plot.
 
+An event referenced by any outline node is exclusive to the outline lane and
+does not consume pool-lane selection until every node reference is removed.
+`cooldownMinutes` pauses the whole pool after any scheduler-origin pool event
+is successfully injected; manual and outline injections do not change that
+pool-level anchor.
+
 Keep `plot_event_mark_next` state out of Story Design and Story Pack fields.
 It is an OOC/GM Session runtime snapshot for the next non-OOC turn, may
 temporarily override `title` and `directive`, and ignores all automatic
-eligibility rules without changing the source event.
+eligibility rules without changing the source event or pool-level cooldown.
 
 Read the relevant generated field reference before adding or substantially
 rewriting that domain:
@@ -1525,14 +1584,22 @@ change the import contract.
   inside an existing opportunity, never as timers. A `forced` automatic
   candidate still requires an opportunity and its SceneTime window; it only
   skips the soft judge.
+- Exclude an event from the automatic pool lane whenever any outline node
+  references it, regardless of current outline/node enablement or Session
+  overrides. Removing all such references returns it to pool eligibility.
+- Apply `cooldownMinutes` to the whole pool from its latest committed
+  scheduler-origin, triggered pool decision. Any pool event starts the same
+  cooldown; manual, outline, deferred, and error decisions neither start nor
+  clear it. The current pool setting applies to an existing anchor.
 - Treat Plot `triggered` as selected-and-injected, not as semantic
   verification, completion, or resolution.
 - Keep `plot_event_mark_next` outside Story Design and Story Pack schemas. It
   is an OOC/GM Session runtime snapshot for the next non-OOC turn. Temporary
   `title`/`directive` overrides do not change the source event, and
   `event_id=null` clears the snapshot. Manual injection ignores the Scene
-  opportunity, SceneTime, enabled state, windows, repeat, and cooldown rules;
-  it can run without SceneTime and clear an existing cooldown anchor.
+  opportunity, SceneTime, enabled state, windows, outline binding, repeat,
+  and cooldown rules. It can run without SceneTime and clear an event-level
+  cooldown anchor, but never starts, refreshes, or clears a pool-level anchor.
 
 ## Story Pack behavior
 

@@ -482,7 +482,7 @@
         },
         "enabled": {
           "default": true,
-          "description": "是否允许事件参与自动候选；Session 手动标记的临时注入忽略此字段。",
+          "description": "是否允许事件参与自动 pool lane 候选；大纲节点是否候选由大纲与节点自身开关决定，Session 手动标记的临时注入也忽略此字段。",
           "examples": [
             true
           ],
@@ -492,7 +492,7 @@
           "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "poolRef": {
-          "description": "该事件所属事件池的 stableId。",
+          "description": "该事件所属事件池的 stableId，用于归属、展示及未绑定大纲时的 pool lane调度；只要仍被任意大纲节点引用，就不参与自动 pool lane。",
           "examples": [
             "pool-main"
           ],
@@ -515,7 +515,7 @@
         },
         "repeatCooldownMinutes": {
           "default": 0,
-          "description": "重复事件两次自动触发之间的 SceneTime 分钟冷却；手动标记忽略冷却，且无 SceneTime 的手动注入会解除已有冷却锚点。",
+          "description": "重复事件两次自动触发之间的 SceneTime 分钟冷却；手动标记忽略冷却，且无 SceneTime 的手动注入会解除该事件已有的事件级冷却锚点，但不影响池级冷却。",
           "examples": [
             0
           ],
@@ -745,11 +745,23 @@
     },
     "PlotPoolSpec": {
       "additionalProperties": false,
-      "description": "在一次 Scene 调度机会中共享启用、排序和抽取策略的一组剧情事件。",
+      "description": "在一次 Scene 调度机会中共享启用、排序、抽取和池级冷却策略的一组剧情事件。",
       "properties": {
+        "cooldownMinutes": {
+          "default": 0,
+          "description": "池内任意事件最近一次以 scheduler 来源在 pool lane 成功注入后，整个池需等待的 SceneTime 分钟；0 表示关闭。手动标记、大纲注入、延期和错误都不启动、刷新或清除池级冷却。创作时可按强度分池：日常现实扰动建议半天到一天，人际/信息/工作压力建议数天，改变关系结构的戏剧性巧合建议十天到数周；这些只是调参建议，不是 schema 默认值。",
+          "examples": [
+            4320
+          ],
+          "minimum": 0,
+          "title": "Cooldownminutes",
+          "type": "integer",
+          "x-authoringRuleId": "field.plot-pool.cooldown-minutes",
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
+        },
         "description": {
           "default": "",
-          "description": "说明池的主题、用途和自动候选边界，不写单个事件指令。",
+          "description": "说明池的主题、用途、自动候选边界和建议冷却档位，不写单个事件指令。",
           "examples": [
             "承载推动失踪案调查的主线事件。"
           ],
@@ -1815,6 +1827,6 @@
   ],
   "title": "RPG World Story Pack v2",
   "type": "object",
-  "x-authoringRulesDigest": "2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52",
-  "x-authoringRulesVersion": "1.2"
+  "x-authoringRulesDigest": "340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431",
+  "x-authoringRulesVersion": "1.3"
 }

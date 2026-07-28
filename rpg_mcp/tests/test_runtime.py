@@ -6,7 +6,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from rpg_mcp.composition import build_runtime_composition
-from rpg_mcp.contracts import StoryDesignDocument
+from rpg_mcp.contracts import StoryDesignDocument, StoryPack
 from rpg_mcp.design_store import DesignProjectStore
 from rpg_mcp.runtime import StoryPackRuntimeError
 
@@ -186,6 +186,7 @@ def _pack() -> dict:
                         "description": "",
                         "selectionMode": "sequential",
                         "priority": 10,
+                        "cooldownMinutes": 4320,
                         "enabled": False,
                     }
                 ],
@@ -256,6 +257,20 @@ def test_checked_in_story_pack_schema_accepts_runtime_fixture() -> None:
     Draft202012Validator(schema).validate(_pack())
 
 
+def test_legacy_story_pack_defaults_missing_pool_cooldown_to_zero() -> None:
+    legacy = _pack()
+    legacy["resources"]["plotSchedule"]["pools"][0].pop(
+        "cooldownMinutes"
+    )
+
+    parsed = StoryPack.model_validate(legacy)
+
+    assert (
+        parsed.resources.plot_schedule.pools[0].cooldown_minutes
+        == 0
+    )
+
+
 def test_story_pack_validation_catches_runtime_owned_text_and_removed_status_fields(
     tmp_path,
 ) -> None:
@@ -322,6 +337,11 @@ def test_story_pack_preview_apply_and_idempotency(tmp_path) -> None:
         )
         assert document["resources"]["statusTables"][0]["rows"]
         assert document["resources"]["visualCatalog"] == []
+        assert (
+            document["resources"]["plotSchedule"]["pools"][0]
+            ["cooldownMinutes"]
+            == 4320
+        )
 
         no_base = deepcopy(pack)
         no_base["packId"] = "test-project-r000003-no-base-style"

@@ -375,6 +375,33 @@ def test_design_requires_story_wide_plot_node_ids() -> None:
         StoryDesignDocument.model_validate(value)
 
 
+def test_plot_pool_cooldown_defaults_to_zero_and_rejects_negative_values() -> None:
+    value = _document().model_dump(by_alias=True)
+    value["resources"]["plotSchedule"] = {
+        "pools": [
+            {
+                "stableId": "pool-main",
+                "name": "主线池",
+            }
+        ]
+    }
+
+    parsed = StoryDesignDocument.model_validate(value)
+    pool = parsed.resources.plot_schedule.pools[0]
+    assert pool.cooldown_minutes == 0
+    assert (
+        parsed.model_dump(by_alias=True)["resources"]["plotSchedule"]
+        ["pools"][0]["cooldownMinutes"]
+        == 0
+    )
+
+    value["resources"]["plotSchedule"]["pools"][0][
+        "cooldownMinutes"
+    ] = -1
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        StoryDesignDocument.model_validate(value)
+
+
 def test_design_rejects_reserved_story_metadata_key() -> None:
     value = _document().model_dump(by_alias=True)
     value["story"]["metadata"]["_rpgStoryDesign"] = {}

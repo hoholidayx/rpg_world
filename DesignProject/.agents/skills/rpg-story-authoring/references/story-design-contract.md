@@ -1,7 +1,7 @@
 # Story design contract
 
-> authoringRulesVersion=1.2 ·
-> catalogDigest=2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52
+> authoringRulesVersion=1.3 ·
+> catalogDigest=340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431
 
 ## Contract and ownership
 
@@ -78,14 +78,22 @@ change the import contract.
   inside an existing opportunity, never as timers. A `forced` automatic
   candidate still requires an opportunity and its SceneTime window; it only
   skips the soft judge.
+- Exclude an event from the automatic pool lane whenever any outline node
+  references it, regardless of current outline/node enablement or Session
+  overrides. Removing all such references returns it to pool eligibility.
+- Apply `cooldownMinutes` to the whole pool from its latest committed
+  scheduler-origin, triggered pool decision. Any pool event starts the same
+  cooldown; manual, outline, deferred, and error decisions neither start nor
+  clear it. The current pool setting applies to an existing anchor.
 - Treat Plot `triggered` as selected-and-injected, not as semantic
   verification, completion, or resolution.
 - Keep `plot_event_mark_next` outside Story Design and Story Pack schemas. It
   is an OOC/GM Session runtime snapshot for the next non-OOC turn. Temporary
   `title`/`directive` overrides do not change the source event, and
   `event_id=null` clears the snapshot. Manual injection ignores the Scene
-  opportunity, SceneTime, enabled state, windows, repeat, and cooldown rules;
-  it can run without SceneTime and clear an existing cooldown anchor.
+  opportunity, SceneTime, enabled state, windows, outline binding, repeat,
+  and cooldown rules. It can run without SceneTime and clear an event-level
+  cooldown anchor, but never starts, refreshes, or clears a pool-level anchor.
 
 ## Story Pack behavior
 

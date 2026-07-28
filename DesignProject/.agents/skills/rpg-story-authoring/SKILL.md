@@ -5,8 +5,8 @@ description: Persist, resume, revise, inspect, validate, and package a portable 
 
 # RPG Story Authoring
 
-<!-- authoring-rules-version: 1.2 -->
-<!-- authoring-rules-digest: 2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52 -->
+<!-- authoring-rules-version: 1.3 -->
+<!-- authoring-rules-digest: 340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431 -->
 
 Persist the Story design as immutable local revisions and use
 `rpg-world-mcp` as the only runtime boundary. Never rely on conversation
@@ -58,10 +58,16 @@ creates one opportunity for the next non-OOC turn; `scheduledTime` and
 `deadlineTime` only gate candidates inside that opportunity. Do not author
 no-op Scene changes to poll Plot.
 
+An event referenced by any outline node is exclusive to the outline lane and
+does not consume pool-lane selection until every node reference is removed.
+`cooldownMinutes` pauses the whole pool after any scheduler-origin pool event
+is successfully injected; manual and outline injections do not change that
+pool-level anchor.
+
 Keep `plot_event_mark_next` state out of Story Design and Story Pack fields.
 It is an OOC/GM Session runtime snapshot for the next non-OOC turn, may
 temporarily override `title` and `directive`, and ignores all automatic
-eligibility rules without changing the source event.
+eligibility rules without changing the source event or pool-level cooldown.
 
 Read the relevant generated field reference before adding or substantially
 rewriting that domain:

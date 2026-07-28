@@ -978,6 +978,8 @@ CREATE TABLE rpg_story_plot_event_pools (
     selection_mode TEXT NOT NULL DEFAULT 'random'
         CHECK (selection_mode IN ('random', 'sequential')),
     priority INTEGER NOT NULL DEFAULT 0,
+    cooldown_minutes INTEGER NOT NULL DEFAULT 0
+        CHECK (cooldown_minutes >= 0),
     enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1161,6 +1163,17 @@ ON rpg_session_plot_schedule_decisions(session_id, id DESC);
 
 CREATE INDEX idx_rpg_session_plot_decisions_source
 ON rpg_session_plot_schedule_decisions(session_id, source_kind, source_id, decision_status, turn_id);
+
+CREATE INDEX idx_rpg_session_plot_decisions_pool_cooldown
+ON rpg_session_plot_schedule_decisions(
+    session_id,
+    source_kind,
+    selection_origin,
+    decision_status,
+    container_id,
+    turn_id DESC,
+    id DESC
+);
 
 INSERT INTO rpg_rp_module_catalog (
     module_name,

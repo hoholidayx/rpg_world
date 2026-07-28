@@ -7,6 +7,12 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from rpg_core.rp_modules.plot_scheduler.diagnostics import (
+    PlotEventBindingDiagnostic,
+    PlotPoolCooldownDiagnostic,
+    evaluate_event_bindings,
+    evaluate_pool_cooldowns,
+)
 from rpg_core.tooling.base import BaseTool
 from rpg_data import models as data_models
 
@@ -32,7 +38,8 @@ class PlotSandboxReadTool(_PlotSandboxTool):
     description = (
         "读取当前 Session 所属 Story 的剧情沙盘定义。可列出或读取事件池、事件、"
         "剧情大纲及节点，也可查看下一次非 OOC turn 的待注入事件快照。"
-        "这是只读工具，不会修改任何剧情定义。"
+        "事件池视图会显示池级冷却及跳过原因；事件视图会显示是否已绑定大纲、"
+        "是否仍可进入自动池候选。这是只读工具，不会修改任何剧情定义或运行态。"
     )
 
     def __init__(
@@ -98,19 +105,56 @@ class PlotSandboxReadTool(_PlotSandboxTool):
         limit: int,
     ) -> dict[str, object]:
         story = self._snapshot.story
+        scene_time = (
+            self._scratch.scene_tracker.get_scene_time()
+            if self._scratch.scene_tracker is not None
+            else None
+        )
+        scene_time_error = (
+            self._scratch.scene_tracker.scene_time_error
+            if self._scratch.scene_tracker is not None
+            else "当前 Session 没有 Scene 状态表"
+        )
+        cooldowns = {
+            item.pool_id: item
+            for item in evaluate_pool_cooldowns(
+                story.pools,
+                self._snapshot.decisions,
+                scene_time=scene_time,
+            )
+        }
+        bindings = {
+            item.event_id: item
+            for item in evaluate_event_bindings(story)
+        }
         if resource == "schedule":
             if item_id is not None:
                 raise ValueError("schedule 不接受 id")
+            outline_bound_count = sum(
+                item.outline_bound for item in bindings.values()
+            )
             return {
                 "resource": resource,
                 "view": "summary",
                 "storyId": story.story_id,
+                "sceneTime": _time_payload(scene_time),
+                "sceneTimeError": "" if scene_time is not None else scene_time_error,
                 "counts": {
                     "pools": len(story.pools),
                     "events": len(story.events),
                     "outlines": len(story.outlines),
                     "nodes": sum(len(item.nodes) for item in story.outlines),
+                    "outlineBoundEvents": outline_bound_count,
+                    "poolLaneEligibleEvents": len(story.events)
+                    - outline_bound_count,
                 },
+                "poolCooldowns": [
+                    _pool_cooldown_payload(cooldowns[pool.id])
+                    for pool in sorted(
+                        story.pools,
+                        key=lambda item: (-item.priority, item.id),
+                    )
+                ],
                 "disabledEventIds": sorted(
                     self._snapshot.overrides.disabled_event_ids
                 ),
@@ -126,7 +170,15 @@ class PlotSandboxReadTool(_PlotSandboxTool):
                 return {
                     "resource": resource,
                     "view": "list",
-                    "items": [_pool_summary(item) for item in page],
+                    "items": [
+                        _pool_summary(
+                            item,
+                            cooldown=cooldowns[item.id],
+                            events=story.events,
+                            bindings=bindings,
+                        )
+                        for item in page
+                    ],
                     "page": info,
                 }
             pool = next((item for item in values if item.id == item_id), None)
@@ -141,10 +193,21 @@ class PlotSandboxReadTool(_PlotSandboxTool):
                 "resource": resource,
                 "view": "detail",
                 "item": {
-                    **_pool_summary(pool),
+                    **_pool_summary(
+                        pool,
+                        cooldown=cooldowns[pool.id],
+                        events=story.events,
+                        bindings=bindings,
+                    ),
                     "description": pool.description,
                     "version": pool.version,
-                    "events": [_event_summary(item) for item in page],
+                    "events": [
+                        _event_summary(
+                            item,
+                            binding=bindings[item.id],
+                        )
+                        for item in page
+                    ],
                     "eventPage": info,
                 },
             }
@@ -158,7 +221,13 @@ class PlotSandboxReadTool(_PlotSandboxTool):
                 return {
                     "resource": resource,
                     "view": "list",
-                    "items": [_event_summary(item) for item in page],
+                    "items": [
+                        _event_summary(
+                            item,
+                            binding=bindings[item.id],
+                        )
+                        for item in page
+                    ],
                     "page": info,
                 }
             event = next((item for item in values if item.id == item_id), None)
@@ -193,8 +262,20 @@ class PlotSandboxReadTool(_PlotSandboxTool):
                 "resource": resource,
                 "view": "detail",
                 "item": {
-                    **_event_detail(event),
-                    "pool": _pool_summary(pool) if pool is not None else None,
+                    **_event_detail(
+                        event,
+                        binding=bindings[event.id],
+                    ),
+                    "pool": (
+                        _pool_summary(
+                            pool,
+                            cooldown=cooldowns[pool.id],
+                            events=story.events,
+                            bindings=bindings,
+                        )
+                        if pool is not None
+                        else None
+                    ),
                     "outlineNodeRefs": page,
                     "outlineNodeRefPage": info,
                     "pendingForNextNonOocTurn": (
@@ -261,7 +342,9 @@ class PlotEventMarkNextTool(_PlotSandboxTool):
     description = (
         "标记当前 Story 的一个事件，在下一次非 OOC turn 强制注入。可用临时 title "
         "和 directive 覆盖一次性快照，不会修改原事件；手动注入忽略自动调度的"
-        "启用、时间窗、重复与冷却规则。event_id 传 null 可清空标记。"
+        "Scene 机会、SceneTime、启用、时间窗、大纲绑定、重复和冷却规则。"
+        "即使没有 SceneTime，也会解除目标事件已有的事件级冷却锚点；它不会"
+        "启动、刷新或清除事件池级冷却锚点。event_id 传 null 可清空标记。"
     )
 
     def __init__(
@@ -363,7 +446,15 @@ class PlotEventMarkNextTool(_PlotSandboxTool):
                 if directive is _UNSET
                 else _non_empty_text(directive, "directive")
             )
-            event_snapshot = _event_detail(event)
+            binding = next(
+                (
+                    item
+                    for item in evaluate_event_bindings(self._snapshot.story)
+                    if item.event_id == event.id
+                ),
+                None,
+            )
+            event_snapshot = _event_detail(event, binding=binding)
             event_snapshot.update({
                 "sourcePoolId": pool.id,
                 "sourcePoolName": pool.name,
@@ -469,19 +560,39 @@ def _page(values, offset: int, limit: int):  # noqa: ANN001, ANN201
     }
 
 
-def _pool_summary(value) -> dict[str, object]:  # noqa: ANN001
+def _pool_summary(  # noqa: ANN001
+    value,
+    *,
+    cooldown: PlotPoolCooldownDiagnostic,
+    events,
+    bindings: dict[int, PlotEventBindingDiagnostic],
+) -> dict[str, object]:
+    pool_events = [event for event in events if event.pool_id == value.id]
+    outline_bound_count = sum(
+        bindings[event.id].outline_bound
+        for event in pool_events
+    )
     return {
         "id": value.id,
         "storyId": value.story_id,
         "name": value.name,
         "selectionMode": value.selection_mode,
         "priority": value.priority,
+        "cooldownMinutes": value.cooldown_minutes,
         "enabled": value.enabled,
+        "eventCount": len(pool_events),
+        "outlineBoundEventCount": outline_bound_count,
+        "poolLaneEligibleEventCount": len(pool_events) - outline_bound_count,
+        "cooldown": _pool_cooldown_payload(cooldown),
     }
 
 
-def _event_summary(value) -> dict[str, object]:  # noqa: ANN001
-    return {
+def _event_summary(  # noqa: ANN001
+    value,
+    *,
+    binding: PlotEventBindingDiagnostic | None,
+) -> dict[str, object]:
+    payload = {
         "id": value.id,
         "storyId": value.story_id,
         "poolId": value.pool_id,
@@ -490,11 +601,26 @@ def _event_summary(value) -> dict[str, object]:  # noqa: ANN001
         "dispatchMode": value.dispatch_mode,
         "enabled": value.enabled,
     }
+    if binding is not None:
+        payload.update({
+            "outlineBound": binding.outline_bound,
+            "outlineNodeReferenceCount": (
+                binding.outline_node_reference_count
+            ),
+            "poolLaneEligibleByBinding": (
+                binding.pool_lane_eligible_by_binding
+            ),
+        })
+    return payload
 
 
-def _event_detail(value) -> dict[str, object]:  # noqa: ANN001
+def _event_detail(  # noqa: ANN001
+    value,
+    *,
+    binding: PlotEventBindingDiagnostic | None = None,
+) -> dict[str, object]:
     return {
-        **_event_summary(value),
+        **_event_summary(value, binding=binding),
         "description": value.description,
         "directive": value.directive,
         "suitabilityHint": value.suitability_hint,
@@ -503,6 +629,30 @@ def _event_detail(value) -> dict[str, object]:  # noqa: ANN001
         "allowRepeat": value.allow_repeat,
         "repeatCooldownMinutes": value.repeat_cooldown_minutes,
         "version": value.version,
+    }
+
+
+def _pool_cooldown_payload(
+    value: PlotPoolCooldownDiagnostic,
+) -> dict[str, object]:
+    anchor = value.anchor
+    return {
+        "poolId": value.pool_id,
+        "cooldownMinutes": value.cooldown_minutes,
+        "status": value.status,
+        "blocksAutomaticSelection": value.blocks_automatic_selection,
+        "elapsedMinutes": value.elapsed_minutes,
+        "remainingMinutes": value.remaining_minutes,
+        "reasonCode": value.reason_code,
+        "reason": value.reason,
+        "anchorDecisionId": anchor.id if anchor is not None else None,
+        "anchorTurnId": anchor.turn_id if anchor is not None else None,
+        "anchorEventId": anchor.event_id if anchor is not None else None,
+        "anchorSceneTime": (
+            _time_payload(anchor.scene_time)
+            if anchor is not None
+            else None
+        ),
     }
 
 

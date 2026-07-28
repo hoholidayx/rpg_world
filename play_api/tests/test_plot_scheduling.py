@@ -35,11 +35,23 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
                 "description": "测试池",
                 "selectionMode": "sequential",
                 "priority": 10,
+                "cooldownMinutes": 120,
                 "enabled": True,
             },
         )
         assert pool.status_code == 201
+        assert pool.json()["cooldownMinutes"] == 120
         pool_id = pool.json()["id"]
+        updated_pool = client.patch(
+            f"{story_path}/pools/{pool_id}",
+            json={"cooldownMinutes": 180},
+        )
+        assert updated_pool.status_code == 200
+        assert updated_pool.json()["cooldownMinutes"] == 180
+        assert client.patch(
+            f"{story_path}/pools/{pool_id}",
+            json={"cooldownMinutes": -1},
+        ).status_code == 422
 
         event = client.post(
             f"{story_path}/events",
@@ -156,14 +168,107 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
 
         runtime = client.get("/play-api/v1/sessions/s_forest001/plot-scheduling")
         assert runtime.status_code == 200
-        assert runtime.json()["sessionId"] == "s_forest001"
+        runtime_payload = runtime.json()
+        assert runtime_payload["sessionId"] == "s_forest001"
         runtime_event = next(
             item
-            for item in runtime.json()["schedule"]["events"]
+            for item in runtime_payload["schedule"]["events"]
             if item["id"] == event_id
         )
         assert runtime_event["title"] == "雨夜加急来信"
-        assert runtime.json()["sceneTime"] is not None
+        assert runtime_payload["sceneTime"] is not None
+        binding = next(
+            item
+            for item in runtime_payload["eventBindings"]
+            if item["eventId"] == event_id
+        )
+        assert binding == {
+            "eventId": event_id,
+            "outlineBound": True,
+            "outlineNodeReferenceCount": 1,
+            "poolLaneEligibleByBinding": False,
+        }
+        initial_cooldown = next(
+            item
+            for item in runtime_payload["poolCooldowns"]
+            if item["poolId"] == pool_id
+        )
+        assert initial_cooldown["cooldownMinutes"] == 180
+        assert initial_cooldown["status"] == "ready"
+        assert initial_cooldown["anchorDecisionId"] is None
+
+        gateway = get_data_service_gateway()
+        scene_time = SceneTime.from_mapping(runtime_payload["sceneTime"])
+        auto_anchor = gateway.plot_scheduling.append_decisions(
+            "s_forest001",
+            9001,
+            (
+                models.StagedPlotScheduleDecision(
+                    source_kind=models.PLOT_SOURCE_POOL,
+                    source_id=event_id,
+                    event_id=event_id,
+                    container_id=pool_id,
+                    decision_status=models.PLOT_DECISION_TRIGGERED,
+                    dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                    selection_origin=models.PLOT_SELECTION_ORIGIN_SCHEDULER,
+                    scene_time=scene_time,
+                    event_snapshot={
+                        "eventTitle": "自动冷却锚点",
+                        "directive": "自动注入快照。",
+                    },
+                    reason="自动调度成功",
+                ),
+            ),
+        )[0]
+        gateway.plot_scheduling.append_decisions(
+            "s_forest001",
+            9002,
+            (
+                models.StagedPlotScheduleDecision(
+                    source_kind=models.PLOT_SOURCE_POOL,
+                    source_id=event_id,
+                    event_id=event_id,
+                    container_id=pool_id,
+                    decision_status=models.PLOT_DECISION_TRIGGERED,
+                    dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                    selection_origin=models.PLOT_SELECTION_ORIGIN_MANUAL,
+                    scene_time=None,
+                    event_snapshot={
+                        "eventTitle": "手动注入不改池锚点",
+                        "directive": "手动注入快照。",
+                    },
+                    reason="手动注入",
+                ),
+            ),
+        )
+        cooled_payload = client.get(
+            "/play-api/v1/sessions/s_forest001/plot-scheduling"
+        ).json()
+        cooldown = next(
+            item
+            for item in cooled_payload["poolCooldowns"]
+            if item["poolId"] == pool_id
+        )
+        assert cooldown["status"] == "cooling_down"
+        assert cooldown["remainingMinutes"] == 180
+        assert cooldown["anchorDecisionId"] == auto_anchor.id
+        assert cooldown["anchorTurnId"] == 9001
+        assert cooldown["anchorEventId"] == event_id
+        persisted = next(
+            item
+            for item in cooled_payload["decisions"]
+            if item["id"] == auto_anchor.id
+        )
+        assert {
+            "version",
+            "createdAt",
+            "updatedAt",
+            "eventSnapshot",
+            "sceneTimeOrdinal",
+            "containerId",
+            "selectionOrigin",
+        }.issubset(persisted)
+        assert persisted["eventSnapshot"]["directive"] == "自动注入快照。"
         max_page = client.get(
             "/play-api/v1/sessions/s_forest001/plot-scheduling?limit=200"
         )

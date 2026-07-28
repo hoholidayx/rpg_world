@@ -119,6 +119,7 @@ class PlotSchedulingDataService:
         description: str,
         selection_mode: str,
         priority: int,
+        cooldown_minutes: int = 0,
         enabled: bool,
     ) -> models.StoryPlotEventPool:
         self._require_story(story_id)
@@ -129,6 +130,7 @@ class PlotSchedulingDataService:
                 description=description,
                 selection_mode=selection_mode,
                 priority=priority,
+                cooldown_minutes=cooldown_minutes,
                 enabled=enabled,
             )
         except IntegrityError as exc:
@@ -144,6 +146,7 @@ class PlotSchedulingDataService:
         description: str,
         selection_mode: str,
         priority: int,
+        cooldown_minutes: int = 0,
         enabled: bool,
     ) -> models.StoryPlotEventPool | None:
         try:
@@ -153,6 +156,7 @@ class PlotSchedulingDataService:
                 description=description,
                 selection_mode=selection_mode,
                 priority=priority,
+                cooldown_minutes=cooldown_minutes,
                 enabled=enabled,
             )
         except IntegrityError as exc:
@@ -420,6 +424,41 @@ class PlotSchedulingDataService:
     ) -> list[models.SessionPlotScheduleDecision]:
         self._require_session(session_id)
         return self._records.list_decisions_for_turns(session_id, turn_ids)
+
+    def list_latest_session_decisions_by_container(
+        self,
+        session_id: str,
+        *,
+        source_kind: str,
+        decision_statuses: Collection[str],
+        selection_origins: Collection[str],
+    ) -> list[models.SessionPlotScheduleDecision]:
+        self._require_session(session_id)
+        normalized_source_kind = str(source_kind)
+        if normalized_source_kind not in models.PLOT_SOURCE_KINDS:
+            raise ValueError(
+                f"unsupported plot source kind: {normalized_source_kind}"
+            )
+        statuses = frozenset(str(status) for status in decision_statuses)
+        unsupported_statuses = statuses - models.PLOT_DECISION_STATUSES
+        if unsupported_statuses:
+            raise ValueError(
+                "unsupported plot decision statuses: "
+                + ", ".join(sorted(unsupported_statuses))
+            )
+        origins = frozenset(str(origin) for origin in selection_origins)
+        unsupported_origins = origins - models.PLOT_SELECTION_ORIGINS
+        if unsupported_origins:
+            raise ValueError(
+                "unsupported plot selection origins: "
+                + ", ".join(sorted(unsupported_origins))
+            )
+        return self._records.list_latest_decisions_by_container(
+            session_id,
+            source_kind=normalized_source_kind,
+            decision_statuses=statuses,
+            selection_origins=origins,
+        )
 
     def summarize_session_decisions(
         self,

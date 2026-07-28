@@ -103,8 +103,10 @@ TurnRuntimeFactory
        │
        ▼
   PlotSchedulingPreflightHook（仅 neutral/IC/GM 且模块有效时）
-  ├─ Scene 时间无效 ─► warning 并跳过
-  ├─ 每轮最多一个到期大纲节点 + 一个池事件
+  ├─ 手动快照 ─► 忽略 Scene 机会、时间、绑定与冷却，forced 暂存
+  ├─ 无 Scene 机会或 Scene 时间无效 ─► 自动 lane 不运行 / warning
+  ├─ 每个机会最多一个到期大纲节点 + 一个可用池事件
+  ├─ 大纲绑定事件、池级冷却中的整池 ─► 排除自动 pool lane
   ├─ forced ─► 直接暂存 triggered + 最终 user runtime suffix 注入
   └─ soft   ─► 独立 LLM 判断；可查已提交 SQL 历史，reason 双重限长，triggered / deferred / error 都先写 scratch
        │
@@ -455,12 +457,14 @@ V1 不拦截当前正文，也没有后置验收、自动修订或针对正文�
 
 Plot Scheduler 有效时，OOC 与 GM 的主工具 registry 额外提供：
 
-- `plot_sandbox_read(resource, id?, offset?, limit?)`：读取本轮不可变的 `schedule | pool | event | outline` snapshot；schedule 同时返回当前 scratch 中对下一次非 OOC turn 生效的待注入快照。
+- `plot_sandbox_read(resource, id?, offset?, limit?)`：读取本轮不可变的 `schedule | pool | event | outline` snapshot；schedule 同时返回当前 scratch 中对下一次非 OOC turn 生效的待注入快照、池冷却和事件大纲绑定诊断。
 - `plot_event_mark_next(event_id, title?, directive?)`：正事件 ID 重新冻结当前 Story 事件，临时 title/directive 只改变一次性快照；省略时冻结原内容。`event_id=null` 清空，且不得带临时字段。
 
-自动 selector 不按每个非 OOC turn 运行：成功 turn 的 active Scene document 最终实际变化时，提交事务留下一个 Scene 调度机会；下一次 `neutral | ic | gm` turn 在 `StatusPreflight` 后消费该机会并使用最新 scratch Scene 抽取候选。消费轮若再次改变 Scene，会留下供再下一轮使用的新机会。OOC、命令、模块禁用、失败或取消不消费也不创建机会；无机会时不调用 selector 或 Judge。
+自动 selector 不按每个非 OOC turn 运行：成功 turn 的 active Scene document 最终实际变化时，提交事务留下一个 Scene 调度机会；下一次 `neutral | ic | gm` turn 在 `StatusPreflight` 后消费该机会并使用最新 scratch Scene 抽取候选。消费轮若再次改变 Scene，会留下供再下一轮使用的新机会。OOC、命令、模块禁用、失败或取消不消费也不创建机会；无机会时不调用 selector 或 Judge。任意大纲节点引用的事件都排除自动 pool lane，不看大纲/节点启用或 Session 覆盖；删除全部引用后才恢复。
 
-每个 Session 只有一个待注入快照，后一次 mark 替换前一次。快照不持有来源 Event/Pool 外键，因而来源编辑、移动或删除都不会改变或级联删除它；Story 与 Session 归属仍受外键约束。OOC 回合只标记而不消费，中间任意数量的 OOC 回合保持快照。下一次 `neutral | ic | gm` preflight 在自动 selector 前将其作为 forced pool lane 注入，即使没有可解析 SceneTime 也执行；显式手动注入不依赖 Scene 调度机会，不受源事件启用、时间窗、重复与冷却等自动候选规则限制，无 SceneTime 的手动触发也覆盖既有冷却锚点。手动注入占用 pool lane，并阻止同一事件在 outline lane 重复。对应 ledger 行使用 `selectionOrigin=manual`，此时 `sceneTime` 与 `sceneTimeOrdinal` 可以为 null。
+事件池的 `cooldownMinutes` 默认为 `0`。池内任意事件最近一次已提交的 scheduler-origin pool `triggered` 决策通过 `container_id` 为整个池建立 SceneTime 冷却锚点；`elapsed < cooldownMinutes` 时整池跳过并可回退低优先级池，边界相等即恢复，当前配置作用于已有锚点。manual、outline、`deferred`、`error` 不启动、刷新或清除这个锚点。
+
+每个 Session 只有一个待注入快照，后一次 mark 替换前一次。快照不持有来源 Event/Pool 外键，因而来源编辑、移动或删除都不会改变或级联删除它；Story 与 Session 归属仍受外键约束。OOC 回合只标记而不消费，中间任意数量的 OOC 回合保持快照。下一次 `neutral | ic | gm` preflight 在自动 selector 前将其作为 forced pool lane 注入，即使没有可解析 SceneTime 也执行；显式手动注入不依赖 Scene 调度机会，不受源事件启用、时间窗、大纲绑定、重复与全部冷却规则限制，无 SceneTime 时也可解除目标事件已有的事件级冷却锚点，但永不影响池级冷却锚点。手动注入占用 pool lane，并阻止同一事件在 outline lane 重复。对应 ledger 行使用 `selectionOrigin=manual`，此时 `sceneTime` 与 `sceneTimeOrdinal` 可以为 null。
 
 mark/clear、手动 consume 和 Scene 机会 consume/replace 都是 `TurnScratch` 的 copy-on-write 状态。标记回合取消或 Provider/commit 失败时不落库；目标回合取消或失败时不消费。成功 commit 才在消息、Plot decision 与状态的同一数据库事务中 CAS 消费/替换；因此 GM 可以在消费旧快照的同一回合标记下一条快照。`/clear`、请求 turn 的 edit/delete/truncate/replace 会清除受影响快照和 Scene 机会，Session 派生不复制二者。
 

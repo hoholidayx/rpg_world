@@ -1722,11 +1722,11 @@ function renderPlotDirectory(plot, plotIndex) {
         ${renderPlotDirectorySection(
           "EVENT POOLS",
           "事件池",
-          "进入事件池查看其候选事件与调度窗口。",
+          "进入事件池查看池级冷却、自动池候选与大纲专用事件。",
           pools.length,
           pools.length
             ? `<div class="resource-grid">${pools.map((pool, index) => (
-              renderPlotPoolSummary(pool, events, index)
+              renderPlotPoolSummary(pool, plotIndex, index)
             )).join("")}</div>`
             : emptyInline("当前没有事件池。"),
         )}
@@ -1793,14 +1793,20 @@ function renderPlotOutlineSummary(outline, index) {
   `;
 }
 
-function renderPlotPoolSummary(pool, events, index) {
+function renderPlotPoolSummary(pool, plotIndex, index) {
   const stableId = String(pool.stableId || "");
   const className = `resource-card plot-directory-card${revisionChangeClass(
     "plotPools",
     stableId || pool.name || index,
   )}`;
-  const eventCount = events.filter(
+  const events = plotIndex.events.all.filter(
     (event) => event.poolRef === stableId,
+  );
+  const outlineBoundCount = events.filter(
+    (event) => collectPlotEventReferences(
+      plotIndex.outlines.all,
+      event.stableId,
+    ).length > 0,
   ).length;
   const content = `
     <div class="card-heading">
@@ -1811,6 +1817,12 @@ function renderPlotPoolSummary(pool, events, index) {
       <span class="plot-card-pills">
         ${statusPill(pool.selectionMode || "random", "is-accent")}
         ${statusPill(
+          Number(pool.cooldownMinutes || 0) > 0
+            ? `冷却 ${pool.cooldownMinutes} 分钟`
+            : "无池级冷却",
+          Number(pool.cooldownMinutes || 0) > 0 ? "is-warning" : "",
+        )}
+        ${statusPill(
           pool.enabled === false ? "停用" : "启用",
           pool.enabled === false ? "is-warning" : "is-positive",
         )}
@@ -1819,7 +1831,9 @@ function renderPlotPoolSummary(pool, events, index) {
     <p class="card-copy">${escapeHtml(pool.description || "暂无事件池说明。")}</p>
     ${metaGrid([
       ["优先级", pool.priority ?? 0],
-      ["事件数", eventCount],
+      ["事件数", events.length],
+      ["自动池候选", events.length - outlineBoundCount],
+      ["大纲专用", outlineBoundCount],
     ])}
     <span class="plot-card-action">展开事件池 <span aria-hidden="true">→</span></span>
   `;
@@ -2022,6 +2036,12 @@ function renderPlotPoolDetail(entry, plotIndex) {
     ),
     "position",
   );
+  const outlineBoundCount = events.filter(
+    (event) => collectPlotEventReferences(
+      plotIndex.outlines.all,
+      event.stableId,
+    ).length > 0,
+  ).length;
   return {
     path: `/resources/plotSchedule/pools/${entry.arrayIndex}`,
     raw: pool,
@@ -2040,6 +2060,12 @@ function renderPlotPoolDetail(entry, plotIndex) {
             <span class="plot-card-pills">
               ${statusPill(pool.selectionMode || "random", "is-accent")}
               ${statusPill(
+                Number(pool.cooldownMinutes || 0) > 0
+                  ? `冷却 ${pool.cooldownMinutes} 分钟`
+                  : "无池级冷却",
+                Number(pool.cooldownMinutes || 0) > 0 ? "is-warning" : "",
+              )}
+              ${statusPill(
                 pool.enabled === false ? "停用" : "启用",
                 pool.enabled === false ? "is-warning" : "is-positive",
               )}
@@ -2049,6 +2075,9 @@ function renderPlotPoolDetail(entry, plotIndex) {
           ${metaGrid([
             ["优先级", pool.priority ?? 0],
             ["事件数", events.length],
+            ["自动池候选", events.length - outlineBoundCount],
+            ["大纲专用", outlineBoundCount],
+            ["池级冷却分钟", pool.cooldownMinutes ?? 0],
           ])}
         </article>
         <section class="plot-detail-section">
@@ -2056,7 +2085,7 @@ function renderPlotPoolDetail(entry, plotIndex) {
             <div>
               <p class="card-eyebrow">POOL EVENTS</p>
               <h3>池内事件</h3>
-              <p>事件按 position 排列；点击后查看完整指令与候选窗口。</p>
+              <p>事件按 position 排列；被任意大纲节点引用的事件只走大纲 lane，不参与自动池抽取。</p>
             </div>
             <span class="plot-section-count">${escapeHtml(events.length)}</span>
           </header>
@@ -2080,6 +2109,10 @@ function renderPlotEventSummary(event, plotIndex, index) {
     "plotEvents",
     stableId || event.title || index,
   )}`;
+  const outlineReferenceCount = collectPlotEventReferences(
+    plotIndex.outlines.all,
+    stableId,
+  ).length;
   const content = `
     <div class="card-heading">
       <div>
@@ -2090,6 +2123,9 @@ function renderPlotEventSummary(event, plotIndex, index) {
         event.dispatchMode || "soft",
         event.dispatchMode === "forced" ? "is-accent" : "",
       )}
+      ${outlineReferenceCount
+        ? statusPill(`大纲专用 · ${outlineReferenceCount} 节点`, "is-accent")
+        : statusPill("自动池候选", "is-positive")}
     </div>
     <p class="card-copy">${escapeHtml(event.description || "暂无事件摘要。")}</p>
     ${metaGrid([
@@ -2146,7 +2182,7 @@ function renderPlotEventDetail(entry, plotIndex) {
         event.title || "未命名事件",
       )}
       <div class="plot-layout">
-        ${renderPlotEventDetailCard(event, entry.arrayIndex)}
+        ${renderPlotEventDetailCard(event, entry.arrayIndex, references.length)}
         <section class="plot-detail-section">
           <header class="plot-section-header">
             <div>
@@ -2171,7 +2207,7 @@ function renderPlotEventDetail(entry, plotIndex) {
   };
 }
 
-function renderPlotEventDetailCard(event, index) {
+function renderPlotEventDetailCard(event, index, outlineReferenceCount) {
   return `
     <article class="resource-card plot-detail-card plot-event-detail${revisionChangeClass(
       "plotEvents",
@@ -2183,6 +2219,9 @@ function renderPlotEventDetailCard(event, index) {
           <h3>${escapeHtml(event.title || "未命名事件")}</h3>
         </div>
         ${statusPill(event.dispatchMode || "soft", event.dispatchMode === "forced" ? "is-accent" : "")}
+        ${outlineReferenceCount
+          ? statusPill(`大纲专用 · ${outlineReferenceCount} 节点`, "is-accent")
+          : statusPill("自动池候选", "is-positive")}
       </div>
       ${
         event.description
@@ -2198,6 +2237,7 @@ function renderPlotEventDetailCard(event, index) {
         ["允许重复", event.allowRepeat ? "是" : "否"],
         ["冷却分钟", event.repeatCooldownMinutes ?? 0],
         ["状态", event.enabled === false ? "停用" : "启用"],
+        ["自动池归属", outlineReferenceCount ? "结构绑定期间排除" : "可参与"],
       ])}
       ${
         event.suitabilityHint
@@ -2239,7 +2279,7 @@ function renderPlotPoolReference(poolRef, resolution) {
       href="${escapeHtml(plotDetailHref("pool", pool.stableId))}"
     >
       <strong>${escapeHtml(pool.name || pool.stableId)}</strong>
-      <p>${escapeHtml(pool.selectionMode || "random")} · 优先级 ${escapeHtml(pool.priority ?? 0)}</p>
+      <p>${escapeHtml(pool.selectionMode || "random")} · 优先级 ${escapeHtml(pool.priority ?? 0)} · 池级冷却 ${escapeHtml(pool.cooldownMinutes ?? 0)} 分钟</p>
       <span>${escapeHtml(pool.stableId)}</span>
     </a>
   `;

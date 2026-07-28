@@ -127,15 +127,25 @@ judge。`scheduledTime`/`deadlineTime` 只是在已有机会内判断候选资�
 SceneTime 门槛，不是定时器；自动 `forced` 仍需机会与时间窗口，只是跳过
 soft judge。`triggered` 仅表示已选择并注入，不表示模型已落实或剧情已完成。
 
+被任意大纲节点引用的事件不参与自动 pool lane，不受大纲/节点启用或 Session
+覆盖影响；删除全部节点引用后才重新成为池候选。`PlotPoolSpec.cooldownMinutes`
+是默认 `0` 的非负 SceneTime 分钟：池内任意事件最近一次由 scheduler 在
+pool lane 成功注入后，整个池在到期前跳过。锚点复用已提交决策的
+`container_id`，manual、outline、deferred、error 都不启动、刷新或清除它。
+冷却档位只是创作建议，不是 schema 默认：日常现实扰动可设半天到一天，
+人际/信息/工作压力可设数天，改变关系结构的戏剧性巧合可设十天到数周，
+并只在已有关系、信息或利益张力时适宜。
+
 `plot_event_mark_next` 不属于 Story Design/Story Pack schema。它仅由 OOC/GM
 在 Session runtime 冻结一个下一次非 OOC turn 使用的临时事件快照；可临时
 覆盖 `title`/`directive`，省略时保留原内容，`event_id=null` 清空。手动注入
-不修改原事件，并忽略 Scene 调度机会、SceneTime、enabled、时间窗、重复和
-冷却等全部自动规则；即使没有 SceneTime 也能触发并解除已有冷却锚点。
+不修改原事件，并忽略 Scene 调度机会、SceneTime、enabled、时间窗、大纲绑定、
+重复和全部冷却规则；即使没有 SceneTime 也能触发并解除事件级冷却锚点，但
+不会启动、刷新或清除池级冷却。
 
 SceneTime 固定使用无“第”字的 `Y 年 M 月 D 日 H 时 [M 分]`。
 
-`authoringRulesVersion=1.2` 与 Story Pack `contractVersion=2.0` 独立演进。
+`authoringRulesVersion=1.3` 与 Story Pack `contractVersion=2.0` 独立演进。
 日常迭代调用 `story_design_validate(profile="draft")`；准备 checkpoint 或
 构建包时调用 `profile="package"`。`diagnostics` 固定包含
 `ruleId/severity/path/message/suggestion/runtimeEffect`。error 是确定性门禁；

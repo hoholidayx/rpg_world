@@ -119,7 +119,7 @@ def test_asset_generation_refreshes_manifest_contract_digest(tmp_path) -> None:
     assert refreshed["contractDigest"] != "0" * 64
     assert refreshed["contractDigest"] == digest_json(contract)
     assert refreshed["contractVersion"] == contract["contractVersion"]
-    assert refreshed["authoringRulesVersion"] == "1.2"
+    assert refreshed["authoringRulesVersion"] == "1.3"
     assert (
         refreshed["authoringRulesDigest"]
         == contract["authoringRules"]["digest"]

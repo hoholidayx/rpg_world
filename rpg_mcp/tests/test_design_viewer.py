@@ -110,6 +110,9 @@ def test_viewer_serves_only_read_only_loopback_apis(tmp_path) -> None:
         assert b"renderFieldGuide" in body
         assert b"authoring-rules" in body
         assert b"invalidateSchemaCache" in body
+        assert b"cooldownMinutes" in body
+        assert "自动池候选".encode() in body
+        assert "大纲专用".encode() in body
 
         status, _, body = _request(port, "GET", "/api/revisions")
         assert status == 200
@@ -130,7 +133,7 @@ def test_viewer_serves_only_read_only_loopback_apis(tmp_path) -> None:
         )
         assert status == 200
         rules = json.loads(body)
-        assert rules["authoringRulesVersion"] == "1.2"
+        assert rules["authoringRulesVersion"] == "1.3"
         assert len(rules["fields"]) >= 150
 
         status, _, body = _request(

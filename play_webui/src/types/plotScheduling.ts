@@ -26,6 +26,7 @@ export type PlotEventPool = {
   description: string
   selectionMode: PlotPoolMode
   priority: number
+  cooldownMinutes: number
   enabled: boolean
   version: number
   createdAt: string
@@ -109,7 +110,31 @@ export type PlotScheduleDecision = {
   reason: string
   errorCode: string
   errorMessage: string
+  version: number
   createdAt: string
+  updatedAt: string
+}
+
+export type PlotPoolCooldown = {
+  poolId: number
+  cooldownMinutes: number
+  status: 'inactive' | 'ready' | 'cooling_down' | 'scene_time_unavailable'
+  blocksAutomaticSelection: boolean
+  elapsedMinutes: number | null
+  remainingMinutes: number | null
+  reasonCode: string
+  reason: string
+  anchorDecisionId: number | null
+  anchorTurnId: number | null
+  anchorEventId: number | null
+  anchorSceneTime: SceneTimeValue | null
+}
+
+export type PlotEventBinding = {
+  eventId: number
+  outlineBound: boolean
+  outlineNodeReferenceCount: number
+  poolLaneEligibleByBinding: boolean
 }
 
 export type SessionPlotSchedule = {
@@ -119,6 +144,8 @@ export type SessionPlotSchedule = {
   schedule: PlotSchedule
   overrides: PlotOverrides
   decisions: PlotScheduleDecision[]
+  poolCooldowns: PlotPoolCooldown[]
+  eventBindings: PlotEventBinding[]
   nextBeforeId: number | null
 }
 
@@ -172,6 +199,7 @@ export type PlotPoolInput = {
   description: string
   selectionMode: PlotPoolMode
   priority: number
+  cooldownMinutes: number
   enabled: boolean
 }
 

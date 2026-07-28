@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -529,6 +530,7 @@ async def test_plot_scheduler_consumes_only_prior_committed_scene_change(
             name="Scene 机会测试池",
             selection_mode=models.PLOT_POOL_SEQUENTIAL,
             priority=100,
+            cooldown_minutes=60,
         )
     )
     event = management.create_event(
@@ -541,6 +543,35 @@ async def test_plot_scheduler_consumes_only_prior_committed_scene_change(
             suitability_hint="信使可以进入当前大厅。",
             dispatch_mode=models.PLOT_DISPATCH_SOFT,
             scheduled_time=SceneTime(2, 3, 4, 5),
+        )
+    )
+    next_high_event = management.create_event(
+        CreatePlotEventCommand(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            pool_id=pool.id,
+            title="冷却结束后的钟声",
+            directive="让大厅中的铜钟在池级冷却结束后响起。",
+            dispatch_mode=models.PLOT_DISPATCH_FORCED,
+        )
+    )
+    low_pool = management.create_pool(
+        CreatePlotPoolCommand(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            name="低优先级备用池",
+            selection_mode=models.PLOT_POOL_SEQUENTIAL,
+            priority=10,
+        )
+    )
+    low_event = management.create_event(
+        CreatePlotEventCommand(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            pool_id=low_pool.id,
+            title="冷却期间的脚步声",
+            directive="让走廊传来一阵不改变主线结构的脚步声。",
+            dispatch_mode=models.PLOT_DISPATCH_FORCED,
         )
     )
     status = scripted_llm_manager.status
@@ -711,24 +742,110 @@ async def test_plot_scheduler_consumes_only_prior_committed_scene_change(
             model="status-model",
             tool_calls=[tool_call(
                 "select_status_targets",
-                '{"scene":false,"tables":[]}',
+                '{"scene":true,"tables":[]}',
             )],
         ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "scene_attr",
+                '{"key":"位置","value":"集成测试大厅北侧门口"}',
+            )],
+        ),
+    )
+    scripted_llm_manager.main_provider().queue_chat(
+        response("走廊里响起了一阵脚步声。", model="config-model")
     )
     third = await integration_status_agent.send("我查看信封的外观。")
 
     assert third.committed_turn_id == 3
-    assert (
-        integration_data_gateway.plot_scheduling.get_scene_opportunity(
-            session.id
-        )
-        is None
-    )
-    assert len(
+    third_decisions = (
         integration_data_gateway.plot_scheduling.list_session_decisions(
             session.id
         )
-    ) == 1
+    )
+    assert [item.event_id for item in third_decisions] == [
+        low_event.id,
+        event.id,
+    ]
+    assert all(item.event_id != next_high_event.id for item in third_decisions)
+    third_main_input = str(
+        [
+            message
+            for message in scripted_llm_manager.main_provider().calls[-1].messages
+            if message.get("role") == "user"
+        ][-1]["content"]
+    )
+    assert low_event.directive in third_main_input
+    assert next_high_event.directive not in third_main_input
+    third_opportunity = (
+        integration_data_gateway.plot_scheduling.get_scene_opportunity(
+            session.id
+        )
+    )
+    assert third_opportunity is not None
+    assert third_opportunity.source_turn_id == 3
+
+    anchor_scene_time = next(
+        item.scene_time
+        for item in third_decisions
+        if item.event_id == event.id
+    )
+    assert anchor_scene_time is not None
+    boundary_scene_time = anchor_scene_time.update(
+        hour=anchor_scene_time.hour + 1
+    )
+    status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                '{"scene":true,"tables":[]}',
+            )],
+        ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "scene_attr",
+                json.dumps(
+                    {
+                        "key": "时间",
+                        "value": boundary_scene_time.format(),
+                    },
+                    ensure_ascii=False,
+                ),
+            )],
+        ),
+    )
+    scripted_llm_manager.main_provider().queue_chat(
+        response("整点时，铜钟在大厅里响起。", model="config-model")
+    )
+
+    fourth = await integration_status_agent.send("我继续检查信封。")
+
+    assert fourth.committed_turn_id == 4
+    fourth_decisions = (
+        integration_data_gateway.plot_scheduling.list_session_decisions(
+            session.id
+        )
+    )
+    assert [item.event_id for item in fourth_decisions] == [
+        next_high_event.id,
+        low_event.id,
+        event.id,
+    ]
+    fourth_main_input = str(
+        [
+            message
+            for message in scripted_llm_manager.main_provider().calls[-1].messages
+            if message.get("role") == "user"
+        ][-1]["content"]
+    )
+    assert next_high_event.directive in fourth_main_input
 
 
 @pytest.mark.asyncio

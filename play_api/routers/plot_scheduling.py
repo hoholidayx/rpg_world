@@ -19,6 +19,7 @@ from rpg_core.rp_modules.plot_scheduler import (
     CreatePlotPoolCommand,
     PLOT_PATCH_UNSET,
     PlotDefinitionInUseError,
+    PlotPoolCooldownDiagnostic,
     PlotPatchUnset,
     PlotScheduleConflictError,
     PlotScheduleManagementService,
@@ -31,6 +32,7 @@ from rpg_core.rp_modules.plot_scheduler import (
     UpdatePlotNodeCommand,
     UpdatePlotOutlineCommand,
     UpdatePlotPoolCommand,
+    evaluate_event_bindings,
 )
 from rpg_data import models
 
@@ -58,6 +60,7 @@ class PlotPoolInput(BaseModel):
     description: str = ""
     selection_mode: str = Field(default=models.PLOT_POOL_RANDOM, alias="selectionMode")
     priority: int = 0
+    cooldown_minutes: int = Field(default=0, alias="cooldownMinutes", ge=0)
     enabled: bool = True
 
 
@@ -68,6 +71,11 @@ class PlotPoolPatch(BaseModel):
     description: str | None = None
     selection_mode: str | None = Field(default=None, alias="selectionMode")
     priority: int | None = None
+    cooldown_minutes: int | None = Field(
+        default=None,
+        alias="cooldownMinutes",
+        ge=0,
+    )
     enabled: bool | None = None
 
 
@@ -80,6 +88,7 @@ class PlotPoolResponse(BaseModel):
     description: str
     selection_mode: str = Field(alias="selectionMode")
     priority: int
+    cooldown_minutes: int = Field(alias="cooldownMinutes")
     enabled: bool
     version: int
     created_at: str = Field(alias="createdAt")
@@ -267,7 +276,42 @@ class PlotDecisionResponse(BaseModel):
     reason: str
     error_code: str = Field(alias="errorCode")
     error_message: str = Field(alias="errorMessage")
+    version: int
     created_at: str = Field(alias="createdAt")
+    updated_at: str = Field(alias="updatedAt")
+
+
+class PlotPoolCooldownResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    pool_id: int = Field(alias="poolId")
+    cooldown_minutes: int = Field(alias="cooldownMinutes")
+    status: Literal[
+        "inactive",
+        "ready",
+        "cooling_down",
+        "scene_time_unavailable",
+    ]
+    blocks_automatic_selection: bool = Field(alias="blocksAutomaticSelection")
+    elapsed_minutes: int | None = Field(alias="elapsedMinutes")
+    remaining_minutes: int | None = Field(alias="remainingMinutes")
+    reason_code: str = Field(alias="reasonCode")
+    reason: str
+    anchor_decision_id: int | None = Field(alias="anchorDecisionId")
+    anchor_turn_id: int | None = Field(alias="anchorTurnId")
+    anchor_event_id: int | None = Field(alias="anchorEventId")
+    anchor_scene_time: SceneTimePayload | None = Field(alias="anchorSceneTime")
+
+
+class PlotEventBindingResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_id: int = Field(alias="eventId")
+    outline_bound: bool = Field(alias="outlineBound")
+    outline_node_reference_count: int = Field(alias="outlineNodeReferenceCount")
+    pool_lane_eligible_by_binding: bool = Field(
+        alias="poolLaneEligibleByBinding"
+    )
 
 
 class SessionPlotScheduleResponse(BaseModel):
@@ -279,6 +323,12 @@ class SessionPlotScheduleResponse(BaseModel):
     schedule: PlotScheduleResponse
     overrides: PlotOverridesResponse
     decisions: list[PlotDecisionResponse]
+    pool_cooldowns: list[PlotPoolCooldownResponse] = Field(
+        alias="poolCooldowns"
+    )
+    event_bindings: list[PlotEventBindingResponse] = Field(
+        alias="eventBindings"
+    )
     next_before_id: int | None = Field(alias="nextBeforeId")
 
 
@@ -376,6 +426,7 @@ def _pool_response(value: models.StoryPlotEventPool) -> PlotPoolResponse:
         description=value.description,
         selectionMode=value.selection_mode,
         priority=value.priority,
+        cooldownMinutes=value.cooldown_minutes,
         enabled=value.enabled,
         version=value.version,
         createdAt=value.created_at,
@@ -473,7 +524,33 @@ def _decision_response(
         reason=value.reason,
         errorCode=value.error_code,
         errorMessage=value.error_message,
+        version=value.version,
         createdAt=value.created_at,
+        updatedAt=value.updated_at,
+    )
+
+
+def _pool_cooldown_response(
+    value: PlotPoolCooldownDiagnostic,
+) -> PlotPoolCooldownResponse:
+    anchor = value.anchor
+    return PlotPoolCooldownResponse(
+        poolId=value.pool_id,
+        cooldownMinutes=value.cooldown_minutes,
+        status=value.status,
+        blocksAutomaticSelection=value.blocks_automatic_selection,
+        elapsedMinutes=value.elapsed_minutes,
+        remainingMinutes=value.remaining_minutes,
+        reasonCode=value.reason_code,
+        reason=value.reason,
+        anchorDecisionId=anchor.id if anchor is not None else None,
+        anchorTurnId=anchor.turn_id if anchor is not None else None,
+        anchorEventId=anchor.event_id if anchor is not None else None,
+        anchorSceneTime=(
+            _time_response(anchor.scene_time)
+            if anchor is not None
+            else None
+        ),
     )
 
 
@@ -607,6 +684,11 @@ def _pool_update_command(
             payload.selection_mode,
         ),
         priority=_required_patch_value(payload, "priority", payload.priority),
+        cooldown_minutes=_required_patch_value(
+            payload,
+            "cooldown_minutes",
+            payload.cooldown_minutes,
+        ),
         enabled=_required_patch_value(payload, "enabled", payload.enabled),
     )
 
@@ -740,6 +822,7 @@ async def create_plot_pool(
                 description=payload.description,
                 selection_mode=payload.selection_mode,
                 priority=payload.priority,
+                cooldown_minutes=payload.cooldown_minutes,
                 enabled=payload.enabled,
             )
         )
@@ -1093,6 +1176,14 @@ async def get_session_plot_schedule(
             scene_time = SceneTime.parse(raw_time)
         except ValueError as exc:
             scene_time_error = str(exc)
+    pool_cooldowns = _service_call(
+        lambda: service.get_session_pool_cooldown_diagnostics(
+            session_id,
+            schedule.pools,
+            scene_time=scene_time,
+        )
+    )
+    event_bindings = evaluate_event_bindings(schedule)
     return SessionPlotScheduleResponse(
         sessionId=session_id,
         sceneTime=_time_response(scene_time),
@@ -1100,6 +1191,19 @@ async def get_session_plot_schedule(
         schedule=_schedule_response(schedule),
         overrides=_overrides_response(overrides),
         decisions=[_decision_response(decision) for decision in decisions],
+        poolCooldowns=[
+            _pool_cooldown_response(item)
+            for item in pool_cooldowns
+        ],
+        eventBindings=[
+            PlotEventBindingResponse(
+                eventId=item.event_id,
+                outlineBound=item.outline_bound,
+                outlineNodeReferenceCount=item.outline_node_reference_count,
+                poolLaneEligibleByBinding=item.pool_lane_eligible_by_binding,
+            )
+            for item in event_bindings
+        ],
         nextBeforeId=(decisions[-1].id if has_more and decisions else None),
     )
 

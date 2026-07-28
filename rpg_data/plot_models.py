@@ -45,6 +45,7 @@ class StoryPlotEventPool:
     description: str = ""
     selection_mode: str = PLOT_POOL_RANDOM
     priority: int = 0
+    cooldown_minutes: int = 0
     enabled: bool = True
     version: int = 1
     created_at: str = ""

@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from commons.scene_time import SceneTime
 from rpg_core.rp_modules.plot_scheduler import (
     CreatePlotEventCommand,
     CreatePlotPoolCommand,
@@ -20,6 +21,7 @@ def _seed_plot_events(
     gateway,
     session_id: str,
     *definitions: tuple[str, str],
+    cooldown_minutes: int = 0,
 ):
     session = gateway.sessions.get_session(session_id)
     assert session is not None
@@ -31,6 +33,7 @@ def _seed_plot_events(
             name=f"{session_id} 手动注入池",
             selection_mode=models.PLOT_POOL_SEQUENTIAL,
             priority=100,
+            cooldown_minutes=cooldown_minutes,
         )
     )
     events = tuple(
@@ -144,11 +147,33 @@ async def test_ooc_mark_is_mode_tagged_and_injected_once_on_next_non_ooc_turn(
 ) -> None:
     session_id = "integration_plot_ooc_mark"
     agent = await integration_agent_factory(session_id)
-    _service, _pool, (event,) = _seed_plot_events(
+    _service, pool, (event,) = _seed_plot_events(
         integration_data_gateway,
         session_id,
         ("原始钟声", "让远处钟楼敲响一次。"),
+        cooldown_minutes=120,
     )
+    automatic_anchor = integration_data_gateway.plot_scheduling.append_decisions(
+        session_id,
+        1,
+        (
+            models.StagedPlotScheduleDecision(
+                source_kind=models.PLOT_SOURCE_POOL,
+                source_id=event.id,
+                event_id=event.id,
+                container_id=pool.id,
+                decision_status=models.PLOT_DECISION_TRIGGERED,
+                dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                selection_origin=models.PLOT_SELECTION_ORIGIN_SCHEDULER,
+                scene_time=SceneTime(1, 1, 1, 6),
+                event_snapshot={
+                    "eventTitle": event.title,
+                    "directive": event.directive,
+                },
+                reason="预置自动池冷却锚点",
+            ),
+        ),
+    )[0]
     provider = scripted_llm_manager.main_provider()
     frozen_title = "临时午夜钟声"
     frozen_directive = "让午夜钟声连续敲响三次，并惊起屋檐上的群鸦。"
@@ -218,10 +243,24 @@ async def test_ooc_mark_is_mode_tagged_and_injected_once_on_next_non_ooc_turn(
     decisions = integration_data_gateway.plot_scheduling.list_session_decisions(
         session_id
     )
-    assert len(decisions) == 1
-    assert decisions[0].event_id == event.id
-    assert decisions[0].selection_origin == models.PLOT_SELECTION_ORIGIN_MANUAL
-    assert decisions[0].scene_time is None
+    assert len(decisions) == 2
+    manual = next(
+        item
+        for item in decisions
+        if item.selection_origin == models.PLOT_SELECTION_ORIGIN_MANUAL
+    )
+    assert manual.event_id == event.id
+    assert manual.scene_time is None
+    anchors = (
+        integration_data_gateway.plot_scheduling
+        .list_latest_session_decisions_by_container(
+            session_id,
+            source_kind=models.PLOT_SOURCE_POOL,
+            decision_statuses={models.PLOT_DECISION_TRIGGERED},
+            selection_origins={models.PLOT_SELECTION_ORIGIN_SCHEDULER},
+        )
+    )
+    assert [item.id for item in anchors] == [automatic_anchor.id]
     rows = integration_data_gateway.messages.list(session_id)
     assert [row.mode for row in rows] == [
         "ooc",

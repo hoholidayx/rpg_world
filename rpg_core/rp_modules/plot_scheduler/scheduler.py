@@ -8,6 +8,10 @@ from collections.abc import Iterable
 
 from commons.scene_time import SceneTime
 from rpg_data import models as data_models
+from rpg_core.rp_modules.plot_scheduler.diagnostics import (
+    evaluate_pool_cooldowns,
+    outline_bound_event_ids,
+)
 from rpg_core.rp_modules.plot_scheduler.models import (
     PlotScheduleCandidate,
     PlotScheduleSnapshot,
@@ -143,16 +147,32 @@ class PlotScheduleSelector:
         completed_turn_ids: frozenset[int],
         excluded_event_ids: frozenset[int],
     ) -> PlotScheduleCandidate | None:
+        outline_bound = outline_bound_event_ids(snapshot.story)
         events_by_pool: dict[int, list[data_models.StoryPlotEvent]] = {}
         for event in snapshot.story.events:
-            if event.enabled and event.id not in snapshot.overrides.disabled_event_ids:
+            if (
+                event.enabled
+                and event.id not in snapshot.overrides.disabled_event_ids
+                and event.id not in outline_bound
+            ):
                 events_by_pool.setdefault(event.pool_id, []).append(event)
 
+        cooldowns = {
+            item.pool_id: item
+            for item in evaluate_pool_cooldowns(
+                snapshot.story.pools,
+                snapshot.decisions,
+                scene_time=scene_time,
+            )
+        }
         for pool in sorted(
             snapshot.story.pools,
             key=lambda item: (-item.priority, item.id),
         ):
             if not pool.enabled:
+                continue
+            cooldown = cooldowns[pool.id]
+            if cooldown.blocks_automatic_selection:
                 continue
             events = sorted(
                 events_by_pool.get(pool.id, ()),

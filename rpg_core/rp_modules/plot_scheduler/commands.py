@@ -26,6 +26,7 @@ class CreatePlotPoolCommand:
     description: str = ""
     selection_mode: str = data_models.PLOT_POOL_RANDOM
     priority: int = 0
+    cooldown_minutes: int = 0
     enabled: bool = True
 
 
@@ -38,6 +39,7 @@ class UpdatePlotPoolCommand:
     description: str | PlotPatchUnset = PLOT_PATCH_UNSET
     selection_mode: str | PlotPatchUnset = PLOT_PATCH_UNSET
     priority: int | PlotPatchUnset = PLOT_PATCH_UNSET
+    cooldown_minutes: int | PlotPatchUnset = PLOT_PATCH_UNSET
     enabled: bool | PlotPatchUnset = PLOT_PATCH_UNSET
 
 

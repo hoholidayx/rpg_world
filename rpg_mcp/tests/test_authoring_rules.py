@@ -79,7 +79,7 @@ def test_rule_catalog_covers_every_generated_schema_field() -> None:
     payload = dict(catalog)
     declared_digest = payload.pop("catalogDigest")
 
-    assert AUTHORING_RULES_VERSION == "1.2"
+    assert AUTHORING_RULES_VERSION == "1.3"
     assert catalog["authoringRulesVersion"] == AUTHORING_RULES_VERSION
     assert digest_json(payload) == declared_digest
     assert len(catalog["fields"]) >= 150
@@ -158,8 +158,23 @@ def test_rule_catalog_uses_model_specific_semantic_examples() -> None:
     assert "手动标记忽略" in (
         rules[("PlotEventSpec", "allowRepeat")]["description"]
     )
-    assert "已有冷却锚点" in (
+    assert "事件级冷却锚点" in (
         rules[("PlotEventSpec", "repeatCooldownMinutes")]["description"]
+    )
+    assert "不影响池级冷却" in (
+        rules[("PlotEventSpec", "repeatCooldownMinutes")]["description"]
+    )
+    assert "整个池" in (
+        rules[("PlotPoolSpec", "cooldownMinutes")]["description"]
+    )
+    assert "手动标记、大纲注入、延期和错误" in (
+        rules[("PlotPoolSpec", "cooldownMinutes")]["description"]
+    )
+    assert "日常现实扰动建议半天到一天" in (
+        rules[("PlotPoolSpec", "cooldownMinutes")]["description"]
+    )
+    assert "改变关系结构的戏剧性巧合建议十天到数周" in (
+        rules[("PlotPoolSpec", "cooldownMinutes")]["description"]
     )
     assert "Scene 调度机会" in (
         rules[("PlotOutlineSpec", "enabled")]["description"]
@@ -179,6 +194,10 @@ def test_plot_scheduling_rules_model_scene_opportunities_and_runtime_marks() -> 
     manual_rule = principles[
         "principle.plot-manual-snapshot-runtime-only"
     ]
+    binding_rule = principles[
+        "principle.plot-outline-binding-isolates-pool-lane"
+    ]
+    pool_cooldown_rule = principles["principle.plot-pool-cooldown"]
 
     assert "整个 active Scene document" in scene_rule["description"]
     assert "下一次 neutral、ic 或 gm turn" in scene_rule["runtimeEffect"]
@@ -187,7 +206,19 @@ def test_plot_scheduling_rules_model_scene_opportunities_and_runtime_marks() -> 
         manual_rule["description"]
     )
     assert "忽略 Scene 调度机会" in manual_rule["runtimeEffect"]
-    assert "解除该事件已有冷却锚点" in manual_rule["runtimeEffect"]
+    assert "解除该事件已有的事件级冷却" in manual_rule["runtimeEffect"]
+    assert "不会启动、刷新或清除事件池级冷却" in (
+        manual_rule["runtimeEffect"]
+    )
+    assert "任意大纲节点引用" in binding_rule["description"]
+    assert "Session 手动标记仍可绕过" in binding_rule["runtimeEffect"]
+    assert "elapsed 小于当前池配置" in pool_cooldown_rule["description"]
+    assert "已有关系、信息或利益张力" in (
+        pool_cooldown_rule["description"]
+    )
+    assert "selectionOrigin=scheduler" in (
+        pool_cooldown_rule["runtimeEffect"]
+    )
 
     assets = build_managed_authoring_assets()
     contract = json.loads(assets["schemas/rpg-mcp-contract-v2.json"])
@@ -207,6 +238,20 @@ def test_plot_scheduling_rules_model_scene_opportunities_and_runtime_marks() -> 
         "timeFieldsAreTimers": False,
         "maxSelectionsPerOpportunity": {"outline": 1, "pool": 1},
         "sameEventMayUseBothLanes": False,
+        "outlineReferencedEventsParticipateInPoolLane": False,
+        "outlineBindingUsesAllNodeReferences": True,
+        "poolCooldown": {
+            "field": "cooldownMinutes",
+            "default": 0,
+            "unit": "scene_time_minutes",
+            "scope": "whole_pool",
+            "anchorSourceKind": "pool",
+            "anchorSelectionOrigin": "scheduler",
+            "anchorDecisionStatus": "triggered",
+            "anchorPoolIdentityField": "container_id",
+            "readyWhenElapsedGreaterThanOrEqual": True,
+            "currentConfigurationAppliesToExistingAnchor": True,
+        },
         "oocConsumesOrCreatesOpportunity": False,
         "commandsConsumeOrCreateOpportunity": False,
         "disabledPlotSchedulingConsumesOrCreatesOpportunity": False,
@@ -226,14 +271,26 @@ def test_plot_scheduling_rules_model_scene_opportunities_and_runtime_marks() -> 
         "enabled",
         "scheduled_time",
         "deadline_time",
+        "outline_binding",
         "repeat",
-        "cooldown",
+        "event_cooldown",
+        "pool_cooldown",
     }
     assert (
         policy["manualPendingInjection"][
             "withoutSceneTimeClearsExistingCooldownAnchor"
         ]
         is True
+    )
+    assert (
+        policy["manualPendingInjection"][
+            "withoutSceneTimeClearsExistingEventCooldownAnchor"
+        ]
+        is True
+    )
+    assert (
+        policy["manualPendingInjection"]["affectsPoolCooldownAnchor"]
+        is False
     )
     assert policy["triggeredMeans"] == "selected_and_injected"
 
@@ -257,8 +314,10 @@ def test_plot_scheduling_rules_model_scene_opportunities_and_runtime_marks() -> 
     ]
     assert "Do not model automatic Plot selection as a per-turn" in skill
     assert "Keep `plot_event_mark_next` state out of Story Design" in skill
+    assert "`cooldownMinutes` pauses the whole pool" in skill
     assert "## Turn and Plot scheduling" in reference
     assert "Manual injection ignores the Scene" in reference
+    assert "Exclude an event from the automatic pool lane" in reference
 
 
 def test_draft_and_package_profiles_return_structured_diagnostics(

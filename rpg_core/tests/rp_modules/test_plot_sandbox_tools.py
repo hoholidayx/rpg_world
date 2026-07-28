@@ -14,12 +14,15 @@ from rpg_core.rp_modules.plot_scheduler.tools import (
     PlotEventMarkNextTool,
     PlotSandboxReadTool,
 )
+from rpg_core.scene import SceneTracker
 from rpg_data import models
 
 
 def _snapshot(
     *,
     pending: models.SessionPlotPendingInjection | None = None,
+    decisions: tuple[models.SessionPlotScheduleDecision, ...] = (),
+    cooldown_minutes: int = 120,
 ) -> PlotScheduleSnapshot:
     event = models.StoryPlotEvent(
         id=11,
@@ -48,6 +51,7 @@ def _snapshot(
                     story_id=1,
                     name="雨夜池",
                     priority=3,
+                    cooldown_minutes=cooldown_minutes,
                 ),
             ),
             events=(event,),
@@ -72,16 +76,21 @@ def _snapshot(
             "s1",
             disabled_event_ids=frozenset((11,)),
         ),
-        decisions=(),
+        decisions=decisions,
         pending_injection=pending,
     )
 
 
 def _scratch(
     pending: models.SessionPlotPendingInjection | None = None,
+    *,
+    scene_time: SceneTime | None = SceneTime(1, 1, 1, 8, 30),
 ) -> SimpleNamespace:
+    tracker = SceneTracker()
+    tracker.set_time_state(scene_time)
     return SimpleNamespace(
         turn_id=8,
+        scene_tracker=tracker,
         plot_pending_injection=PlotPendingInjectionTurnState(base=pending),
     )
 
@@ -103,6 +112,7 @@ async def test_plot_sandbox_read_lists_details_and_pending_snapshot() -> None:
 
     schedule = json.loads(await tool.execute(resource="schedule"))
     event = json.loads(await tool.execute(resource="event", id=11))
+    pool = json.loads(await tool.execute(resource="pool", id=7))
     outline = json.loads(await tool.execute(resource="outline", id=5))
 
     assert schedule["ok"] is True
@@ -111,12 +121,72 @@ async def test_plot_sandbox_read_lists_details_and_pending_snapshot() -> None:
         "events": 1,
         "outlines": 1,
         "nodes": 1,
+        "outlineBoundEvents": 1,
+        "poolLaneEligibleEvents": 0,
     }
+    assert schedule["sceneTime"]["minute"] == 30
+    assert schedule["poolCooldowns"][0]["poolId"] == 7
+    assert schedule["poolCooldowns"][0]["cooldownMinutes"] == 120
+    assert schedule["poolCooldowns"][0]["status"] == "ready"
     assert schedule["pendingInjection"]["sourceEventId"] == 99
     assert event["item"]["directive"] == "原事件指令。"
     assert event["item"]["pool"]["name"] == "雨夜池"
+    assert event["item"]["outlineBound"] is True
+    assert event["item"]["outlineNodeReferenceCount"] == 1
+    assert event["item"]["poolLaneEligibleByBinding"] is False
     assert event["item"]["outlineNodeRefs"][0]["nodeId"] == 9
+    assert pool["item"]["cooldownMinutes"] == 120
+    assert pool["item"]["eventCount"] == 1
+    assert pool["item"]["outlineBoundEventCount"] == 1
+    assert pool["item"]["poolLaneEligibleEventCount"] == 0
     assert outline["item"]["nodes"][0]["eventTitle"] == "原事件标题"
+
+
+@pytest.mark.asyncio
+async def test_plot_sandbox_read_reports_pool_cooldown_anchor_and_remaining() -> None:
+    anchor_time = SceneTime(1, 1, 1, 8)
+    anchor = models.SessionPlotScheduleDecision(
+        id=21,
+        session_id="s1",
+        turn_id=4,
+        source_kind=models.PLOT_SOURCE_POOL,
+        source_id=11,
+        event_id=11,
+        container_id=7,
+        decision_status=models.PLOT_DECISION_TRIGGERED,
+        dispatch_mode=models.PLOT_DISPATCH_SOFT,
+        selection_origin=models.PLOT_SELECTION_ORIGIN_SCHEDULER,
+        scene_time=anchor_time,
+        scene_time_ordinal=anchor_time.ordinal_minutes,
+    )
+    manual = models.SessionPlotScheduleDecision(
+        id=22,
+        session_id="s1",
+        turn_id=5,
+        source_kind=models.PLOT_SOURCE_POOL,
+        source_id=11,
+        event_id=11,
+        container_id=7,
+        decision_status=models.PLOT_DECISION_TRIGGERED,
+        dispatch_mode=models.PLOT_DISPATCH_FORCED,
+        selection_origin=models.PLOT_SELECTION_ORIGIN_MANUAL,
+        scene_time=None,
+        scene_time_ordinal=None,
+    )
+    tool = PlotSandboxReadTool(
+        _snapshot(decisions=(anchor, manual)),
+        _scratch(),
+    )
+
+    payload = json.loads(await tool.execute(resource="pool", id=7))
+    cooldown = payload["item"]["cooldown"]
+
+    assert cooldown["status"] == "cooling_down"
+    assert cooldown["blocksAutomaticSelection"] is True
+    assert cooldown["elapsedMinutes"] == 30
+    assert cooldown["remainingMinutes"] == 90
+    assert cooldown["anchorDecisionId"] == 21
+    assert cooldown["anchorTurnId"] == 4
 
 
 @pytest.mark.asyncio

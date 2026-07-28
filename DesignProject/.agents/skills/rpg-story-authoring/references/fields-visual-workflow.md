@@ -1,6 +1,6 @@
 # 视觉目录、来源与设计工作流字段
 
-> authoringRulesVersion=1.2 · catalogDigest=2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52
+> authoringRulesVersion=1.3 · catalogDigest=340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431
 
 本文由 RPG World 字段语义单一真源生成；不要手工修改。
 

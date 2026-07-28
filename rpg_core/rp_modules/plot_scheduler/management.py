@@ -19,6 +19,10 @@ from rpg_core.rp_modules.plot_scheduler.commands import (
     UpdatePlotOutlineCommand,
     UpdatePlotPoolCommand,
 )
+from rpg_core.rp_modules.plot_scheduler.diagnostics import (
+    PlotPoolCooldownDiagnostic,
+    evaluate_pool_cooldowns,
+)
 from rpg_data import models as data_models
 from rpg_data.errors import DataIntegrityError
 
@@ -82,6 +86,7 @@ class PlotScheduleManagementDataPort(Protocol):
         description: str,
         selection_mode: str,
         priority: int,
+        cooldown_minutes: int,
         enabled: bool,
     ) -> data_models.StoryPlotEventPool: ...
 
@@ -93,6 +98,7 @@ class PlotScheduleManagementDataPort(Protocol):
         description: str,
         selection_mode: str,
         priority: int,
+        cooldown_minutes: int,
         enabled: bool,
     ) -> data_models.StoryPlotEventPool | None: ...
 
@@ -203,6 +209,15 @@ class PlotScheduleManagementDataPort(Protocol):
         before_id: int | None = None,
     ) -> list[data_models.SessionPlotScheduleDecision]: ...
 
+    def list_latest_session_decisions_by_container(
+        self,
+        session_id: str,
+        *,
+        source_kind: str,
+        decision_statuses: set[str],
+        selection_origins: set[str],
+    ) -> list[data_models.SessionPlotScheduleDecision]: ...
+
     def set_session_event_disabled(
         self,
         session_id: str,
@@ -250,6 +265,25 @@ class PlotScheduleManagementService:
             before_id=before_id,
         )
 
+    def get_session_pool_cooldown_diagnostics(
+        self,
+        session_id: str,
+        pools: Iterable[data_models.StoryPlotEventPool],
+        *,
+        scene_time: SceneTime | None,
+    ) -> tuple[PlotPoolCooldownDiagnostic, ...]:
+        anchors = self._data.list_latest_session_decisions_by_container(
+            session_id,
+            source_kind=data_models.PLOT_SOURCE_POOL,
+            decision_statuses={data_models.PLOT_DECISION_TRIGGERED},
+            selection_origins={data_models.PLOT_SELECTION_ORIGIN_SCHEDULER},
+        )
+        return evaluate_pool_cooldowns(
+            pools,
+            anchors,
+            scene_time=scene_time,
+        )
+
     def create_pool(
         self,
         command: CreatePlotPoolCommand,
@@ -262,6 +296,10 @@ class PlotScheduleManagementService:
                 description=_text(command.description),
                 selection_mode=_pool_mode(command.selection_mode),
                 priority=_integer(command.priority, "priority"),
+                cooldown_minutes=_non_negative(
+                    command.cooldown_minutes,
+                    "cooldown_minutes",
+                ),
                 enabled=_boolean(command.enabled, "enabled"),
             )
 
@@ -290,6 +328,13 @@ class PlotScheduleManagementService:
                 priority=_integer(
                     _resolve_patch(command.priority, current.priority),
                     "priority",
+                ),
+                cooldown_minutes=_non_negative(
+                    _resolve_patch(
+                        command.cooldown_minutes,
+                        current.cooldown_minutes,
+                    ),
+                    "cooldown_minutes",
                 ),
                 enabled=_boolean(
                     _resolve_patch(command.enabled, current.enabled),

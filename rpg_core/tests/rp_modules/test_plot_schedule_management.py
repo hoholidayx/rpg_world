@@ -17,6 +17,7 @@ from rpg_core.rp_modules.plot_scheduler import (
     PlotScheduleManagementService,
     UpdatePlotEventCommand,
     UpdatePlotNodeCommand,
+    UpdatePlotPoolCommand,
 )
 from rpg_data import models
 from rpg_data.services.gateway import DataServiceGateway
@@ -32,8 +33,10 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                 workspace_id="demo_workspace",
                 story_id=1,
                 name="日常池",
+                cooldown_minutes=120,
             )
         )
+        assert first_pool.cooldown_minutes == 120
         second_pool = service.create_pool(
             CreatePlotPoolCommand(
                 workspace_id="demo_workspace",
@@ -41,6 +44,24 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                 name="夜间池",
             )
         )
+        updated_pool = service.update_pool(
+            UpdatePlotPoolCommand(
+                workspace_id="demo_workspace",
+                story_id=1,
+                pool_id=first_pool.id,
+                cooldown_minutes=240,
+            )
+        )
+        assert updated_pool.cooldown_minutes == 240
+        with pytest.raises(ValueError, match="cooldown_minutes"):
+            service.update_pool(
+                UpdatePlotPoolCommand(
+                    workspace_id="demo_workspace",
+                    story_id=1,
+                    pool_id=first_pool.id,
+                    cooldown_minutes=-1,
+                )
+            )
         scheduled_time = SceneTime(1, 1, 1, 8)
         deadline_time = SceneTime(1, 1, 1, 10)
         first = service.create_event(

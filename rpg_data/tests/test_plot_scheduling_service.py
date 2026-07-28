@@ -33,8 +33,10 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             description="显式持久化参数",
             selection_mode=models.PLOT_POOL_SEQUENTIAL,
             priority=20,
+            cooldown_minutes=180,
             enabled=True,
         )
+        assert pool.cooldown_minutes == 180
         first = service.create_event(
             story_id=story.id,
             pool_id=pool.id,
@@ -88,6 +90,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             description="更新后的描述",
             selection_mode=models.PLOT_POOL_RANDOM,
             priority=30,
+            cooldown_minutes=360,
             enabled=False,
         )
         updated_event = service.update_event(
@@ -122,6 +125,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
         )
 
         assert updated_pool is not None and updated_pool.name == "日常事件池"
+        assert updated_pool.cooldown_minutes == 360
         assert updated_event is not None and updated_event.position == 2
         assert updated_event.deadline_time == SceneTime(1, 1, 1, 12)
         assert updated_outline is not None and updated_outline.name == "主线 A"
@@ -184,6 +188,18 @@ def test_pending_plot_injection_snapshot_uses_cas_and_survives_event_delete() ->
             priority=0,
             enabled=True,
         )
+        assert pool.cooldown_minutes == 0
+
+        with pytest.raises(PlotScheduleDataIntegrityError):
+            service.create_pool(
+                story_id=story.id,
+                name="非法冷却池",
+                description="",
+                selection_mode=models.PLOT_POOL_RANDOM,
+                priority=0,
+                cooldown_minutes=-1,
+                enabled=True,
+            )
         event = service.create_event(
             story_id=story.id,
             pool_id=pool.id,
@@ -285,6 +301,105 @@ def test_pending_plot_injection_snapshot_uses_cas_and_survives_event_delete() ->
                 values=replace(write, event_title="旧版本不得覆盖"),
             )
         assert service.get_pending_injection(session.id) == recreated
+    finally:
+        gateway.close()
+
+
+def test_latest_pool_cooldown_anchor_query_filters_and_ranks_in_sql() -> None:
+    gateway = DataServiceGateway(":memory:")
+    try:
+        gateway.initialize()
+        service = gateway.plot_scheduling
+        session = gateway.catalog.create_session(
+            "demo_workspace",
+            1,
+            session_id="s_plot_pool_cooldown_anchors",
+            title="池级冷却锚点",
+        )
+        assert session is not None
+
+        def _decision(
+            *,
+            source_kind: str = models.PLOT_SOURCE_POOL,
+            container_id: int = 10,
+            status: str = models.PLOT_DECISION_TRIGGERED,
+            origin: str = models.PLOT_SELECTION_ORIGIN_SCHEDULER,
+            scene_time: SceneTime | None = SceneTime(1, 1, 1, 8),
+        ) -> models.StagedPlotScheduleDecision:
+            return models.StagedPlotScheduleDecision(
+                source_kind=source_kind,
+                source_id=container_id,
+                event_id=container_id,
+                container_id=container_id,
+                decision_status=status,
+                dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                selection_origin=origin,
+                scene_time=scene_time,
+                event_snapshot={"eventTitle": f"事件 {container_id}"},
+            )
+
+        first = service.append_decisions(session.id, 2, (_decision(),))[0]
+        service.append_decisions(
+            session.id,
+            3,
+            (
+                _decision(
+                    origin=models.PLOT_SELECTION_ORIGIN_MANUAL,
+                    scene_time=None,
+                ),
+            ),
+        )
+        service.append_decisions(
+            session.id,
+            4,
+            (_decision(status=models.PLOT_DECISION_DEFERRED),),
+        )
+        service.append_decisions(
+            session.id,
+            5,
+            (_decision(source_kind=models.PLOT_SOURCE_OUTLINE),),
+        )
+        latest = service.append_decisions(
+            session.id,
+            6,
+            (_decision(scene_time=SceneTime(1, 1, 1, 10)),),
+        )[0]
+        second_pool = service.append_decisions(
+            session.id,
+            7,
+            (
+                _decision(
+                    container_id=20,
+                    scene_time=SceneTime(1, 1, 1, 11),
+                ),
+            ),
+        )[0]
+
+        anchors = service.list_latest_session_decisions_by_container(
+            session.id,
+            source_kind=models.PLOT_SOURCE_POOL,
+            decision_statuses={models.PLOT_DECISION_TRIGGERED},
+            selection_origins={models.PLOT_SELECTION_ORIGIN_SCHEDULER},
+        )
+
+        assert [(item.container_id, item.id) for item in anchors] == [
+            (10, latest.id),
+            (20, second_pool.id),
+        ]
+        assert first.id != latest.id
+        assert service.list_latest_session_decisions_by_container(
+            session.id,
+            source_kind=models.PLOT_SOURCE_POOL,
+            decision_statuses=set(),
+            selection_origins={models.PLOT_SELECTION_ORIGIN_SCHEDULER},
+        ) == []
+        with pytest.raises(ValueError, match="unsupported plot decision"):
+            service.list_latest_session_decisions_by_container(
+                session.id,
+                source_kind=models.PLOT_SOURCE_POOL,
+                decision_statuses={"unknown"},
+                selection_origins={models.PLOT_SELECTION_ORIGIN_SCHEDULER},
+            )
     finally:
         gateway.close()
 

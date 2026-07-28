@@ -53,6 +53,7 @@ class PlotSchedulingRepository:
         description: str,
         selection_mode: str,
         priority: int,
+        cooldown_minutes: int,
         enabled: bool,
     ) -> models.StoryPlotEventPool:
         row = StoryPlotEventPoolRecord.create(
@@ -61,6 +62,7 @@ class PlotSchedulingRepository:
             description=description,
             selection_mode=selection_mode,
             priority=int(priority),
+            cooldown_minutes=int(cooldown_minutes),
             enabled=bool(enabled),
         )
         return _to_pool(StoryPlotEventPoolRecord.get_by_id(row.id))
@@ -73,6 +75,7 @@ class PlotSchedulingRepository:
         description: str,
         selection_mode: str,
         priority: int,
+        cooldown_minutes: int,
         enabled: bool,
     ) -> models.StoryPlotEventPool | None:
         changed = (
@@ -81,6 +84,7 @@ class PlotSchedulingRepository:
                 description=description,
                 selection_mode=selection_mode,
                 priority=int(priority),
+                cooldown_minutes=int(cooldown_minutes),
                 enabled=bool(enabled),
                 version=StoryPlotEventPoolRecord.version + 1,
                 updated_at=SQL("CURRENT_TIMESTAMP"),
@@ -786,6 +790,69 @@ class PlotSchedulingRepository:
             query = query.limit(int(limit))
         return [_to_decision(row) for row in query]
 
+    def list_latest_decisions_by_container(
+        self,
+        session_id: str,
+        *,
+        source_kind: str,
+        decision_statuses: Collection[str],
+        selection_origins: Collection[str],
+    ) -> list[models.SessionPlotScheduleDecision]:
+        statuses = tuple(sorted(set(decision_statuses)))
+        origins = tuple(sorted(set(selection_origins)))
+        if not statuses or not origins:
+            return []
+        ranked = (
+            SessionPlotScheduleDecisionRecord
+            .select(
+                SessionPlotScheduleDecisionRecord.id.alias("decision_id"),
+                fn.ROW_NUMBER().over(
+                    partition_by=[
+                        SessionPlotScheduleDecisionRecord.container_id
+                    ],
+                    order_by=[
+                        SessionPlotScheduleDecisionRecord.turn_id.desc(),
+                        SessionPlotScheduleDecisionRecord.id.desc(),
+                    ],
+                ).alias("container_rank"),
+            )
+            .where(
+                (SessionPlotScheduleDecisionRecord.session == str(session_id))
+                & (
+                    SessionPlotScheduleDecisionRecord.source_kind
+                    == str(source_kind)
+                )
+                & (
+                    SessionPlotScheduleDecisionRecord.decision_status.in_(
+                        statuses
+                    )
+                )
+                & (
+                    SessionPlotScheduleDecisionRecord.selection_origin.in_(
+                        origins
+                    )
+                )
+            )
+            .cte("ranked_plot_container_decisions")
+        )
+        rows = (
+            SessionPlotScheduleDecisionRecord
+            .select()
+            .join(
+                ranked,
+                on=(
+                    SessionPlotScheduleDecisionRecord.id
+                    == ranked.c.decision_id
+                ),
+            )
+            .where(ranked.c.container_rank == 1)
+            .with_cte(ranked)
+            .order_by(
+                SessionPlotScheduleDecisionRecord.container_id,
+            )
+        )
+        return [_to_decision(row) for row in rows]
+
     def list_decisions_for_turns(
         self,
         session_id: str,
@@ -1062,6 +1129,7 @@ def _to_pool(row: StoryPlotEventPoolRecord) -> models.StoryPlotEventPool:
         description=str(row.description or ""),
         selection_mode=str(row.selection_mode),
         priority=int(row.priority),
+        cooldown_minutes=int(row.cooldown_minutes),
         enabled=bool(row.enabled),
         version=int(row.version),
         created_at=str(row.created_at),

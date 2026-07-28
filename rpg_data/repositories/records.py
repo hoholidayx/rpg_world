@@ -1081,6 +1081,7 @@ class StoryPlotEventPoolRecord(BaseRecord):
     description = TextField(default="")
     selection_mode = TextField(default="random")
     priority = IntegerField(default=0)
+    cooldown_minutes = IntegerField(default=0)
     enabled = BooleanField(default=True)
     version = IntegerField(default=1)
     created_at = TextField()

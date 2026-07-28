@@ -11,10 +11,12 @@ from rpg_core.rp_modules.constants import (
 )
 from rpg_core.rp_modules.models import ModuleContextRequest
 from rpg_core.rp_modules.plot_scheduler import (
+    PLOT_POOL_COOLDOWN_ACTIVE,
     PlotScheduleInjection,
     PlotScheduleSelector,
     PlotScheduleSnapshot,
     PlotSchedulerModule,
+    evaluate_pool_cooldowns,
 )
 from rpg_core.settings import PlotSchedulerModuleSettings
 from rpg_core.utils.tokenizer import TiktokenTokenCounter
@@ -53,7 +55,8 @@ def _decision(
     container_id: int,
     status: str,
     *,
-    scene_time: SceneTime = SceneTime(1, 1, 1, 8),
+    scene_time: SceneTime | None = SceneTime(1, 1, 1, 8),
+    selection_origin: str = models.PLOT_SELECTION_ORIGIN_SCHEDULER,
 ) -> models.SessionPlotScheduleDecision:
     return models.SessionPlotScheduleDecision(
         id=decision_id,
@@ -65,8 +68,11 @@ def _decision(
         container_id=container_id,
         decision_status=status,
         dispatch_mode=models.PLOT_DISPATCH_SOFT,
+        selection_origin=selection_origin,
         scene_time=scene_time,
-        scene_time_ordinal=scene_time.ordinal_minutes,
+        scene_time_ordinal=(
+            scene_time.ordinal_minutes if scene_time is not None else None
+        ),
     )
 
 
@@ -440,6 +446,254 @@ def test_manual_trigger_without_scene_time_overrides_prior_cooldown() -> None:
     )
 
     assert selected[0].event.id == event.id
+
+
+def test_pool_cooldown_skips_whole_pool_and_reopens_at_boundary() -> None:
+    anchor_event = _event(1, 10, position=0)
+    next_high_event = _event(2, 10, position=1)
+    low_event = _event(3, 20)
+    anchor = _decision(
+        1,
+        2,
+        models.PLOT_SOURCE_POOL,
+        anchor_event.id,
+        anchor_event.id,
+        10,
+        models.PLOT_DECISION_TRIGGERED,
+        scene_time=SceneTime(1, 1, 1, 10),
+    )
+    snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(
+                models.StoryPlotEventPool(
+                    10,
+                    1,
+                    "高优先级池",
+                    selection_mode=models.PLOT_POOL_SEQUENTIAL,
+                    priority=100,
+                    cooldown_minutes=60,
+                ),
+                models.StoryPlotEventPool(20, 1, "低优先级池", priority=1),
+            ),
+            events=(anchor_event, next_high_event, low_event),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(anchor,),
+    )
+    selector = PlotScheduleSelector()
+
+    cooling = selector.select(
+        snapshot,
+        scene_time=SceneTime(1, 1, 1, 10, 59),
+        current_turn_id=4,
+        completed_world_turn_ids=(1, 2, 3),
+    )
+    ready = selector.select(
+        snapshot,
+        scene_time=SceneTime(1, 1, 1, 11),
+        current_turn_id=4,
+        completed_world_turn_ids=(1, 2, 3),
+    )
+
+    assert [item.event.id for item in cooling] == [low_event.id]
+    assert [item.event.id for item in ready] == [next_high_event.id]
+
+
+def test_pool_cooldown_ignores_manual_outline_deferred_and_error_decisions() -> None:
+    event = _event(1, 10)
+    available = _event(2, 10)
+    manual = _decision(
+        4,
+        6,
+        models.PLOT_SOURCE_POOL,
+        event.id,
+        event.id,
+        10,
+        models.PLOT_DECISION_TRIGGERED,
+        scene_time=None,
+        selection_origin=models.PLOT_SELECTION_ORIGIN_MANUAL,
+    )
+    outline = _decision(
+        3,
+        5,
+        models.PLOT_SOURCE_OUTLINE,
+        51,
+        event.id,
+        10,
+        models.PLOT_DECISION_TRIGGERED,
+    )
+    deferred = _decision(
+        2,
+        4,
+        models.PLOT_SOURCE_POOL,
+        event.id,
+        event.id,
+        10,
+        models.PLOT_DECISION_DEFERRED,
+    )
+    errored = _decision(
+        1,
+        3,
+        models.PLOT_SOURCE_POOL,
+        event.id,
+        event.id,
+        10,
+        models.PLOT_DECISION_ERROR,
+    )
+    pool = models.StoryPlotEventPool(
+        10,
+        1,
+        "仅有非锚点判断",
+        cooldown_minutes=120,
+    )
+    snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(pool,),
+            events=(event, available),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(manual, outline, deferred, errored),
+    )
+
+    diagnostics = evaluate_pool_cooldowns(
+        (pool,),
+        snapshot.decisions,
+        scene_time=SceneTime(1, 1, 1, 8, 1),
+    )
+    selected = PlotScheduleSelector().select(
+        snapshot,
+        scene_time=SceneTime(1, 1, 1, 8, 1),
+        current_turn_id=7,
+        completed_world_turn_ids=(1, 2, 3, 4, 5, 6),
+    )
+
+    assert diagnostics[0].status == "ready"
+    assert diagnostics[0].anchor is None
+    assert [item.event.id for item in selected] == [available.id]
+
+
+def test_manual_decision_does_not_replace_pool_cooldown_anchor() -> None:
+    anchored_event = _event(1, 10)
+    pending_event = _event(2, 10)
+    scheduler_anchor = _decision(
+        1,
+        2,
+        models.PLOT_SOURCE_POOL,
+        anchored_event.id,
+        anchored_event.id,
+        10,
+        models.PLOT_DECISION_TRIGGERED,
+        scene_time=SceneTime(1, 1, 1, 8),
+    )
+    manual = _decision(
+        2,
+        3,
+        models.PLOT_SOURCE_POOL,
+        pending_event.id,
+        pending_event.id,
+        10,
+        models.PLOT_DECISION_TRIGGERED,
+        scene_time=None,
+        selection_origin=models.PLOT_SELECTION_ORIGIN_MANUAL,
+    )
+    pool = models.StoryPlotEventPool(
+        10,
+        1,
+        "共享冷却池",
+        cooldown_minutes=60,
+    )
+
+    diagnostic = evaluate_pool_cooldowns(
+        (pool,),
+        (scheduler_anchor, manual),
+        scene_time=SceneTime(1, 1, 1, 8, 30),
+    )[0]
+
+    assert diagnostic.status == PLOT_POOL_COOLDOWN_ACTIVE
+    assert diagnostic.remaining_minutes == 30
+    assert diagnostic.anchor == scheduler_anchor
+
+
+def test_outline_binding_excludes_event_from_pool_until_all_refs_are_removed() -> None:
+    bound = _event(1, 10, position=0)
+    free = _event(2, 10, position=1)
+    node = models.StoryPlotOutlineNode(
+        50,
+        1,
+        20,
+        bound.id,
+        SceneTime(1, 1, 1, 9),
+        position=0,
+        enabled=False,
+    )
+    pool = models.StoryPlotEventPool(
+        10,
+        1,
+        "顺序池",
+        selection_mode=models.PLOT_POOL_SEQUENTIAL,
+    )
+    bound_snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(pool,),
+            events=(bound, free),
+            outlines=(
+                models.StoryPlotOutline(
+                    20,
+                    1,
+                    "已停用大纲",
+                    enabled=False,
+                    nodes=(node,),
+                ),
+            ),
+        ),
+        overrides=models.SessionPlotOverrides(
+            "s1",
+            disabled_outline_node_ids=frozenset((node.id,)),
+        ),
+        decisions=(),
+    )
+    unbound_snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(pool,),
+            events=(bound, free),
+            outlines=(),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(),
+    )
+    selector = PlotScheduleSelector()
+
+    while_bound = selector.select(
+        bound_snapshot,
+        scene_time=SceneTime(1, 1, 1, 10),
+        current_turn_id=2,
+        completed_world_turn_ids=(1,),
+    )
+    after_refs_removed = selector.select(
+        unbound_snapshot,
+        scene_time=SceneTime(1, 1, 1, 10),
+        current_turn_id=2,
+        completed_world_turn_ids=(1,),
+    )
+
+    assert [item.event.id for item in while_bound] == [free.id]
+    assert [item.event.id for item in after_refs_removed] == [bound.id]
 
 
 def test_non_repeat_event_keeps_pool_lane_trigger_after_moving_pools() -> None:
