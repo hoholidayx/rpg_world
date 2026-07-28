@@ -21,7 +21,7 @@ from rpg_mcp.contracts import (
     digest_json,
 )
 
-AUTHORING_RULES_VERSION = "1.1"
+AUTHORING_RULES_VERSION = "1.2"
 AUTHORING_RULES_SCHEMA_VERSION = "story-authoring-rules/1.0"
 AUTHORING_RULES_RELATIVE_PATH = (
     "schemas/story-authoring-rules-v1.json"
@@ -140,35 +140,38 @@ _MODEL_INFO: dict[str, dict[str, str]] = {
         "domain": "plot",
         "path": "/resources/plotSchedule",
         "title": "剧情调度",
-        "description": "事件池、事件和大纲的 Story 级调度投影。",
+        "description": (
+            "事件池、事件和大纲的 Story 级调度投影；自动选择由已提交 Scene"
+            " 文档的净变化产生一次机会。"
+        ),
     },
     "PlotPoolSpec": {
         "token": "plot-pool",
         "domain": "plot",
         "path": "/resources/plotSchedule/pools/*",
         "title": "剧情事件池",
-        "description": "一组共享启用、排序和抽取策略的剧情事件。",
+        "description": "在一次 Scene 调度机会中共享启用、排序和抽取策略的一组剧情事件。",
     },
     "PlotEventSpec": {
         "token": "plot-event",
         "domain": "plot",
         "path": "/resources/plotSchedule/events/*",
         "title": "剧情事件",
-        "description": "可被事件池或大纲节点调度的一条世界/NPC指令。",
+        "description": "可被事件池、大纲节点或 Session 临时标记引用的一条世界/NPC指令。",
     },
     "PlotOutlineSpec": {
         "token": "plot-outline",
         "domain": "plot",
         "path": "/resources/plotSchedule/outlines/*",
         "title": "剧情大纲",
-        "description": "按位置和最早时间组织的一组一次性大纲节点。",
+        "description": "按位置和最早 SceneTime 资格门槛组织的一组一次性大纲节点。",
     },
     "PlotNodeSpec": {
         "token": "plot-node",
         "domain": "plot",
         "path": "/resources/plotSchedule/outlines/*/nodes/*",
         "title": "大纲节点",
-        "description": "在某个最早时间引用一个剧情事件的调度节点。",
+        "description": "在一次 Scene 调度机会中按最早 SceneTime 引用剧情事件的节点。",
     },
     "VisualSpec": {
         "token": "visual",
@@ -231,7 +234,7 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "allowCreateWorkspace": "目标 Workspace 不存在时是否允许导入流程创建它。",
     "title": "面向作者、玩家或管理界面的短标题。",
     "summary": "Story 的短管理摘要，说明体验与前提，不写执行指令。",
-    "storyPrompt": "每个可推进世界 turn 使用的固定 Story 规则与叙事约束。",
+    "storyPrompt": "每个 Agent 正文 turn 使用的固定 Story 规则与叙事约束。",
     "timeSetting": "故事虚拟年代、历法与时间锚点的文字说明。",
     "logline": "一句话核心冲突：主角、目标、阻力和主要代价。",
     "themes": "需要持续回响的主题关键词或短语。",
@@ -260,17 +263,26 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "pools": "剧情事件池定义。",
     "events": "剧情事件定义；每条事件只归一个池。",
     "outlines": "顺序大纲定义。",
-    "selectionMode": "池内候选的 random 或 sequential 抽取方式。",
-    "priority": "同类调度对象之间的相对优先级。",
+    "selectionMode": "有 Scene 调度机会时，池内候选的 random 或 sequential 抽取方式。",
+    "priority": "一次 Scene 调度机会内，同类候选之间的相对优先级。",
     "poolRef": "该事件所属事件池的 stableId。",
     "directive": "触发后主 Agent 必须落实的世界与 NPC 行动要求。",
-    "suitabilityHint": "soft judge 判断此刻是否适合开始事件的补充条件。",
-    "dispatchMode": "forced 到时直接注入；soft 还需适宜性判断。",
-    "scheduledTime": "事件或节点最早可进入候选的 SceneTime。",
-    "deadlineTime": "事件窗口的排他上界；到达此时即不再候选。",
+    "suitabilityHint": "自动 soft 候选通过 judge 判断此刻是否适合开始事件的补充条件。",
+    "dispatchMode": (
+        "一次 Scene 调度机会内的自动候选满足 SceneTime 窗口后，forced 跳过"
+        " soft judge，soft 仍需适宜性判断；手动标记不读取此字段。"
+    ),
+    "scheduledTime": (
+        "仅在 Scene 调度机会存在时作为自动候选最早资格门槛的 SceneTime；"
+        "不是定时器。"
+    ),
+    "deadlineTime": (
+        "仅在 Scene 调度机会存在时作为自动事件候选窗口的排他上界；"
+        "不是定时器。"
+    ),
     "position": "同一容器内的稳定顺序位置。",
-    "allowRepeat": "该事件触发后是否允许再次候选。",
-    "repeatCooldownMinutes": "重复事件两次触发之间的故事分钟冷却。",
+    "allowRepeat": "该事件自动触发后是否允许在后续 Scene 调度机会再次候选。",
+    "repeatCooldownMinutes": "重复事件两次自动触发之间的 SceneTime 分钟冷却。",
     "nodes": "该大纲按 position 排列的节点。",
     "eventRef": "该节点引用的剧情事件 stableId。",
     "assetType": "视觉资产用途类别，例如角色立绘、场景或地图。",
@@ -304,7 +316,10 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "narrativeStyles": "需在 Workspace 创建并绑定到 Story 的叙事风格。",
     "quickReplies": "Story Composer 的快捷玩家输入。",
     "rpModules": "Story 允许启用的内置 RP Module。",
-    "plotSchedule": "Story 级事件池、大纲和事件调度配置。",
+    "plotSchedule": (
+        "Story 级事件池、大纲和事件调度配置；自动 selector 只在已提交 Scene"
+        " 净变化留下机会后运行。"
+    ),
     "visualCatalog": "只归档、不自动创建媒体任务的独立视觉 brief。",
 }
 
@@ -335,17 +350,49 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
         "不得写频率、延迟、后台调度、人工只读或数据库权限。留空时使用"
         "“事实明确且值实际变化”的通用规则。"
     ),
-    ("PlotPoolSpec", "description"): "说明池的主题、用途和候选边界，不写单个事件指令。",
+    ("PlotPoolSpec", "description"): (
+        "说明池的主题、用途和自动候选边界，不写单个事件指令。"
+    ),
+    ("PlotPoolSpec", "enabled"): (
+        "是否允许该池参与有 Scene 调度机会的自动候选；手动标记忽略此字段。"
+    ),
     ("PlotEventSpec", "description"): "管理摘要：事件是什么、为什么存在；不承担触发指令。",
     ("PlotEventSpec", "directive"): (
         "事件触发后必须落实的世界/NPC行为；保留玩家选择，不把后果提前写成事实。"
     ),
     ("PlotEventSpec", "suitabilityHint"): (
-        "只说明 soft 事件何时适合开始，包括阶段、地点、在场角色、前置事实和"
-        "安全边界；不重复 directive。"
+        "只说明自动 soft 候选何时适合开始，包括阶段、地点、在场角色、前置"
+        "事实和安全边界；不重复 directive，手动标记不会执行该判断。"
+    ),
+    ("PlotEventSpec", "enabled"): (
+        "是否允许事件参与自动候选；Session 手动标记的临时注入忽略此字段。"
+    ),
+    ("PlotEventSpec", "allowRepeat"): (
+        "事件自动触发后是否可在后续 Scene 调度机会再次候选；手动标记忽略"
+        "重复限制。"
+    ),
+    ("PlotEventSpec", "repeatCooldownMinutes"): (
+        "重复事件两次自动触发之间的 SceneTime 分钟冷却；手动标记忽略冷却，"
+        "且无 SceneTime 的手动注入会解除已有冷却锚点。"
+    ),
+    ("PlotOutlineSpec", "description"): (
+        "说明大纲线的主题、节点顺序与用途；节点仍只在 Scene 调度机会中成为"
+        "自动候选。"
+    ),
+    ("PlotOutlineSpec", "enabled"): (
+        "是否允许该大纲参与有 Scene 调度机会的自动候选；不限制其事件被手动"
+        "标记。"
+    ),
+    ("PlotNodeSpec", "dispatchMode"): (
+        "一次 Scene 调度机会内，节点满足 SceneTime 门槛后，forced 跳过 soft"
+        " judge，soft 仍需适宜性判断；手动标记事件不读取节点字段。"
     ),
     ("PlotNodeSpec", "scheduledTime"): (
-        "节点最早可注入时间；注入只代表触发 directive，不代表章节完成。"
+        "仅在 Scene 调度机会存在时作为节点自动候选的最早资格门槛；不是"
+        "定时器。注入只代表触发 directive，不代表章节完成。"
+    ),
+    ("PlotNodeSpec", "enabled"): (
+        "是否允许节点参与有 Scene 调度机会的自动候选；不限制事件被手动标记。"
     ),
     ("VisualSpec", "prompt"): "可直接生图的正向 brief，写主体、场景、构图、光线和风格。",
     ("VisualSpec", "visualAnchors"): "只放跨变体必须稳定的身份或物件特征，不放姿势和光线。",
@@ -373,12 +420,36 @@ _FIELD_AVOID: dict[tuple[str, str], str] = {
     ("StatusRowSpec", "runtimeKeyLocked"): "不要把它理解为 value 只读。",
     ("StatusRowSpec", "updateRule"): (
         "不要重复表 description 的共同规则，也不要预设 value 是数值或写每 N "
-        "回合、延迟、定时、manual 或 read-only 规则。"
+        "回合、延迟、定时、manual 或 read-only 规则；不要用无事实变化的"
+        " Scene 更新轮询 Plot。"
     ),
     ("PlotEventSpec", "description"): "不要用命令语气要求主 Agent 落实剧情。",
     ("PlotEventSpec", "directive"): "不要替玩家决定行动、同意或情绪，也不要预写未发生后果。",
-    ("PlotEventSpec", "suitabilityHint"): "不要把它当确定性 DSL 或重复剧情正文。",
-    ("PlotNodeSpec", "scheduledTime"): "不要把节点触发时间解释成章节完成时间。",
+    ("PlotEventSpec", "suitabilityHint"): (
+        "不要把它当确定性 DSL、手动注入条件或重复剧情正文。"
+    ),
+    ("PlotEventSpec", "dispatchMode"): (
+        "不要把 forced 理解成定时器；没有 Scene 调度机会时不会因此自动运行。"
+    ),
+    ("PlotEventSpec", "scheduledTime"): (
+        "不要把时间门槛解释成后台定时器或每 turn 轮询触发器。"
+    ),
+    ("PlotEventSpec", "deadlineTime"): (
+        "不要把截止时间解释成会自行唤醒 selector 的定时器。"
+    ),
+    ("PlotEventSpec", "allowRepeat"): (
+        "不要把手动标记的临时注入计入自动重复资格。"
+    ),
+    ("PlotEventSpec", "repeatCooldownMinutes"): (
+        "不要把冷却写成现实时间、turn 数或手动注入限制。"
+    ),
+    ("PlotNodeSpec", "dispatchMode"): (
+        "不要把 forced 节点理解成定时器；没有 Scene 调度机会时不会因此"
+        "自动运行。"
+    ),
+    ("PlotNodeSpec", "scheduledTime"): (
+        "不要把节点时间解释成章节完成时间、后台定时器或每 turn 轮询触发器。"
+    ),
     ("VisualSpec", "prompt"): "不要把排除项混入正向 prompt；排除项写 negativePrompt。",
     ("VisualSpec", "visualAnchors"): "不要写可变服装、姿势、镜头或照明，除非它们是身份锚点。",
     ("SourceRecord", "locator"): "不要因来源已登记就自动导入其全部内容。",
@@ -577,10 +648,16 @@ _RUNTIME_EFFECTS: dict[str, str] = {
     "story": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。",
     "character": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。",
     "lorebook": "作为 Story 世界知识进入运行时检索与 Context。",
-    "status": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+    "status": (
+        "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文"
+        " turn 即时更新。"
+    ),
     "composer": "影响 Story 叙事风格绑定或玩家快捷输入。",
     "rp-module": "限定 Story 可用的内置 RP 能力；Session 只能在其内覆盖。",
-    "plot": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+    "plot": (
+        "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC"
+        " turn 的候选、判断和 directive 注入。"
+    ),
     "visual": "仅归档可生图规格，不创建媒体资产、任务或消息。",
     "workflow": "只影响设计恢复与决策追踪，不直接进入运行时 Story。",
     "package": "控制 Story Pack 身份、范围和 merge-only 导入行为。",
@@ -641,13 +718,16 @@ _PRINCIPLES: tuple[dict[str, str], ...] = (
         "domain": "status",
         "title": "状态值即时判断",
         "description": (
-            "所有状态 value 都在当前 turn 根据明确事实判断更新。整表共同语义、"
-            "value 格式和即时更新规则写入 description；row.updateRule 只补充"
-            "字段专属条件，不预设数值模型。状态表保存需要每轮可见和更新的当前"
-            "状态；Memory 更适合按时间累积的叙事历史，但当前事实仍可成为状态"
-            "字段。"
+            "所有状态 value 都在 neutral、ic 或 gm 的当前正文 turn 根据明确"
+            "事实判断更新。整表共同语义、value 格式和即时更新规则写入"
+            " description；row.updateRule 只补充字段专属条件，不预设数值"
+            "模型。状态表保存需要每轮可见和更新的当前状态；Memory 更适合按"
+            "时间累积的叙事历史，但当前事实仍可成为状态字段。"
         ),
-        "runtimeEffect": "StatusSubAgent 每 turn 按目标即时处理状态。",
+        "runtimeEffect": (
+            "StatusSubAgent 在 neutral、ic 或 gm 正文 turn 按目标即时处理"
+            "状态；OOC 与命令不推进状态事实。"
+        ),
     },
     {
         "ruleId": "principle.message-mode-code-owned",
@@ -657,17 +737,58 @@ _PRINCIPLES: tuple[dict[str, str], ...] = (
             "message_mode 只声明启用且 config 为空；neutral/ic/ooc/gm 的"
             "标签和 Prompt 不属于设计数据。"
         ),
-        "runtimeEffect": "OOC 不推进 Plot、Status、Scene 或 Memory 事实。",
+        "runtimeEffect": (
+            "neutral、ic 与 gm 是非 OOC 正文 turn；OOC 不推进 Plot、Status、"
+            "Scene 或 Memory 事实，命令也不属于正文 turn。"
+        ),
+    },
+    {
+        "ruleId": "principle.plot-scene-opportunity",
+        "domain": "plot",
+        "title": "Scene 净变化产生一次自动调度机会",
+        "description": (
+            "自动 selector 不按每个 turn 运行。只有成功提交 turn 后整个 active"
+            " Scene document 的最终内容发生净变化，才为下一次非 OOC turn"
+            " 留下一次机会；变化覆盖时间、位置、在场人物、其他字段及获准的"
+            " key 结构变化。不要用无事实变化的 Scene 写入轮询事件。"
+        ),
+        "runtimeEffect": (
+            "下一次 neutral、ic 或 gm turn 在 StatusPreflight 后使用最新 scratch"
+            " Scene 消费机会，最多选择一个大纲节点和一个池事件；消费 turn 若"
+            "再次改变 Scene，则为再下一轮留下新机会。OOC、命令、Plot 模块"
+            "禁用、失败或取消既不消费也不创建机会；无机会时不运行 selector"
+            " 或 soft judge。"
+        ),
+    },
+    {
+        "ruleId": "principle.plot-manual-snapshot-runtime-only",
+        "domain": "plot",
+        "title": "手动下一轮标记是 Session 临时快照",
+        "description": (
+            "`plot_event_mark_next` 只在 OOC/GM 运行时把现有事件冻结为"
+            " Session 一次性快照；可临时覆盖 title/directive，省略时保留原"
+            "内容，event_id=null 清空。该快照及工具参数不是 Story Design 或"
+            " Story Pack 字段，也不修改原事件。"
+        ),
+        "runtimeEffect": (
+            "快照在下一次 neutral、ic 或 gm turn 强制注入，忽略 Scene 调度"
+            "机会、SceneTime、enabled、时间窗、重复和冷却等全部自动规则；"
+            "即使无 SceneTime 也可触发并解除该事件已有冷却锚点。"
+        ),
     },
     {
         "ruleId": "principle.plot-trigger-not-resolution",
         "domain": "plot",
         "title": "节点触发不等于章节完成",
         "description": (
-            "大纲节点被注入只表示其 directive 已触发，不代表玩家完成、跳过"
-            "或解决了章节。"
+            "Plot 的 triggered 只表示事件或大纲节点已被选择并把 directive"
+            " 注入当前请求，不代表模型已落实，也不代表玩家完成、跳过或解决"
+            "了章节。"
         ),
-        "runtimeEffect": "当前 Plot ledger 记录 triggered，不提供章节完成生命周期。",
+        "runtimeEffect": (
+            "当前 Plot ledger 记录 selected-and-injected 的 triggered，不提供"
+            "语义验收或章节完成生命周期。"
+        ),
     },
 )
 
@@ -810,7 +931,10 @@ _DIAGNOSTIC_RULES: tuple[dict[str, Any], ...] = (
         "profiles": ["draft", "package"],
         "pathPattern": "/resources/statusTables/*/rows/*/updateRule",
         "message": "updateRule 疑似包含频率、延迟、定时或读写权限语义。",
-        "suggestion": "改写为当前 turn 的事实判定条件；删除每 N 回合、延迟、manual/read-only 等内容。",
+        "suggestion": (
+            "改写为当前非 OOC 正文 turn 的事实判定条件；删除每 N 回合、延迟、"
+            "manual/read-only 等内容，也不要用无事实变化的 Scene 写入轮询 Plot。"
+        ),
         "runtimeEffect": "运行时不会执行这些调度或权限语义，保留会误导状态 Agent。",
     },
     {
@@ -821,7 +945,10 @@ _DIAGNOSTIC_RULES: tuple[dict[str, Any], ...] = (
         "pathPattern": "/resources/statusTables/*/rows/*/value",
         "message": "Scene 时间使用了疑似占位年份。",
         "suggestion": "若故事已锚定现实年代，使用 2019 年、2020 年等虚拟年份。",
-        "runtimeEffect": "Plot Scheduler 严格按 SceneTime 比较故事时间。",
+        "runtimeEffect": (
+            "仅当已有 Scene 调度机会时，Plot Scheduler 才按 SceneTime 判断"
+            "自动候选资格。"
+        ),
     },
     {
         "ruleId": "plot.soft-event-hint-empty",
@@ -831,7 +958,10 @@ _DIAGNOSTIC_RULES: tuple[dict[str, Any], ...] = (
         "pathPattern": "/resources/plotSchedule/events/*/suitabilityHint",
         "message": "soft 事件没有 suitabilityHint。",
         "suggestion": "补充适合开始的阶段、地点、在场人物、前置事实与安全边界。",
-        "runtimeEffect": "soft judge 只能依赖通用 Context，事件更容易在不合适时机触发。",
+        "runtimeEffect": (
+            "有 Scene 调度机会且事件进入自动 soft 候选后，judge 只能依赖"
+            "通用 Context，事件更容易在不合适时机触发。"
+        ),
     },
     {
         "ruleId": "plot.forced-event-unused-hint",
@@ -839,9 +969,12 @@ _DIAGNOSTIC_RULES: tuple[dict[str, Any], ...] = (
         "severity": "warning",
         "profiles": ["draft", "package"],
         "pathPattern": "/resources/plotSchedule/events/*/suitabilityHint",
-        "message": "forced 事件填写了 suitabilityHint，但 forced 调度不会等待 soft 判断。",
+        "message": "forced 事件填写了 suitabilityHint，但自动 forced 候选不会等待 soft 判断。",
         "suggestion": "若条件必须被判断，改用 soft；否则把必要内容移入 directive 或管理说明。",
-        "runtimeEffect": "forced 候选到时直接注入。",
+        "runtimeEffect": (
+            "有 Scene 调度机会且满足 SceneTime 窗口后，自动 forced 候选"
+            "跳过 soft judge 直接注入；时间字段本身不会唤醒 selector。"
+        ),
     },
     {
         "ruleId": "plot.event-description-empty",
@@ -1211,6 +1344,18 @@ generation brief. Use Story virtual calendar years such as 2019 or 2020 when
 the fiction is anchored to those years; do not replace them with placeholder
 year 1.
 
+Treat `neutral | ic | gm` as non-OOC body turns; OOC and commands do not
+advance world facts. Do not model automatic Plot selection as a per-turn
+poll. A successfully committed net change to the entire active Scene document
+creates one opportunity for the next non-OOC turn; `scheduledTime` and
+`deadlineTime` only gate candidates inside that opportunity. Do not author
+no-op Scene changes to poll Plot.
+
+Keep `plot_event_mark_next` state out of Story Design and Story Pack fields.
+It is an OOC/GM Session runtime snapshot for the next non-OOC turn, may
+temporarily override `title` and `directive`, and ignores all automatic
+eligibility rules without changing the source event.
+
 Read the relevant generated field reference before adding or substantially
 rewriting that domain:
 
@@ -1359,6 +1504,35 @@ change the import contract.
   jobs, messages, or message metadata.
 - Source records are references only. Re-select, author, and confirm content
   into the current revision before it can enter a Story Pack.
+
+## Turn and Plot scheduling
+
+- Treat `neutral | ic | gm` as non-OOC body turns. OOC and commands do not
+  advance world facts.
+- Do not run the automatic Plot selector on every turn. Only a successfully
+  committed net change to the active Scene document creates one scheduling
+  opportunity for the next non-OOC turn. Scene change covers time, location,
+  present characters, every other field, and permitted key-structure changes.
+- Consume that opportunity after `StatusPreflight` using the latest scratch
+  Scene. Select at most one outline node and one pool event, without injecting
+  the same event twice. If the consuming turn changes Scene again, create a
+  new opportunity for the following non-OOC turn.
+- OOC, commands, disabled Plot scheduling, failed turns, and cancelled turns
+  neither consume nor create an opportunity. Without an opportunity, do not
+  run the automatic selector or soft judge. Do not use no-op Scene writes to
+  poll Plot.
+- Treat `scheduledTime` and `deadlineTime` only as automatic eligibility gates
+  inside an existing opportunity, never as timers. A `forced` automatic
+  candidate still requires an opportunity and its SceneTime window; it only
+  skips the soft judge.
+- Treat Plot `triggered` as selected-and-injected, not as semantic
+  verification, completion, or resolution.
+- Keep `plot_event_mark_next` outside Story Design and Story Pack schemas. It
+  is an OOC/GM Session runtime snapshot for the next non-OOC turn. Temporary
+  `title`/`directive` overrides do not change the source event, and
+  `event_id=null` clears the snapshot. Manual injection ignores the Scene
+  opportunity, SceneTime, enabled state, windows, repeat, and cooldown rules;
+  it can run without SceneTime and clear an existing cooldown anchor.
 
 ## Story Pack behavior
 

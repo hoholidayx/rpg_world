@@ -1,6 +1,6 @@
 # 项目、Story 与 Opening 字段
 
-> authoringRulesVersion=1.1 · catalogDigest=1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a
+> authoringRulesVersion=1.2 · catalogDigest=2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52
 
 本文由 RPG World 字段语义单一真源生成；不要手工修改。
 
@@ -48,10 +48,10 @@ Character、Lorebook 与 Status 都直接归 Story 所有；不得设计 Workspa
 | `StoryResources` | `/resources/lorebook` | 直接归当前 Story 所有的世界书条目。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 作为 Story 世界知识进入运行时检索与 Context。 |
 | `StoryResources` | `/resources/narrativeStyles` | 需在 Workspace 创建并绑定到 Story 的叙事风格。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Story 叙事风格绑定或玩家快捷输入。 |
 | `StoryResources` | `/resources/openings` | 最多三条按 sortOrder 排序的 Opening。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 进入 Story Opening 定义；首次有效绑定角色且历史为空时可追加所选开场。 |
-| `StoryResources` | `/resources/plotSchedule` | Story 级事件池、大纲和事件调度配置。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响可推进世界 turn 的剧情候选、判断和 directive 注入。 |
+| `StoryResources` | `/resources/plotSchedule` | Story 级事件池、大纲和事件调度配置；自动 selector 只在已提交 Scene 净变化留下机会后运行。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `StoryResources` | `/resources/quickReplies` | Story Composer 的快捷玩家输入。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Story 叙事风格绑定或玩家快捷输入。 |
 | `StoryResources` | `/resources/rpModules` | Story 允许启用的内置 RP Module。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 限定 Story 可用的内置 RP 能力；Session 只能在其内覆盖。 |
-| `StoryResources` | `/resources/statusTables` | 直接归当前 Story 所有的状态定义。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。 |
+| `StoryResources` | `/resources/statusTables` | 直接归当前 Story 所有的状态定义。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。 |
 | `StoryResources` | `/resources/visualCatalog` | 只归档、不自动创建媒体任务的独立视觉 brief。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 仅归档可生图规格，不创建媒体资产、任务或消息。 |
 | `RuntimeTarget` | `/target/allowCreateWorkspace` | 目标 Workspace 不存在时是否允许导入流程创建它。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 只影响 DesignProject 恢复、构建目标和作者工作流。 |
 | `RuntimeTarget` | `/target/storyId` | 已存在目标 Story 的运行时数字 ID；新建时留空。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 只影响 DesignProject 恢复、构建目标和作者工作流。 |
@@ -66,7 +66,7 @@ Character、Lorebook 与 Status 都直接归 Story 所有；不得设计 Workspa
 | `StoryCore` | `/story/logline` | 一句话核心冲突：主角、目标、阻力和主要代价。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
 | `StoryCore` | `/story/metadata` | 仅放没有正式字段承载的中立扩展数据。 | 不要写 _rpgStoryDesign；该键由运行时适配器保留。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
 | `StoryCore` | `/story/stableId` | 跨 revision、分包和运行时绑定保持稳定的文本 ID。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
-| `StoryCore` | `/story/storyPrompt` | 每个可推进世界 turn 使用的固定 Story 规则与叙事约束。 | 不要写易变 Scene、当前状态值或 message_mode 提示。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
+| `StoryCore` | `/story/storyPrompt` | 每个 Agent 正文 turn 使用的固定 Story 规则与叙事约束。 | 不要写易变 Scene、当前状态值或 message_mode 提示。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
 | `StoryCore` | `/story/summary` | Story 的短管理摘要，说明体验与前提，不写执行指令。 | 不要写固定 Prompt、逐场景正文或当前 Session 状态。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
 | `StoryCore` | `/story/themes` | 需要持续回响的主题关键词或短语。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
 | `StoryCore` | `/story/timeSetting` | 故事虚拟年代、历法与时间锚点的文字说明。 | 不要用“1 年”代替已确定的 2019、2020 等虚拟年份。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |

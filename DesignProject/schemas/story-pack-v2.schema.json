@@ -413,18 +413,18 @@
     },
     "PlotEventSpec": {
       "additionalProperties": false,
-      "description": "可被事件池或大纲节点调度的一条世界/NPC指令。",
+      "description": "可被事件池、大纲节点或 Session 临时标记引用的一条世界/NPC指令。",
       "properties": {
         "allowRepeat": {
           "default": false,
-          "description": "该事件触发后是否允许再次候选。",
+          "description": "事件自动触发后是否可在后续 Scene 调度机会再次候选；手动标记忽略重复限制。",
           "examples": [
             false
           ],
           "title": "Allowrepeat",
           "type": "boolean",
           "x-authoringRuleId": "field.plot-event.allow-repeat",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "deadlineTime": {
           "anyOf": [
@@ -436,13 +436,13 @@
             }
           ],
           "default": null,
-          "description": "事件窗口的排他上界；到达此时即不再候选。",
+          "description": "仅在 Scene 调度机会存在时作为自动事件候选窗口的排他上界；不是定时器。",
           "examples": [
             "2020 年 7 月 21 日 18 时"
           ],
           "title": "Deadlinetime",
           "x-authoringRuleId": "field.plot-event.deadline-time",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "description": {
           "default": "",
@@ -453,7 +453,7 @@
           "title": "Description",
           "type": "string",
           "x-authoringRuleId": "field.plot-event.description",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "directive": {
           "description": "事件触发后必须落实的世界/NPC行为；保留玩家选择，不把后果提前写成事实。",
@@ -463,11 +463,11 @@
           "title": "Directive",
           "type": "string",
           "x-authoringRuleId": "field.plot-event.directive",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "dispatchMode": {
           "default": "soft",
-          "description": "forced 到时直接注入；soft 还需适宜性判断。",
+          "description": "一次 Scene 调度机会内的自动候选满足 SceneTime 窗口后，forced 跳过 soft judge，soft 仍需适宜性判断；手动标记不读取此字段。",
           "enum": [
             "forced",
             "soft"
@@ -478,18 +478,18 @@
           "title": "Dispatchmode",
           "type": "string",
           "x-authoringRuleId": "field.plot-event.dispatch-mode",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "enabled": {
           "default": true,
-          "description": "是否在导入后启用该资源或模块。",
+          "description": "是否允许事件参与自动候选；Session 手动标记的临时注入忽略此字段。",
           "examples": [
             true
           ],
           "title": "Enabled",
           "type": "boolean",
           "x-authoringRuleId": "field.plot-event.enabled",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "poolRef": {
           "description": "该事件所属事件池的 stableId。",
@@ -499,7 +499,7 @@
           "title": "Poolref",
           "type": "string",
           "x-authoringRuleId": "field.plot-event.pool-ref",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "position": {
           "default": 0,
@@ -511,11 +511,11 @@
           "title": "Position",
           "type": "integer",
           "x-authoringRuleId": "field.plot-event.position",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "repeatCooldownMinutes": {
           "default": 0,
-          "description": "重复事件两次触发之间的故事分钟冷却。",
+          "description": "重复事件两次自动触发之间的 SceneTime 分钟冷却；手动标记忽略冷却，且无 SceneTime 的手动注入会解除已有冷却锚点。",
           "examples": [
             0
           ],
@@ -523,7 +523,7 @@
           "title": "Repeatcooldownminutes",
           "type": "integer",
           "x-authoringRuleId": "field.plot-event.repeat-cooldown-minutes",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "scheduledTime": {
           "anyOf": [
@@ -535,13 +535,13 @@
             }
           ],
           "default": null,
-          "description": "事件或节点最早可进入候选的 SceneTime。",
+          "description": "仅在 Scene 调度机会存在时作为自动候选最早资格门槛的 SceneTime；不是定时器。",
           "examples": [
             "2020 年 7 月 18 日 9 时"
           ],
           "title": "Scheduledtime",
           "x-authoringRuleId": "field.plot-event.scheduled-time",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "stableId": {
           "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
@@ -551,18 +551,18 @@
           "title": "Stableid",
           "type": "string",
           "x-authoringRuleId": "field.plot-event.stable-id",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "suitabilityHint": {
           "default": "",
-          "description": "只说明 soft 事件何时适合开始，包括阶段、地点、在场角色、前置事实和安全边界；不重复 directive。",
+          "description": "只说明自动 soft 候选何时适合开始，包括阶段、地点、在场角色、前置事实和安全边界；不重复 directive，手动标记不会执行该判断。",
           "examples": [
             "玩家已抵达旧城区，且尚未取得录音笔中的第二段录音。"
           ],
           "title": "Suitabilityhint",
           "type": "string",
           "x-authoringRuleId": "field.plot-event.suitability-hint",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "title": {
           "description": "面向作者、玩家或管理界面的短标题。",
@@ -572,7 +572,7 @@
           "title": "Title",
           "type": "string",
           "x-authoringRuleId": "field.plot-event.title",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         }
       },
       "required": [
@@ -586,11 +586,11 @@
     },
     "PlotNodeSpec": {
       "additionalProperties": false,
-      "description": "在某个最早时间引用一个剧情事件的调度节点。",
+      "description": "在一次 Scene 调度机会中按最早 SceneTime 引用剧情事件的节点。",
       "properties": {
         "dispatchMode": {
           "default": "soft",
-          "description": "forced 到时直接注入；soft 还需适宜性判断。",
+          "description": "一次 Scene 调度机会内，节点满足 SceneTime 门槛后，forced 跳过 soft judge，soft 仍需适宜性判断；手动标记事件不读取节点字段。",
           "enum": [
             "forced",
             "soft"
@@ -601,18 +601,18 @@
           "title": "Dispatchmode",
           "type": "string",
           "x-authoringRuleId": "field.plot-node.dispatch-mode",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "enabled": {
           "default": true,
-          "description": "是否在导入后启用该资源或模块。",
+          "description": "是否允许节点参与有 Scene 调度机会的自动候选；不限制事件被手动标记。",
           "examples": [
             true
           ],
           "title": "Enabled",
           "type": "boolean",
           "x-authoringRuleId": "field.plot-node.enabled",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "eventRef": {
           "description": "该节点引用的剧情事件 stableId。",
@@ -622,7 +622,7 @@
           "title": "Eventref",
           "type": "string",
           "x-authoringRuleId": "field.plot-node.event-ref",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "position": {
           "default": 0,
@@ -634,17 +634,17 @@
           "title": "Position",
           "type": "integer",
           "x-authoringRuleId": "field.plot-node.position",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "scheduledTime": {
-          "description": "节点最早可注入时间；注入只代表触发 directive，不代表章节完成。",
+          "description": "仅在 Scene 调度机会存在时作为节点自动候选的最早资格门槛；不是定时器。注入只代表触发 directive，不代表章节完成。",
           "examples": [
             "2020 年 7 月 18 日 9 时"
           ],
           "title": "Scheduledtime",
           "type": "string",
           "x-authoringRuleId": "field.plot-node.scheduled-time",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "stableId": {
           "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
@@ -654,7 +654,7 @@
           "title": "Stableid",
           "type": "string",
           "x-authoringRuleId": "field.plot-node.stable-id",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         }
       },
       "required": [
@@ -667,29 +667,29 @@
     },
     "PlotOutlineSpec": {
       "additionalProperties": false,
-      "description": "按位置和最早时间组织的一组一次性大纲节点。",
+      "description": "按位置和最早 SceneTime 资格门槛组织的一组一次性大纲节点。",
       "properties": {
         "description": {
           "default": "",
-          "description": "供作者和管理界面理解对象用途的说明。",
+          "description": "说明大纲线的主题、节点顺序与用途；节点仍只在 Scene 调度机会中成为自动候选。",
           "examples": [
             "按故事虚拟时间推进失踪案调查。"
           ],
           "title": "Description",
           "type": "string",
           "x-authoringRuleId": "field.plot-outline.description",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "enabled": {
           "default": true,
-          "description": "是否在导入后启用该资源或模块。",
+          "description": "是否允许该大纲参与有 Scene 调度机会的自动候选；不限制其事件被手动标记。",
           "examples": [
             true
           ],
           "title": "Enabled",
           "type": "boolean",
           "x-authoringRuleId": "field.plot-outline.enabled",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "name": {
           "description": "面向作者和管理界面的名称。",
@@ -699,7 +699,7 @@
           "title": "Name",
           "type": "string",
           "x-authoringRuleId": "field.plot-outline.name",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "nodes": {
           "description": "该大纲按 position 排列的节点。",
@@ -712,18 +712,18 @@
           "title": "Nodes",
           "type": "array",
           "x-authoringRuleId": "field.plot-outline.nodes",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "priority": {
           "default": 0,
-          "description": "同类调度对象之间的相对优先级。",
+          "description": "一次 Scene 调度机会内，同类候选之间的相对优先级。",
           "examples": [
             10
           ],
           "title": "Priority",
           "type": "integer",
           "x-authoringRuleId": "field.plot-outline.priority",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "stableId": {
           "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
@@ -733,7 +733,7 @@
           "title": "Stableid",
           "type": "string",
           "x-authoringRuleId": "field.plot-outline.stable-id",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         }
       },
       "required": [
@@ -745,29 +745,29 @@
     },
     "PlotPoolSpec": {
       "additionalProperties": false,
-      "description": "一组共享启用、排序和抽取策略的剧情事件。",
+      "description": "在一次 Scene 调度机会中共享启用、排序和抽取策略的一组剧情事件。",
       "properties": {
         "description": {
           "default": "",
-          "description": "说明池的主题、用途和候选边界，不写单个事件指令。",
+          "description": "说明池的主题、用途和自动候选边界，不写单个事件指令。",
           "examples": [
             "承载推动失踪案调查的主线事件。"
           ],
           "title": "Description",
           "type": "string",
           "x-authoringRuleId": "field.plot-pool.description",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "enabled": {
           "default": true,
-          "description": "是否在导入后启用该资源或模块。",
+          "description": "是否允许该池参与有 Scene 调度机会的自动候选；手动标记忽略此字段。",
           "examples": [
             true
           ],
           "title": "Enabled",
           "type": "boolean",
           "x-authoringRuleId": "field.plot-pool.enabled",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "name": {
           "description": "面向作者和管理界面的名称。",
@@ -777,22 +777,22 @@
           "title": "Name",
           "type": "string",
           "x-authoringRuleId": "field.plot-pool.name",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "priority": {
           "default": 0,
-          "description": "同类调度对象之间的相对优先级。",
+          "description": "一次 Scene 调度机会内，同类候选之间的相对优先级。",
           "examples": [
             10
           ],
           "title": "Priority",
           "type": "integer",
           "x-authoringRuleId": "field.plot-pool.priority",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "selectionMode": {
           "default": "random",
-          "description": "池内候选的 random 或 sequential 抽取方式。",
+          "description": "有 Scene 调度机会时，池内候选的 random 或 sequential 抽取方式。",
           "enum": [
             "random",
             "sequential"
@@ -803,7 +803,7 @@
           "title": "Selectionmode",
           "type": "string",
           "x-authoringRuleId": "field.plot-pool.selection-mode",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "stableId": {
           "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
@@ -813,7 +813,7 @@
           "title": "Stableid",
           "type": "string",
           "x-authoringRuleId": "field.plot-pool.stable-id",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         }
       },
       "required": [
@@ -825,7 +825,7 @@
     },
     "PlotScheduleSpec": {
       "additionalProperties": false,
-      "description": "事件池、事件和大纲的 Story 级调度投影。",
+      "description": "事件池、事件和大纲的 Story 级调度投影；自动选择由已提交 Scene 文档的净变化产生一次机会。",
       "properties": {
         "events": {
           "description": "剧情事件定义；每条事件只归一个池。",
@@ -838,7 +838,7 @@
           "title": "Events",
           "type": "array",
           "x-authoringRuleId": "field.plot-schedule.events",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "outlines": {
           "description": "顺序大纲定义。",
@@ -851,7 +851,7 @@
           "title": "Outlines",
           "type": "array",
           "x-authoringRuleId": "field.plot-schedule.outlines",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "pools": {
           "description": "剧情事件池定义。",
@@ -864,7 +864,7 @@
           "title": "Pools",
           "type": "array",
           "x-authoringRuleId": "field.plot-schedule.pools",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         }
       },
       "title": "PlotScheduleSpec",
@@ -1062,7 +1062,7 @@
           "title": "Key",
           "type": "string",
           "x-authoringRuleId": "field.status-row.key",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "metadata": {
           "additionalProperties": true,
@@ -1073,7 +1073,7 @@
           "title": "Metadata",
           "type": "object",
           "x-authoringRuleId": "field.status-row.metadata",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "runtimeKeyLocked": {
           "default": false,
@@ -1084,7 +1084,7 @@
           "title": "Runtimekeylocked",
           "type": "boolean",
           "x-authoringRuleId": "field.status-row.runtime-key-locked",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "updateRule": {
           "default": "",
@@ -1095,7 +1095,7 @@
           "title": "Updaterule",
           "type": "string",
           "x-authoringRuleId": "field.status-row.update-rule",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "value": {
           "default": "",
@@ -1106,7 +1106,7 @@
           "title": "Value",
           "type": "string",
           "x-authoringRuleId": "field.status-row.value",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         }
       },
       "required": [
@@ -1135,7 +1135,7 @@
           ],
           "title": "Characterref",
           "x-authoringRuleId": "field.status-table.character-ref",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "description": {
           "default": "",
@@ -1146,7 +1146,7 @@
           "title": "Description",
           "type": "string",
           "x-authoringRuleId": "field.status-table.description",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "metadata": {
           "additionalProperties": true,
@@ -1157,7 +1157,7 @@
           "title": "Metadata",
           "type": "object",
           "x-authoringRuleId": "field.status-table.metadata",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "name": {
           "description": "面向作者和管理界面的名称。",
@@ -1167,7 +1167,7 @@
           "title": "Name",
           "type": "string",
           "x-authoringRuleId": "field.status-table.name",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "rows": {
           "description": "该状态表的有序字段定义。",
@@ -1202,7 +1202,7 @@
           "title": "Rows",
           "type": "array",
           "x-authoringRuleId": "field.status-table.rows",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "sortOrder": {
           "default": 0,
@@ -1214,7 +1214,7 @@
           "title": "Sortorder",
           "type": "integer",
           "x-authoringRuleId": "field.status-table.sort-order",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "stableId": {
           "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
@@ -1224,7 +1224,7 @@
           "title": "Stableid",
           "type": "string",
           "x-authoringRuleId": "field.status-table.stable-id",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "statusKind": {
           "default": "normal",
@@ -1239,7 +1239,7 @@
           "title": "Statuskind",
           "type": "string",
           "x-authoringRuleId": "field.status-table.status-kind",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         }
       },
       "required": [
@@ -1303,7 +1303,7 @@
         },
         "storyPrompt": {
           "default": "",
-          "description": "每个可推进世界 turn 使用的固定 Story 规则与叙事约束。",
+          "description": "每个 Agent 正文 turn 使用的固定 Story 规则与叙事约束。",
           "examples": [
             "保持悬疑节奏；所有关键选择由玩家作出。"
           ],
@@ -1456,7 +1456,7 @@
         },
         "plotSchedule": {
           "$ref": "#/$defs/PlotScheduleSpec",
-          "description": "Story 级事件池、大纲和事件调度配置。",
+          "description": "Story 级事件池、大纲和事件调度配置；自动 selector 只在已提交 Scene 净变化留下机会后运行。",
           "examples": [
             {
               "events": [],
@@ -1465,7 +1465,7 @@
             }
           ],
           "x-authoringRuleId": "field.resources.plot-schedule",
-          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "quickReplies": {
           "description": "Story Composer 的快捷玩家输入。",
@@ -1504,7 +1504,7 @@
           "title": "Statustables",
           "type": "array",
           "x-authoringRuleId": "field.resources.status-tables",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
         },
         "visualCatalog": {
           "description": "只归档、不自动创建媒体任务的独立视觉 brief。",
@@ -1815,6 +1815,6 @@
   ],
   "title": "RPG World Story Pack v2",
   "type": "object",
-  "x-authoringRulesDigest": "1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a",
-  "x-authoringRulesVersion": "1.1"
+  "x-authoringRulesDigest": "2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52",
+  "x-authoringRulesVersion": "1.2"
 }

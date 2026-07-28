@@ -50,6 +50,16 @@ the entire turn.
   visibility and updates. Memory is better suited to time-ordered narrative
   history, but current facts, commitments, contacts, or event states may still
   be modeled as status rows.
+- Treat `neutral | ic | gm` as non-OOC body turns; OOC and commands do not
+  advance world facts. Automatic Plot selection is not a per-turn poll. Only
+  a successfully committed net change to the entire active Scene document
+  creates one opportunity for the next non-OOC turn; `scheduledTime` and
+  `deadlineTime` are eligibility gates inside that opportunity, not timers.
+  Do not use no-op Scene updates to poll Plot.
+- Keep `plot_event_mark_next` out of Story Design and Story Pack fields. It is
+  an OOC/GM Session runtime snapshot for the next non-OOC turn, may temporarily
+  override `title` and `directive`, and ignores all automatic scheduling rules
+  without changing the source event.
 - `message_mode` is a code-owned, empty-config RP Module with
   `neutral | ic | ooc | gm`; do not model Workspace mode or prompt resources.
 - Story Design, Story Pack, DesignProject, and MCP contracts are 2.0 hard cuts.

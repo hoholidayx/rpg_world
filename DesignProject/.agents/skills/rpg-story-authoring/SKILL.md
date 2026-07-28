@@ -5,8 +5,8 @@ description: Persist, resume, revise, inspect, validate, and package a portable 
 
 # RPG Story Authoring
 
-<!-- authoring-rules-version: 1.1 -->
-<!-- authoring-rules-digest: 1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a -->
+<!-- authoring-rules-version: 1.2 -->
+<!-- authoring-rules-digest: 2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52 -->
 
 Persist the Story design as immutable local revisions and use
 `rpg-world-mcp` as the only runtime boundary. Never rely on conversation
@@ -50,6 +50,18 @@ Story-owned. Include image-worthy material in both the relevant resource's
 generation brief. Use Story virtual calendar years such as 2019 or 2020 when
 the fiction is anchored to those years; do not replace them with placeholder
 year 1.
+
+Treat `neutral | ic | gm` as non-OOC body turns; OOC and commands do not
+advance world facts. Do not model automatic Plot selection as a per-turn
+poll. A successfully committed net change to the entire active Scene document
+creates one opportunity for the next non-OOC turn; `scheduledTime` and
+`deadlineTime` only gate candidates inside that opportunity. Do not author
+no-op Scene changes to poll Plot.
+
+Keep `plot_event_mark_next` state out of Story Design and Story Pack fields.
+It is an OOC/GM Session runtime snapshot for the next non-OOC turn, may
+temporarily override `title` and `directive`, and ignores all automatic
+eligibility rules without changing the source event.
 
 Read the relevant generated field reference before adding or substantially
 rewriting that domain:

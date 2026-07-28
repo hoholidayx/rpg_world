@@ -1,6 +1,6 @@
 {
-  "authoringRulesVersion": "1.1",
-  "catalogDigest": "1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a",
+  "authoringRulesVersion": "1.2",
+  "catalogDigest": "2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52",
   "compatibleContracts": {
     "designProject": "story-design-project/2.0",
     "mcp": "2.0",
@@ -181,7 +181,7 @@
       "ruleId": "status.update-rule-scheduling",
       "runtimeEffect": "运行时不会执行这些调度或权限语义，保留会误导状态 Agent。",
       "severity": "warning",
-      "suggestion": "改写为当前 turn 的事实判定条件；删除每 N 回合、延迟、manual/read-only 等内容。"
+      "suggestion": "改写为当前非 OOC 正文 turn 的事实判定条件；删除每 N 回合、延迟、manual/read-only 等内容，也不要用无事实变化的 Scene 写入轮询 Plot。"
     },
     {
       "domain": "status",
@@ -192,7 +192,7 @@
         "package"
       ],
       "ruleId": "status.scene-placeholder-year",
-      "runtimeEffect": "Plot Scheduler 严格按 SceneTime 比较故事时间。",
+      "runtimeEffect": "仅当已有 Scene 调度机会时，Plot Scheduler 才按 SceneTime 判断自动候选资格。",
       "severity": "warning",
       "suggestion": "若故事已锚定现实年代，使用 2019 年、2020 年等虚拟年份。"
     },
@@ -205,20 +205,20 @@
         "package"
       ],
       "ruleId": "plot.soft-event-hint-empty",
-      "runtimeEffect": "soft judge 只能依赖通用 Context，事件更容易在不合适时机触发。",
+      "runtimeEffect": "有 Scene 调度机会且事件进入自动 soft 候选后，judge 只能依赖通用 Context，事件更容易在不合适时机触发。",
       "severity": "warning",
       "suggestion": "补充适合开始的阶段、地点、在场人物、前置事实与安全边界。"
     },
     {
       "domain": "plot",
-      "message": "forced 事件填写了 suitabilityHint，但 forced 调度不会等待 soft 判断。",
+      "message": "forced 事件填写了 suitabilityHint，但自动 forced 候选不会等待 soft 判断。",
       "pathPattern": "/resources/plotSchedule/events/*/suitabilityHint",
       "profiles": [
         "draft",
         "package"
       ],
       "ruleId": "plot.forced-event-unused-hint",
-      "runtimeEffect": "forced 候选到时直接注入。",
+      "runtimeEffect": "有 Scene 调度机会且满足 SceneTime 窗口后，自动 forced 候选跳过 soft judge 直接注入；时间字段本身不会唤醒 selector。",
       "severity": "warning",
       "suggestion": "若条件必须被判断，改用 soft；否则把必要内容移入 directive 或管理说明。"
     },
@@ -320,7 +320,7 @@
     },
     {
       "id": "status",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
     },
     {
       "id": "composer",
@@ -332,7 +332,7 @@
     },
     {
       "id": "plot",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
     },
     {
       "id": "visual",
@@ -1022,8 +1022,8 @@
       "title": "Story Pack 根文档 · target"
     },
     {
-      "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "该事件触发后是否允许再次候选。",
+      "avoid": "不要把手动标记的临时注入计入自动重复资格。",
+      "description": "事件自动触发后是否可在后续 Scene 调度机会再次候选；手动标记忽略重复限制。",
       "domain": "plot",
       "examples": [
         false
@@ -1032,12 +1032,12 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/allowRepeat",
       "ruleId": "field.plot-event.allow-repeat",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · allowRepeat"
     },
     {
-      "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "事件窗口的排他上界；到达此时即不再候选。",
+      "avoid": "不要把截止时间解释成会自行唤醒 selector 的定时器。",
+      "description": "仅在 Scene 调度机会存在时作为自动事件候选窗口的排他上界；不是定时器。",
       "domain": "plot",
       "examples": [
         "2020 年 7 月 21 日 18 时"
@@ -1046,7 +1046,7 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/deadlineTime",
       "ruleId": "field.plot-event.deadline-time",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · deadlineTime"
     },
     {
@@ -1060,7 +1060,7 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/description",
       "ruleId": "field.plot-event.description",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · description"
     },
     {
@@ -1074,12 +1074,12 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/directive",
       "ruleId": "field.plot-event.directive",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · directive"
     },
     {
-      "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "forced 到时直接注入；soft 还需适宜性判断。",
+      "avoid": "不要把 forced 理解成定时器；没有 Scene 调度机会时不会因此自动运行。",
+      "description": "一次 Scene 调度机会内的自动候选满足 SceneTime 窗口后，forced 跳过 soft judge，soft 仍需适宜性判断；手动标记不读取此字段。",
       "domain": "plot",
       "examples": [
         "soft"
@@ -1088,12 +1088,12 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/dispatchMode",
       "ruleId": "field.plot-event.dispatch-mode",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · dispatchMode"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "是否在导入后启用该资源或模块。",
+      "description": "是否允许事件参与自动候选；Session 手动标记的临时注入忽略此字段。",
       "domain": "plot",
       "examples": [
         true
@@ -1102,7 +1102,7 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/enabled",
       "ruleId": "field.plot-event.enabled",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · enabled"
     },
     {
@@ -1116,7 +1116,7 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/poolRef",
       "ruleId": "field.plot-event.pool-ref",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · poolRef"
     },
     {
@@ -1130,12 +1130,12 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/position",
       "ruleId": "field.plot-event.position",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · position"
     },
     {
-      "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "重复事件两次触发之间的故事分钟冷却。",
+      "avoid": "不要把冷却写成现实时间、turn 数或手动注入限制。",
+      "description": "重复事件两次自动触发之间的 SceneTime 分钟冷却；手动标记忽略冷却，且无 SceneTime 的手动注入会解除已有冷却锚点。",
       "domain": "plot",
       "examples": [
         0
@@ -1144,12 +1144,12 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/repeatCooldownMinutes",
       "ruleId": "field.plot-event.repeat-cooldown-minutes",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · repeatCooldownMinutes"
     },
     {
-      "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "事件或节点最早可进入候选的 SceneTime。",
+      "avoid": "不要把时间门槛解释成后台定时器或每 turn 轮询触发器。",
+      "description": "仅在 Scene 调度机会存在时作为自动候选最早资格门槛的 SceneTime；不是定时器。",
       "domain": "plot",
       "examples": [
         "2020 年 7 月 18 日 9 时"
@@ -1158,7 +1158,7 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/scheduledTime",
       "ruleId": "field.plot-event.scheduled-time",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · scheduledTime"
     },
     {
@@ -1172,12 +1172,12 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/stableId",
       "ruleId": "field.plot-event.stable-id",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · stableId"
     },
     {
-      "avoid": "不要把它当确定性 DSL 或重复剧情正文。",
-      "description": "只说明 soft 事件何时适合开始，包括阶段、地点、在场角色、前置事实和安全边界；不重复 directive。",
+      "avoid": "不要把它当确定性 DSL、手动注入条件或重复剧情正文。",
+      "description": "只说明自动 soft 候选何时适合开始，包括阶段、地点、在场角色、前置事实和安全边界；不重复 directive，手动标记不会执行该判断。",
       "domain": "plot",
       "examples": [
         "玩家已抵达旧城区，且尚未取得录音笔中的第二段录音。"
@@ -1186,7 +1186,7 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/suitabilityHint",
       "ruleId": "field.plot-event.suitability-hint",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · suitabilityHint"
     },
     {
@@ -1200,12 +1200,12 @@
       "model": "PlotEventSpec",
       "pathPattern": "/resources/plotSchedule/events/*/title",
       "ruleId": "field.plot-event.title",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件 · title"
     },
     {
-      "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "forced 到时直接注入；soft 还需适宜性判断。",
+      "avoid": "不要把 forced 节点理解成定时器；没有 Scene 调度机会时不会因此自动运行。",
+      "description": "一次 Scene 调度机会内，节点满足 SceneTime 门槛后，forced 跳过 soft judge，soft 仍需适宜性判断；手动标记事件不读取节点字段。",
       "domain": "plot",
       "examples": [
         "soft"
@@ -1214,12 +1214,12 @@
       "model": "PlotNodeSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/nodes/*/dispatchMode",
       "ruleId": "field.plot-node.dispatch-mode",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "大纲节点 · dispatchMode"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "是否在导入后启用该资源或模块。",
+      "description": "是否允许节点参与有 Scene 调度机会的自动候选；不限制事件被手动标记。",
       "domain": "plot",
       "examples": [
         true
@@ -1228,7 +1228,7 @@
       "model": "PlotNodeSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/nodes/*/enabled",
       "ruleId": "field.plot-node.enabled",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "大纲节点 · enabled"
     },
     {
@@ -1242,7 +1242,7 @@
       "model": "PlotNodeSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/nodes/*/eventRef",
       "ruleId": "field.plot-node.event-ref",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "大纲节点 · eventRef"
     },
     {
@@ -1256,12 +1256,12 @@
       "model": "PlotNodeSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/nodes/*/position",
       "ruleId": "field.plot-node.position",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "大纲节点 · position"
     },
     {
-      "avoid": "不要把节点触发时间解释成章节完成时间。",
-      "description": "节点最早可注入时间；注入只代表触发 directive，不代表章节完成。",
+      "avoid": "不要把节点时间解释成章节完成时间、后台定时器或每 turn 轮询触发器。",
+      "description": "仅在 Scene 调度机会存在时作为节点自动候选的最早资格门槛；不是定时器。注入只代表触发 directive，不代表章节完成。",
       "domain": "plot",
       "examples": [
         "2020 年 7 月 18 日 9 时"
@@ -1270,7 +1270,7 @@
       "model": "PlotNodeSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/nodes/*/scheduledTime",
       "ruleId": "field.plot-node.scheduled-time",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "大纲节点 · scheduledTime"
     },
     {
@@ -1284,12 +1284,12 @@
       "model": "PlotNodeSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/nodes/*/stableId",
       "ruleId": "field.plot-node.stable-id",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "大纲节点 · stableId"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "供作者和管理界面理解对象用途的说明。",
+      "description": "说明大纲线的主题、节点顺序与用途；节点仍只在 Scene 调度机会中成为自动候选。",
       "domain": "plot",
       "examples": [
         "按故事虚拟时间推进失踪案调查。"
@@ -1298,12 +1298,12 @@
       "model": "PlotOutlineSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/description",
       "ruleId": "field.plot-outline.description",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情大纲 · description"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "是否在导入后启用该资源或模块。",
+      "description": "是否允许该大纲参与有 Scene 调度机会的自动候选；不限制其事件被手动标记。",
       "domain": "plot",
       "examples": [
         true
@@ -1312,7 +1312,7 @@
       "model": "PlotOutlineSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/enabled",
       "ruleId": "field.plot-outline.enabled",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情大纲 · enabled"
     },
     {
@@ -1326,7 +1326,7 @@
       "model": "PlotOutlineSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/name",
       "ruleId": "field.plot-outline.name",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情大纲 · name"
     },
     {
@@ -1340,12 +1340,12 @@
       "model": "PlotOutlineSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/nodes",
       "ruleId": "field.plot-outline.nodes",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情大纲 · nodes"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "同类调度对象之间的相对优先级。",
+      "description": "一次 Scene 调度机会内，同类候选之间的相对优先级。",
       "domain": "plot",
       "examples": [
         10
@@ -1354,7 +1354,7 @@
       "model": "PlotOutlineSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/priority",
       "ruleId": "field.plot-outline.priority",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情大纲 · priority"
     },
     {
@@ -1368,12 +1368,12 @@
       "model": "PlotOutlineSpec",
       "pathPattern": "/resources/plotSchedule/outlines/*/stableId",
       "ruleId": "field.plot-outline.stable-id",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情大纲 · stableId"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "说明池的主题、用途和候选边界，不写单个事件指令。",
+      "description": "说明池的主题、用途和自动候选边界，不写单个事件指令。",
       "domain": "plot",
       "examples": [
         "承载推动失踪案调查的主线事件。"
@@ -1382,12 +1382,12 @@
       "model": "PlotPoolSpec",
       "pathPattern": "/resources/plotSchedule/pools/*/description",
       "ruleId": "field.plot-pool.description",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件池 · description"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "是否在导入后启用该资源或模块。",
+      "description": "是否允许该池参与有 Scene 调度机会的自动候选；手动标记忽略此字段。",
       "domain": "plot",
       "examples": [
         true
@@ -1396,7 +1396,7 @@
       "model": "PlotPoolSpec",
       "pathPattern": "/resources/plotSchedule/pools/*/enabled",
       "ruleId": "field.plot-pool.enabled",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件池 · enabled"
     },
     {
@@ -1410,12 +1410,12 @@
       "model": "PlotPoolSpec",
       "pathPattern": "/resources/plotSchedule/pools/*/name",
       "ruleId": "field.plot-pool.name",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件池 · name"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "同类调度对象之间的相对优先级。",
+      "description": "一次 Scene 调度机会内，同类候选之间的相对优先级。",
       "domain": "plot",
       "examples": [
         10
@@ -1424,12 +1424,12 @@
       "model": "PlotPoolSpec",
       "pathPattern": "/resources/plotSchedule/pools/*/priority",
       "ruleId": "field.plot-pool.priority",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件池 · priority"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "池内候选的 random 或 sequential 抽取方式。",
+      "description": "有 Scene 调度机会时，池内候选的 random 或 sequential 抽取方式。",
       "domain": "plot",
       "examples": [
         "sequential"
@@ -1438,7 +1438,7 @@
       "model": "PlotPoolSpec",
       "pathPattern": "/resources/plotSchedule/pools/*/selectionMode",
       "ruleId": "field.plot-pool.selection-mode",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件池 · selectionMode"
     },
     {
@@ -1452,7 +1452,7 @@
       "model": "PlotPoolSpec",
       "pathPattern": "/resources/plotSchedule/pools/*/stableId",
       "ruleId": "field.plot-pool.stable-id",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件池 · stableId"
     },
     {
@@ -1466,7 +1466,7 @@
       "model": "PlotScheduleSpec",
       "pathPattern": "/resources/plotSchedule/events",
       "ruleId": "field.plot-schedule.events",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情调度 · events"
     },
     {
@@ -1480,7 +1480,7 @@
       "model": "PlotScheduleSpec",
       "pathPattern": "/resources/plotSchedule/outlines",
       "ruleId": "field.plot-schedule.outlines",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情调度 · outlines"
     },
     {
@@ -1494,7 +1494,7 @@
       "model": "PlotScheduleSpec",
       "pathPattern": "/resources/plotSchedule/pools",
       "ruleId": "field.plot-schedule.pools",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情调度 · pools"
     },
     {
@@ -1744,7 +1744,7 @@
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "Story 级事件池、大纲和事件调度配置。",
+      "description": "Story 级事件池、大纲和事件调度配置；自动 selector 只在已提交 Scene 净变化留下机会后运行。",
       "domain": "project",
       "examples": [
         {
@@ -1757,7 +1757,7 @@
       "model": "StoryResources",
       "pathPattern": "/resources/plotSchedule",
       "ruleId": "field.resources.plot-schedule",
-      "runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "Story 资源集合 · plotSchedule"
     },
     {
@@ -1799,7 +1799,7 @@
       "model": "StoryResources",
       "pathPattern": "/resources/statusTables",
       "ruleId": "field.resources.status-tables",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "Story 资源集合 · statusTables"
     },
     {
@@ -1939,7 +1939,7 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/key",
       "ruleId": "field.status-row.key",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态字段 · key"
     },
     {
@@ -1953,7 +1953,7 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/metadata",
       "ruleId": "field.status-row.metadata",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态字段 · metadata"
     },
     {
@@ -1967,11 +1967,11 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/runtimeKeyLocked",
       "ruleId": "field.status-row.runtime-key-locked",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态字段 · runtimeKeyLocked"
     },
     {
-      "avoid": "不要重复表 description 的共同规则，也不要预设 value 是数值或写每 N 回合、延迟、定时、manual 或 read-only 规则。",
+      "avoid": "不要重复表 description 的共同规则，也不要预设 value 是数值或写每 N 回合、延迟、定时、manual 或 read-only 规则；不要用无事实变化的 Scene 更新轮询 Plot。",
       "description": "只写该字段专属的额外即时语义条件；整表共同规则写入表 description。不得写频率、延迟、后台调度、人工只读或数据库权限。留空时使用“事实明确且值实际变化”的通用规则。",
       "domain": "status",
       "examples": [
@@ -1981,7 +1981,7 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/updateRule",
       "ruleId": "field.status-row.update-rule",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态字段 · updateRule"
     },
     {
@@ -1995,7 +1995,7 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/value",
       "ruleId": "field.status-row.value",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态字段 · value"
     },
     {
@@ -2009,7 +2009,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/characterRef",
       "ruleId": "field.status-table.character-ref",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态表 · characterRef"
     },
     {
@@ -2023,7 +2023,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/description",
       "ruleId": "field.status-table.description",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态表 · description"
     },
     {
@@ -2037,7 +2037,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/metadata",
       "ruleId": "field.status-table.metadata",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态表 · metadata"
     },
     {
@@ -2051,7 +2051,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/name",
       "ruleId": "field.status-table.name",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态表 · name"
     },
     {
@@ -2087,7 +2087,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/rows",
       "ruleId": "field.status-table.rows",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态表 · rows"
     },
     {
@@ -2101,7 +2101,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/sortOrder",
       "ruleId": "field.status-table.sort-order",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态表 · sortOrder"
     },
     {
@@ -2115,7 +2115,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/stableId",
       "ruleId": "field.status-table.stable-id",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态表 · stableId"
     },
     {
@@ -2129,7 +2129,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/statusKind",
       "ruleId": "field.status-table.status-kind",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
       "title": "状态表 · statusKind"
     },
     {
@@ -2248,7 +2248,7 @@
     },
     {
       "avoid": "不要写易变 Scene、当前状态值或 message_mode 提示。",
-      "description": "每个可推进世界 turn 使用的固定 Story 规则与叙事约束。",
+      "description": "每个 Agent 正文 turn 使用的固定 Story 规则与叙事约束。",
       "domain": "story",
       "examples": [
         "保持悬疑节奏；所有关键选择由玩家作出。"
@@ -2687,24 +2687,38 @@
       "title": "来源不自动获得导入授权"
     },
     {
-      "description": "所有状态 value 都在当前 turn 根据明确事实判断更新。整表共同语义、value 格式和即时更新规则写入 description；row.updateRule 只补充字段专属条件，不预设数值模型。状态表保存需要每轮可见和更新的当前状态；Memory 更适合按时间累积的叙事历史，但当前事实仍可成为状态字段。",
+      "description": "所有状态 value 都在 neutral、ic 或 gm 的当前正文 turn 根据明确事实判断更新。整表共同语义、value 格式和即时更新规则写入 description；row.updateRule 只补充字段专属条件，不预设数值模型。状态表保存需要每轮可见和更新的当前状态；Memory 更适合按时间累积的叙事历史，但当前事实仍可成为状态字段。",
       "domain": "status",
       "ruleId": "principle.status-immediate",
-      "runtimeEffect": "StatusSubAgent 每 turn 按目标即时处理状态。",
+      "runtimeEffect": "StatusSubAgent 在 neutral、ic 或 gm 正文 turn 按目标即时处理状态；OOC 与命令不推进状态事实。",
       "title": "状态值即时判断"
     },
     {
       "description": "message_mode 只声明启用且 config 为空；neutral/ic/ooc/gm 的标签和 Prompt 不属于设计数据。",
       "domain": "rp-module",
       "ruleId": "principle.message-mode-code-owned",
-      "runtimeEffect": "OOC 不推进 Plot、Status、Scene 或 Memory 事实。",
+      "runtimeEffect": "neutral、ic 与 gm 是非 OOC 正文 turn；OOC 不推进 Plot、Status、Scene 或 Memory 事实，命令也不属于正文 turn。",
       "title": "message_mode 由代码内置"
     },
     {
-      "description": "大纲节点被注入只表示其 directive 已触发，不代表玩家完成、跳过或解决了章节。",
+      "description": "自动 selector 不按每个 turn 运行。只有成功提交 turn 后整个 active Scene document 的最终内容发生净变化，才为下一次非 OOC turn 留下一次机会；变化覆盖时间、位置、在场人物、其他字段及获准的 key 结构变化。不要用无事实变化的 Scene 写入轮询事件。",
+      "domain": "plot",
+      "ruleId": "principle.plot-scene-opportunity",
+      "runtimeEffect": "下一次 neutral、ic 或 gm turn 在 StatusPreflight 后使用最新 scratch Scene 消费机会，最多选择一个大纲节点和一个池事件；消费 turn 若再次改变 Scene，则为再下一轮留下新机会。OOC、命令、Plot 模块禁用、失败或取消既不消费也不创建机会；无机会时不运行 selector 或 soft judge。",
+      "title": "Scene 净变化产生一次自动调度机会"
+    },
+    {
+      "description": "`plot_event_mark_next` 只在 OOC/GM 运行时把现有事件冻结为 Session 一次性快照；可临时覆盖 title/directive，省略时保留原内容，event_id=null 清空。该快照及工具参数不是 Story Design 或 Story Pack 字段，也不修改原事件。",
+      "domain": "plot",
+      "ruleId": "principle.plot-manual-snapshot-runtime-only",
+      "runtimeEffect": "快照在下一次 neutral、ic 或 gm turn 强制注入，忽略 Scene 调度机会、SceneTime、enabled、时间窗、重复和冷却等全部自动规则；即使无 SceneTime 也可触发并解除该事件已有冷却锚点。",
+      "title": "手动下一轮标记是 Session 临时快照"
+    },
+    {
+      "description": "Plot 的 triggered 只表示事件或大纲节点已被选择并把 directive 注入当前请求，不代表模型已落实，也不代表玩家完成、跳过或解决了章节。",
       "domain": "plot",
       "ruleId": "principle.plot-trigger-not-resolution",
-      "runtimeEffect": "当前 Plot ledger 记录 triggered，不提供章节完成生命周期。",
+      "runtimeEffect": "当前 Plot ledger 记录 selected-and-injected 的 triggered，不提供语义验收或章节完成生命周期。",
       "title": "节点触发不等于章节完成"
     }
   ],

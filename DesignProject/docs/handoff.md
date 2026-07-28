@@ -111,7 +111,31 @@ Story Pack v2 每包只包含一个 Story，支持按 section 拆包，采用 me
 RP Module，模式固定为 `neutral | ic | ooc | gm`，不再设计 Workspace mode。
 Design/Pack/Project/MCP 契约均硬切 2.0，v1 输入直接拒绝且无转换器。
 
-`authoringRulesVersion=1.1` 与 Story Pack `contractVersion=2.0` 独立演进。
+### Scene、turn 与 Plot 调度口径
+
+`neutral | ic | gm` 是非 OOC 正文 turn；OOC 和命令不推进世界事实。自动
+Plot selector 不再按每个 turn 轮询。只有成功提交 turn 后，active Scene
+document 的最终内容相对基线确实发生净变化，才留下供下一次非 OOC turn
+消费的一次调度机会。Scene 变化覆盖时间、位置、在场人物、其他字段以及运行时
+允许的 key 结构变化；不要通过无事实变化的 Scene 写入轮询事件。
+
+下一次非 OOC turn 在 `StatusPreflight` 后按最新 scratch Scene 消费机会，
+每次至多选择一个大纲节点和一个池事件，同一事件不得在两个 lane 重复注入。
+消费轮若再次改变 Scene，会为再下一轮留下新机会。OOC、命令、Plot 模块禁用、
+失败或取消不消费也不创建机会；没有机会时不会调用自动 selector 或 soft
+judge。`scheduledTime`/`deadlineTime` 只是在已有机会内判断候选资格的
+SceneTime 门槛，不是定时器；自动 `forced` 仍需机会与时间窗口，只是跳过
+soft judge。`triggered` 仅表示已选择并注入，不表示模型已落实或剧情已完成。
+
+`plot_event_mark_next` 不属于 Story Design/Story Pack schema。它仅由 OOC/GM
+在 Session runtime 冻结一个下一次非 OOC turn 使用的临时事件快照；可临时
+覆盖 `title`/`directive`，省略时保留原内容，`event_id=null` 清空。手动注入
+不修改原事件，并忽略 Scene 调度机会、SceneTime、enabled、时间窗、重复和
+冷却等全部自动规则；即使没有 SceneTime 也能触发并解除已有冷却锚点。
+
+SceneTime 固定使用无“第”字的 `Y 年 M 月 D 日 H 时 [M 分]`。
+
+`authoringRulesVersion=1.2` 与 Story Pack `contractVersion=2.0` 独立演进。
 日常迭代调用 `story_design_validate(profile="draft")`；准备 checkpoint 或
 构建包时调用 `profile="package"`。`diagnostics` 固定包含
 `ruleId/severity/path/message/suggestion/runtimeEffect`。error 是确定性门禁；

@@ -1,6 +1,6 @@
 {
   "authoringRules": {
-    "digest": "1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a",
+    "digest": "2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52",
     "managedAssetRefresh": {
       "changesDesignRevision": false,
       "changesRuntimeIntegration": false,
@@ -20,7 +20,7 @@
       "suggestion",
       "runtimeEffect"
     ],
-    "version": "1.1"
+    "version": "1.2"
   },
   "characterCards": {
     "objectiveDetailTags": [
@@ -317,6 +317,62 @@
         }
       ]
     }
+  },
+  "plotScheduling": {
+    "automatic": {
+      "commandsConsumeOrCreateOpportunity": false,
+      "deadlineTimeRole": "exclusive_eligibility_gate",
+      "disabledPlotSchedulingConsumesOrCreatesOpportunity": false,
+      "failedOrCancelledTurnsConsumeOrCreateOpportunity": false,
+      "maxSelectionsPerOpportunity": {
+        "outline": 1,
+        "pool": 1
+      },
+      "oocConsumesOrCreatesOpportunity": false,
+      "requiresSceneOpportunity": true,
+      "sameEventMayUseBothLanes": false,
+      "sceneChangeCoversEntireDocument": true,
+      "scheduledTimeRole": "eligibility_gate",
+      "selectionPhase": "after_status_preflight",
+      "selectionTrigger": "committed_active_scene_net_change",
+      "selectionTurn": "next_non_ooc_turn",
+      "timeFieldsAreTimers": false
+    },
+    "manualPendingInjection": {
+      "availableModes": [
+        "ooc",
+        "gm"
+      ],
+      "clearWithNullEventId": true,
+      "consumedBy": "next_non_ooc_turn",
+      "ignoresAutomaticRules": [
+        "scene_opportunity",
+        "scene_time",
+        "enabled",
+        "scheduled_time",
+        "deadline_time",
+        "repeat",
+        "cooldown"
+      ],
+      "sourceEventChanged": false,
+      "storageScope": "session_runtime_snapshot",
+      "storySchemaField": false,
+      "temporaryOverrides": [
+        "title",
+        "directive"
+      ],
+      "toolName": "plot_event_mark_next",
+      "withoutSceneTimeClearsExistingCooldownAnchor": true,
+      "worksWithoutSceneTime": true
+    },
+    "nonOocModes": [
+      "neutral",
+      "ic",
+      "gm"
+    ],
+    "sceneTimeFormat": "Y 年 M 月 D 日 H 时 [M 分]",
+    "sceneTimeUsesOrdinalPrefix": false,
+    "triggeredMeans": "selected_and_injected"
   },
   "runtimePolicy": {
     "createsSessions": false,

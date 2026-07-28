@@ -130,7 +130,7 @@ def test_viewer_serves_only_read_only_loopback_apis(tmp_path) -> None:
         )
         assert status == 200
         rules = json.loads(body)
-        assert rules["authoringRulesVersion"] == "1.1"
+        assert rules["authoringRulesVersion"] == "1.2"
         assert len(rules["fields"]) >= 150
 
         status, _, body = _request(

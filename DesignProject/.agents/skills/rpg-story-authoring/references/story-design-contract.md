@@ -1,7 +1,7 @@
 # Story design contract
 
-> authoringRulesVersion=1.1 ·
-> catalogDigest=1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a
+> authoringRulesVersion=1.2 ·
+> catalogDigest=2b31edf08c2ba281ceb1a8a6fa90937c42b3774f9162a82818d86ebdbc59af52
 
 ## Contract and ownership
 
@@ -57,6 +57,35 @@ change the import contract.
   jobs, messages, or message metadata.
 - Source records are references only. Re-select, author, and confirm content
   into the current revision before it can enter a Story Pack.
+
+## Turn and Plot scheduling
+
+- Treat `neutral | ic | gm` as non-OOC body turns. OOC and commands do not
+  advance world facts.
+- Do not run the automatic Plot selector on every turn. Only a successfully
+  committed net change to the active Scene document creates one scheduling
+  opportunity for the next non-OOC turn. Scene change covers time, location,
+  present characters, every other field, and permitted key-structure changes.
+- Consume that opportunity after `StatusPreflight` using the latest scratch
+  Scene. Select at most one outline node and one pool event, without injecting
+  the same event twice. If the consuming turn changes Scene again, create a
+  new opportunity for the following non-OOC turn.
+- OOC, commands, disabled Plot scheduling, failed turns, and cancelled turns
+  neither consume nor create an opportunity. Without an opportunity, do not
+  run the automatic selector or soft judge. Do not use no-op Scene writes to
+  poll Plot.
+- Treat `scheduledTime` and `deadlineTime` only as automatic eligibility gates
+  inside an existing opportunity, never as timers. A `forced` automatic
+  candidate still requires an opportunity and its SceneTime window; it only
+  skips the soft judge.
+- Treat Plot `triggered` as selected-and-injected, not as semantic
+  verification, completion, or resolution.
+- Keep `plot_event_mark_next` outside Story Design and Story Pack schemas. It
+  is an OOC/GM Session runtime snapshot for the next non-OOC turn. Temporary
+  `title`/`directive` overrides do not change the source event, and
+  `event_id=null` clears the snapshot. Manual injection ignores the Scene
+  opportunity, SceneTime, enabled state, windows, repeat, and cooldown rules;
+  it can run without SceneTime and clear an existing cooldown anchor.
 
 ## Story Pack behavior
 

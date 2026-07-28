@@ -79,6 +79,7 @@ def test_rule_catalog_covers_every_generated_schema_field() -> None:
     payload = dict(catalog)
     declared_digest = payload.pop("catalogDigest")
 
+    assert AUTHORING_RULES_VERSION == "1.2"
     assert catalog["authoringRulesVersion"] == AUTHORING_RULES_VERSION
     assert digest_json(payload) == declared_digest
     assert len(catalog["fields"]) >= 150
@@ -145,6 +146,119 @@ def test_rule_catalog_uses_model_specific_semantic_examples() -> None:
     assert "只影响 DesignProject" not in (
         rules[("StoryResources", "plotSchedule")]["runtimeEffect"]
     )
+    assert "每个可推进世界 turn" not in (
+        rules[("StoryCore", "storyPrompt")]["description"]
+    )
+    assert "不是定时器" in (
+        rules[("PlotEventSpec", "scheduledTime")]["description"]
+    )
+    assert "Scene 调度机会" in (
+        rules[("PlotEventSpec", "dispatchMode")]["description"]
+    )
+    assert "手动标记忽略" in (
+        rules[("PlotEventSpec", "allowRepeat")]["description"]
+    )
+    assert "已有冷却锚点" in (
+        rules[("PlotEventSpec", "repeatCooldownMinutes")]["description"]
+    )
+    assert "Scene 调度机会" in (
+        rules[("PlotOutlineSpec", "enabled")]["description"]
+    )
+    assert "手动标记事件不读取节点字段" in (
+        rules[("PlotNodeSpec", "dispatchMode")]["description"]
+    )
+
+
+def test_plot_scheduling_rules_model_scene_opportunities_and_runtime_marks() -> None:
+    catalog = authoring_rules_catalog()
+    principles = {
+        item["ruleId"]: item
+        for item in catalog["principles"]
+    }
+    scene_rule = principles["principle.plot-scene-opportunity"]
+    manual_rule = principles[
+        "principle.plot-manual-snapshot-runtime-only"
+    ]
+
+    assert "整个 active Scene document" in scene_rule["description"]
+    assert "下一次 neutral、ic 或 gm turn" in scene_rule["runtimeEffect"]
+    assert "无机会时不运行 selector" in scene_rule["runtimeEffect"]
+    assert "不是 Story Design 或 Story Pack 字段" in (
+        manual_rule["description"]
+    )
+    assert "忽略 Scene 调度机会" in manual_rule["runtimeEffect"]
+    assert "解除该事件已有冷却锚点" in manual_rule["runtimeEffect"]
+
+    assets = build_managed_authoring_assets()
+    contract = json.loads(assets["schemas/rpg-mcp-contract-v2.json"])
+    policy = contract["plotScheduling"]
+
+    assert policy["sceneTimeFormat"] == "Y 年 M 月 D 日 H 时 [M 分]"
+    assert policy["sceneTimeUsesOrdinalPrefix"] is False
+    assert policy["nonOocModes"] == ["neutral", "ic", "gm"]
+    assert policy["automatic"] == {
+        "selectionTrigger": "committed_active_scene_net_change",
+        "selectionTurn": "next_non_ooc_turn",
+        "selectionPhase": "after_status_preflight",
+        "sceneChangeCoversEntireDocument": True,
+        "requiresSceneOpportunity": True,
+        "scheduledTimeRole": "eligibility_gate",
+        "deadlineTimeRole": "exclusive_eligibility_gate",
+        "timeFieldsAreTimers": False,
+        "maxSelectionsPerOpportunity": {"outline": 1, "pool": 1},
+        "sameEventMayUseBothLanes": False,
+        "oocConsumesOrCreatesOpportunity": False,
+        "commandsConsumeOrCreateOpportunity": False,
+        "disabledPlotSchedulingConsumesOrCreatesOpportunity": False,
+        "failedOrCancelledTurnsConsumeOrCreateOpportunity": False,
+    }
+    assert policy["manualPendingInjection"]["availableModes"] == [
+        "ooc",
+        "gm",
+    ]
+    assert policy["manualPendingInjection"]["storySchemaField"] is False
+    assert policy["manualPendingInjection"]["clearWithNullEventId"] is True
+    assert set(
+        policy["manualPendingInjection"]["ignoresAutomaticRules"]
+    ) == {
+        "scene_opportunity",
+        "scene_time",
+        "enabled",
+        "scheduled_time",
+        "deadline_time",
+        "repeat",
+        "cooldown",
+    }
+    assert (
+        policy["manualPendingInjection"][
+            "withoutSceneTimeClearsExistingCooldownAnchor"
+        ]
+        is True
+    )
+    assert policy["triggeredMeans"] == "selected_and_injected"
+
+    design_schema = json.loads(
+        assets["schemas/story-design-v2.schema.json"]
+    )
+    event_fields = design_schema["$defs"]["PlotEventSpec"]["properties"]
+    assert {
+        "pendingInjection",
+        "temporaryTitle",
+        "temporaryDirective",
+    }.isdisjoint(event_fields)
+    assert "不是定时器" in event_fields["scheduledTime"]["description"]
+
+    skill = assets[
+        ".agents/skills/rpg-story-authoring/SKILL.md"
+    ]
+    reference = assets[
+        ".agents/skills/rpg-story-authoring/references/"
+        "story-design-contract.md"
+    ]
+    assert "Do not model automatic Plot selection as a per-turn" in skill
+    assert "Keep `plot_event_mark_next` state out of Story Design" in skill
+    assert "## Turn and Plot scheduling" in reference
+    assert "Manual injection ignores the Scene" in reference
 
 
 def test_draft_and_package_profiles_return_structured_diagnostics(
