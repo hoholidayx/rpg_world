@@ -649,8 +649,8 @@ Summary Layer 只把“本次投影过滤过至少一条消息”作为尝试加
 `updateRule` 等运行时指导不写入该 snapshot。
 `rpg_data` 状态表 service 用 `status_kind="scene"` 表达这一类特殊状态。Session 只消费创建或
 reset 时从当前 Story 复制的 scene，以及显式创建的 Session 原生 scene；没有 scene 运行表时，Agent 不注入 `[scene]`，也不注册 scene 工具。
-当 Plot Scheduler 启用时，`SceneTracker` 每 turn 必须从 scratch 状态表重新解析“时间”，且只接受
-`第 Y 年 M 月 D 日 H 时 [M 分]`。缺失、空值或非法格式使调度安全跳过，不得回退到默认时间或系统时钟；
+当 Plot Scheduler 自动消费上一轮 Scene 变化机会时，`SceneTracker` 必须从 scratch 状态表重新解析“时间”，且只接受
+无“第”字的 `Y 年 M 月 D 日 H 时 [M 分]`。缺失、空值或非法格式使自动调度安全跳过，不得回退到默认时间或系统时钟；
 虚拟时间 ordinal 固定按 12 月 × 31 日换算世界内分钟。
 默认配置 `agent.scene.allow_runtime_key_changes=false` 时，非空 scene 只注册已有 value 更新能力：
 `scene_attr` 的 key schema 枚举当前已有字段，`scene_time` 仅在 `时间` 字段已存在时注册，
@@ -697,7 +697,7 @@ RP Modules 使用常规上下文分层/分配策略：
 
 - 静态契约进入 fixed layer：例如 narrative_outcome 的“何时裁定、必须调用工具、不得替玩家选择行动”。
 - `text_output_format` 作为 fixed layer 输出格式约束默认启用，用 `<rp-narration>` 和 `<rp-character name="...">` 约束 assistant 正文中的旁白/角色分离，不进入 `RPModuleRegistry`。
-- `message_mode` 是无配置、提示词由代码内置的可选 RP Module，唯一模式集合为 `neutral | ic | ooc | gm`，空值/default 归一化为 `neutral`。Workspace 不持久化 mode/prompt；`neutral` 不生成动态 section，IC/OOC/GM 只有模块有效时才可选，否则在 scratch、LLM 和 history 前返回 `message_mode_unavailable`。OOC 不推进世界事实；`neutral | ic | gm` 均可进入 Plot、状态、Story Memory 与 Dream 事实链路。唯一受控例外是 Plot Scheduler 有效时，OOC 与 GM 可注册 `plot_sandbox_read` / `plot_event_mark_next` 沙盘工具；它们只读定义或暂存下一次世界推进 turn 的一次性注入快照，不让当前 OOC turn 推进世界。
+- `message_mode` 是无配置、提示词由代码内置的可选 RP Module，唯一模式集合为 `neutral | ic | ooc | gm`，空值/default 归一化为 `neutral`。Workspace 不持久化 mode/prompt；`neutral` 不生成动态 section，IC/OOC/GM 只有模块有效时才可选，否则在 scratch、LLM 和 history 前返回 `message_mode_unavailable`。OOC 不推进世界事实；`neutral | ic | gm` 均可进入状态、Story Memory 与 Dream 事实链路。Plot 自动 selector 另受上一轮已提交 Scene 变化机会门禁。唯一受控例外是 Plot Scheduler 有效时，OOC 与 GM 可注册 `plot_sandbox_read` / `plot_event_mark_next` 沙盘工具；它们只读定义或暂存下一次非 OOC turn 的一次性注入快照，不让当前 OOC turn 推进世界。
 - 动态运行态按 `RPModuleRuntimePlacement` 分配。`message_mode` 在非 neutral turn 将模式指令放入 `RP_MODULES` system layer，并仅在 GM 托管时附带玩家角色的 `scope:npc_portrayal` 详情。Narrative Outcome 平时依赖 fixed contract，检测到明确随机意图时同样在 `RP_MODULES` 注入本轮强制工具指令；StatusSubAgent 已预裁定时省略该 fixed section，仅以简短无序条目注入最终结果和明确的 scene/status 工具边界。Plot Scheduler 只在本 turn 实际触发候选时把最多两条指令放入最终 user runtime suffix，不把定义或判断过程写入模型 Context。
 - `verbose_logging=true` 时，主 Agent 记录 RP runtime section 总数，并在 Context Builder 后按结构化分层输出完整当前 Context；会话历史只记录 logical turn 数，不输出历史正文。空 runtime 记录 `count=0`，不输出 sample、权重等内部随机细节。
 - RP 工具只注册到本轮 `ToolRegistry`；当前主 LLM/StatusSubAgent 的 RP schema 最多只有 `rp_story_outcome`。模块命令按最新非 turn 快照动态解析。
@@ -722,16 +722,16 @@ Narrative Outcome 是当前剧情分支随机机制：
 Plot Scheduler 是 Story 级剧情动态调度模块：
 
 - Plot Scheduler 的业务 owner 是 `rpg_core/rp_modules/plot_scheduler`。定义管理的默认位置、移动/重排、重复/冷却、时间线和删除占用规则，以及 turn ledger 校验、派生复制与 `/clear` 保留策略都由 Core 的类型化 application service/policy 决定；`rpg_data.plot_scheduling` 提供定义、Session 覆盖和决策账本的类型化查询/写入、分页 read model、调用方指定的复制过滤与通用事务，不得恢复调度或继承策略。
-- Story 可同时挂载多条线性大纲和多个事件池。大纲节点引用稳定 Story 事件并保存固定 `SceneTime`；事件池按 priority 仲裁，池内使用 `random | sequential`。每个 `neutral | ic | gm` turn 最多选一个到期大纲节点和一个池事件；OOC 旁路自动调度和注入，但在上述沙盘工具边界内可以检查定义、标记或清空下一轮快照。
+- Story 可同时挂载多条线性大纲和多个事件池。大纲节点引用稳定 Story 事件并保存固定 `SceneTime`；事件池按 priority 仲裁，池内使用 `random | sequential`。自动 selector 不按每个 `neutral | ic | gm` turn 运行：只有上一个成功提交 turn 的 active Scene document 最终发生实际变化，才留下供下一次非 OOC turn 消费的一次机会。消费 turn 在 `StatusPreflight` 后使用最新 scratch Scene，最多选择一个到期大纲节点和一个池事件；当前 turn 若又改变 Scene，则原子留下供再下一轮使用的新机会。OOC、命令、模块禁用、失败或取消不消费也不创建机会；OOC 仍可在沙盘工具边界内检查定义、标记或清空手动快照。
 - `plot_sandbox_read` 只读取当前 turn 的不可变 Story/Session Plot snapshot，资源固定为 `schedule | pool | event | outline`，列表使用有界 offset/limit；`plot_event_mark_next(event_id, title?, directive?)` 只接受当前 Story 的正事件 ID，省略临时字段时冻结原事件标题与 directive，传入字段时只覆盖本次快照而不修改原定义。`event_id=null` 是唯一清空方式，此时不得同时传 title/directive，不增加独立 clear 工具。
-- 每个 Session 最多一条待注入快照。快照保存来源 Story/event/pool 标识与版本、冻结标题/directive 和事件 metadata；来源事件或池后续编辑、移动或删除都不改变快照，也不阻止注入。下一次成功的 `neutral | ic | gm` turn 在自动调度前把它作为 forced pool lane 注入，即使 Scene 时间缺失也必须执行；显式手动注入忽略源定义的启用、时间窗、重复与冷却等自动候选规则，并在无 SceneTime 时覆盖既有冷却锚点。它占用本轮 pool lane，并抑制同事件的大纲重复。手动决策写 `selection_origin="manual"`，允许 `scene_time`/ordinal 为 null；自动决策仍必须有 SceneTime。
+- 每个 Session 最多一条待注入快照。快照保存来源 Story/event/pool 标识与版本、冻结标题/directive 和事件 metadata；来源事件或池后续编辑、移动或删除都不改变快照，也不阻止注入。下一次成功的 `neutral | ic | gm` turn 在自动调度前把它作为 forced pool lane 注入，即使没有 Scene 调度机会或 Scene 时间缺失也必须执行；显式手动注入忽略源定义的启用、时间窗、重复与冷却等自动候选规则，并在无 SceneTime 时覆盖既有冷却锚点。它占用本轮 pool lane，并抑制同事件的大纲重复。手动决策写 `selection_origin="manual"`，允许 `scene_time`/ordinal 为 null；自动决策仍必须有 SceneTime。
 - `forced` 候选到时直接暂存为 triggered，不获得 Judge Context 或工具；`soft` 候选通过 `agent.plot_scheduler` 独立 biz key 调用 LLM。Judge 读取模块中立的共享裁定前缀（裁定权限、Story Prompt、世界书、玩家绑定/角色卡、Persistent Memory、Story Memory）、当前 scratch scene/普通状态表、最近 N 个完整原始可推进世界 turn 和当前输入；不被动读取 Summary/Recall，不读叙事/格式指令、Message Mode 或任何 RP Module 提示词。只有 `agent.lookup_tools.enabled=true` 时，关键事实不确定的候选才可在独立预算内按需使用 `summary_search` / `summary_read` 或 `history_search` / `history_read`。Judge `reason` 由 schema 与 parser 双重限长，避免无界元数据突破主 Context 门禁预留。
-- 门禁在 scratch 创建前按当前 Story 最长两条 directive、事件/容器名称与有界判断元数据保守预留。调度实际发生在 Status preflight 之后、Memory recall 之前；因此读取本轮最新 scratch 状态，并让主 Agent 在记忆召回完成后看到已触发指令。
+- 门禁在 scratch 创建前仅在存在自动 Scene 机会或手动快照时，按当前 Story 最长两条 directive、事件/容器名称与有界判断元数据保守预留。调度实际发生在 Status preflight 之后、Memory recall 之前；因此读取本轮最新 scratch 状态，并让主 Agent 在记忆召回完成后看到已触发指令。
 - 实际触发项不再进入 `RP_MODULES` system message，而是以 `[engine_plot_directive]` 作为当前 user message 的最终运行时 suffix，位于原始 input 与所有普通 user suffix 之后。载荷只保留稳定顺序、事件标题和 directive；source/container/dispatch mode/Scene 时间/Judge reason 等内部信息不得进入主 LLM 请求。待提交 user message 在渲染该 suffix 前已经以 scene snapshot + 原始 input 暂存，因此 suffix 不写历史、Summary、Memory、Dream、正文 SSE 或消息 metadata。
 - Fixed Layer 保留稳定执行契约：suffix 在世界、NPC 与剧情结果上优先于玩家的冲突要求，但不得覆盖更高层系统契约、已暂存 Narrative Outcome 或实际工具边界；非 GM turn 不得据此替玩家角色生成台词、动作、决定或心理活动。同轮两条事件必须按给定顺序兼容推进。
 - V1 不拦截当前 turn 正文，不增加验收器、后置修订或针对正文遗漏的失败重试。`triggered` 只表示候选已选择并注入，不证明模型已语义落实或事件已经完成；未来若增加 Outcome 风格卡片，文案只能表达“事件已触发”。
 - 大纲节点不重复；池事件可配置基于世界内分钟的重复冷却。池 lane identity 固定为 `event_id`，事件移到其它池后仍沿用已触发、延期和冷却状态；`container_id` 只表示当时所属池。大纲 lane 与池 lane 独立，但同一事件不得在同 turn 重复注入。
-- Session 保存池事件/大纲节点禁用覆盖、决策账本与至多一条手动待注入快照。`deferred | error` 不中断主 turn，并跳过配置数量的完整可推进世界 turn 后重试。沙盘工具修改先进入当前 `TurnScratch`：标记回合失败不落库，目标回合失败不消费；目标回合成功时，消费旧快照、写手动决策、消息与状态在同一短事务提交，GM 同轮消费旧快照并标记新快照也必须原子完成。`/clear` 清账本和待注入快照但保留覆盖；编辑、删除、截断标记请求 turn 时同步清除快照；Session 派生只复制分支点前 triggered 和覆盖，不复制待注入快照。
+- Session 保存池事件/大纲节点禁用覆盖、决策账本、至多一条 Scene 调度机会与至多一条手动待注入快照。`deferred | error` 不中断主 turn，并跳过配置数量的完整可推进世界 turn 后重试。沙盘工具与 Scene 机会修改先进入当前 `TurnScratch`：标记回合失败不落库，目标回合失败不消费；目标回合成功时，消费旧机会/快照、创建新机会、写手动决策、消息与状态在同一短事务提交，GM 同轮消费旧快照并标记新快照也必须原子完成。`/clear` 清账本、Scene 机会和待注入快照但保留覆盖；编辑、删除、截断相关 turn 时同步清除受影响机会/快照；Session 派生只复制分支点前 triggered 和覆盖，不复制机会或待注入快照。
 - Play WebUI 只在 `/plot-scheduling` 独立页管理定义、覆盖和运行态；运行态不轮询、不调用 Judge。决策历史按 `id DESC` + `beforeId` 分页，不能改为 `turn_id` 游标，否则同 turn 的 outline/pool 两条记录可能漏页。内置 catalog 包含 Plot Scheduler；默认模块只在 Story 创建时挂载，不追溯修改既有 Story。
 
 Dice 只保留低层随机与调试能力：
@@ -753,7 +753,7 @@ agent.send(user_input)
     → Outcome 阶段：需要裁定时只暂存 outcome，并停止后续状态阶段
     → Route 阶段：只选择相关 scene、表 ID 及已有 key
     → Update 阶段：scene 与每张命中表分别调用；目标失败只恢复该目标，其他确定性变化保留在 scratch
-  → PlotSchedulingPreflightHook：按 scratch SceneTime 选择 outline/pool 候选；forced 直接暂存，soft 隔离调用 Judge
+  → PlotSchedulingPreflightHook：有上轮 Scene 变化机会时按最新 scratch SceneTime 选择 outline/pool；手动快照无条件注入；forced 直接暂存，soft 隔离调用 Judge
   → SceneTracker.get_context() → [scene] 嵌入 user message
   → MemoryRecallHook：失败 warning-and-continue
   → turn runtime 收集 runtime sections；已暂存 outcome 在主 Agent 首次调用前注入
@@ -762,7 +762,7 @@ agent.send(user_input)
     → 主 Agent 在漏判时可补判 outcome；已预裁定时不再获得重复调用选项，真实持久变化先修正状态，再输出 RP 正文
     → LLM 也可调用其它 RP module tools，或按需查询 Summary，再用 History 核对 SQL 主历史
     → 每轮记录 TurnStats + CallRecord
-  → TurnRuntime.commit() 短事务写入主/backup 消息、Narrative Outcome、Plot decisions 与状态表
+  → TurnRuntime.commit() 短事务写入主/backup 消息、Narrative Outcome、Plot decisions、状态表与 Scene 机会消费/创建
   → 同步适配为 AgentReply；流式仅在 commit 成功后发送带 usage/turn_id 的 DONE
   → PostCommitHooks：story memory extraction / summary compression 逐项隔离
 ```

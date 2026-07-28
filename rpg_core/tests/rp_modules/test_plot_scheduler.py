@@ -177,7 +177,7 @@ def test_plot_runtime_section_is_concise_ordered_user_suffix() -> None:
         "第一章",
         "城镇事件池",
         "forced",
-        "第 1 年",
+        "1 年",
         "内部适宜性理由",
     ):
         assert internal_value not in section.content
@@ -239,6 +239,10 @@ def test_context_gate_reserve_covers_two_concise_plot_suffix_items() -> None:
         ),
         overrides=models.SessionPlotOverrides("s1"),
         decisions=(),
+        scene_opportunity=models.SessionPlotSceneOpportunity(
+            session_id="s1",
+            source_turn_id=1,
+        ),
     )
     module = PlotSchedulerModule(session_id="s1")
     module.bind_turn(

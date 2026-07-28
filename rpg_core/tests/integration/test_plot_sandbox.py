@@ -124,7 +124,7 @@ async def test_ooc_null_event_id_clears_the_persisted_mark(
         str(cleared.tool_records[0].tool_results[0]["content"])
     )
     assert result["ok"] is True
-    assert result["pendingForNextWorldTurn"] is False
+    assert result["pendingForNextNonOocTurn"] is False
     assert result["pendingInjection"] is None
     assert result["replacedOrCleared"]["sourceEventId"] == event.id
     assert integration_data_gateway.plot_scheduling.get_pending_injection(
@@ -137,7 +137,7 @@ async def test_ooc_null_event_id_clears_the_persisted_mark(
 
 
 @pytest.mark.asyncio
-async def test_ooc_mark_is_mode_tagged_and_injected_once_on_next_world_turn(
+async def test_ooc_mark_is_mode_tagged_and_injected_once_on_next_non_ooc_turn(
     integration_agent_factory,
     integration_data_gateway,
     scripted_llm_manager,
@@ -158,7 +158,7 @@ async def test_ooc_mark_is_mode_tagged_and_injected_once_on_next_world_turn(
             title=frozen_title,
             directive=frozen_directive,
         ),
-        response("已为下一次世界推进标记该事件。", model="config-model"),
+        response("已为下一次非 OOC turn 标记该事件。", model="config-model"),
     )
 
     marked = await agent.send("把钟声安排到下一回合。", mode="ooc")

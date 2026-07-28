@@ -57,7 +57,7 @@ RESOURCE_SECTIONS = (
 _STABLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _WORKSPACE_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
 _SCENE_TIME_RE = re.compile(
-    r"^\s*第\s*(?P<year>\d+)\s*年\s*"
+    r"^\s*(?P<year>\d+)\s*年\s*"
     r"(?P<month>\d+)\s*月\s*"
     r"(?P<day>\d+)\s*日\s*"
     r"(?P<hour>\d+)\s*时"
@@ -109,7 +109,7 @@ def validate_scene_time(value: str) -> str:
     normalized = str(value or "").strip()
     match = _SCENE_TIME_RE.fullmatch(normalized)
     if match is None:
-        raise ValueError("scene time must match '第 Y 年 M 月 D 日 H 时 [M 分]'")
+        raise ValueError("scene time must match 'Y 年 M 月 D 日 H 时 [M 分]'")
     parsed = {
         key: int(raw) if raw is not None else 0
         for key, raw in match.groupdict().items()

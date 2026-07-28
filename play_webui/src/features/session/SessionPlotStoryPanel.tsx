@@ -54,7 +54,7 @@ function Badge({
 function formatSceneTime(value: SceneTimeValue | null) {
   if (!value) return '未设置'
   const minute = String(value.minute).padStart(2, '0')
-  return `第 ${value.year} 年 ${value.month} 月 ${value.day} 日 ${value.hour}:${minute}`
+  return `${value.year} 年 ${value.month} 月 ${value.day} 日 ${value.hour}:${minute}`
 }
 
 function nodePanelId(slotKey: string) {

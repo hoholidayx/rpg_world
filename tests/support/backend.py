@@ -157,7 +157,7 @@ def _ensure_integration_status(
             models.StatusTableData(
                 headers=("属性", "值"),
                 rows=(
-                    ("时间", "第 2 年 3 月 4 日 5 时"),
+                    ("时间", "2 年 3 月 4 日 5 时"),
                     ("位置", "集成测试大厅"),
                     ("在场人物", "测试者"),
                 ),

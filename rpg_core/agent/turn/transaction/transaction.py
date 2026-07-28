@@ -20,6 +20,9 @@ from rpg_core.agent.turn.transaction.scratch import TurnScratch
 from rpg_core.rp_modules.plot_scheduler.manual_injection import (
     PlotPendingInjectionTurnState,
 )
+from rpg_core.rp_modules.plot_scheduler.scene_opportunity import (
+    PlotSceneOpportunityTurnState,
+)
 
 if TYPE_CHECKING:
     from rpg_core.agent.telemetry import TurnStats
@@ -32,7 +35,13 @@ if TYPE_CHECKING:
     from rpg_core.rp_modules.plot_scheduler.manual_injection import (
         PlotPendingInjectionCommitService,
     )
-    from rpg_data.models import SessionPlotPendingInjection
+    from rpg_core.rp_modules.plot_scheduler.scene_opportunity import (
+        PlotSceneOpportunityCommitService,
+    )
+    from rpg_data.models import (
+        SessionPlotPendingInjection,
+        SessionPlotSceneOpportunity,
+    )
 
 _TAG = "[AgentTurnTransaction]"
 
@@ -50,6 +59,7 @@ class AgentTurnTransaction:
         narrative_outcome_ledger: "NarrativeOutcomeLedgerService | None" = None,
         plot_schedule_ledger: "PlotScheduleLedgerService | None" = None,
         plot_pending_injection_commit: "PlotPendingInjectionCommitService | None" = None,
+        plot_scene_opportunity_commit: "PlotSceneOpportunityCommitService | None" = None,
     ) -> None:
         self._session = session
         self._status_mgr = status_mgr
@@ -58,6 +68,7 @@ class AgentTurnTransaction:
         self._narrative_outcome_ledger = narrative_outcome_ledger
         self._plot_schedule_ledger = plot_schedule_ledger
         self._plot_pending_injection_commit = plot_pending_injection_commit
+        self._plot_scene_opportunity_commit = plot_scene_opportunity_commit
         self._turn_id: int | None = None
         self._scratch: TurnScratch | None = None
         self._committed = False
@@ -74,6 +85,8 @@ class AgentTurnTransaction:
         *,
         mode: TurnMode | str = TurnMode.NEUTRAL,
         pending_plot_injection: "SessionPlotPendingInjection | None" = None,
+        plot_scene_opportunity: "SessionPlotSceneOpportunity | None" = None,
+        track_plot_scene_opportunity: bool = False,
     ) -> TurnScratch:
         turn_id: int | None = None
         try:
@@ -95,6 +108,11 @@ class AgentTurnTransaction:
                 turn_stats=turn_stats,
                 plot_pending_injection=PlotPendingInjectionTurnState(
                     base=pending_plot_injection
+                ),
+                plot_scene_opportunity=(
+                    PlotSceneOpportunityTurnState(base=plot_scene_opportunity)
+                    if track_plot_scene_opportunity
+                    else None
                 ),
             )
         except Exception as exc:
@@ -122,12 +140,20 @@ class AgentTurnTransaction:
             narrative_outcome_ledger=self._narrative_outcome_ledger,
             plot_schedule_ledger=self._plot_schedule_ledger,
             plot_pending_injection_commit=self._plot_pending_injection_commit,
+            plot_scene_opportunity_commit=self._plot_scene_opportunity_commit,
             narrative_outcome=self.scratch.narrative_outcome,
             plot_schedule_decisions=tuple(self.scratch.plot_schedule_decisions),
             plot_pending_injection=self.scratch.plot_pending_injection,
+            plot_scene_opportunity=self.scratch.plot_scene_opportunity,
         )
 
     def commit(self) -> list[StatusDocumentChange]:
+        scene_opportunity = self.scratch.plot_scene_opportunity
+        if scene_opportunity is not None:
+            scene_opportunity.finalize(
+                source_turn_id=self.scratch.turn_id,
+                scene_changed=self.scratch.status_scratch.scene_changed,
+            )
         changes = self.build_commit_plan().commit()
         self._committed = True
         logger.debug(

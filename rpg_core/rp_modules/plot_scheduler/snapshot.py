@@ -27,6 +27,11 @@ class PlotScheduleSnapshotDataPort(Protocol):
         session_id: str,
     ) -> data_models.SessionPlotPendingInjection | None: ...
 
+    def get_scene_opportunity(
+        self,
+        session_id: str,
+    ) -> data_models.SessionPlotSceneOpportunity | None: ...
+
 
 class PlotScheduleSnapshotResolver:
     def __init__(self, data: PlotScheduleSnapshotDataPort) -> None:
@@ -42,6 +47,7 @@ class PlotScheduleSnapshotResolver:
             return PlotScheduleSnapshot.disabled(session_id, rp_modules.story_id)
         story, overrides, decisions = self._data.get_session_state(session_id)
         pending = self._data.get_pending_injection(session_id)
+        scene_opportunity = self._data.get_scene_opportunity(session_id)
         return PlotScheduleSnapshot(
             session_id=session_id,
             story_id=story.story_id,
@@ -50,6 +56,7 @@ class PlotScheduleSnapshotResolver:
             overrides=overrides,
             decisions=tuple(decisions),
             pending_injection=pending,
+            scene_opportunity=scene_opportunity,
             judge_history_turns=int(selected.effective_config["judge_history_turns"]),
             soft_retry_intervening_turns=int(
                 selected.effective_config["soft_retry_intervening_turns"]

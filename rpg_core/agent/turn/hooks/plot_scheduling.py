@@ -78,6 +78,13 @@ class PlotSchedulingPreflightHook:
                     else None
                 ),
             )
+        scene_opportunity = turn_scratch.plot_scene_opportunity
+        if snapshot.scene_opportunity is None:
+            return
+        if scene_opportunity is None or not scene_opportunity.available:
+            raise RuntimeError("Plot Scene opportunity scratch state is missing")
+        scene_opportunity.consume()
+
         scene_tracker = turn_scratch.scene_tracker
         scene_time = (
             scene_tracker.get_scene_time() if scene_tracker is not None else None
@@ -141,7 +148,7 @@ class PlotSchedulingPreflightHook:
                 directive=pending.directive,
                 dispatch_mode=data_models.PLOT_DISPATCH_FORCED,
                 scene_time=scene_time,
-                reason="用户已手动标记为下一次世界推进 turn 强制注入。",
+                reason="用户已手动标记为下一次非 OOC turn 强制注入。",
             )
         )
         event_snapshot = dict(pending.event_snapshot)

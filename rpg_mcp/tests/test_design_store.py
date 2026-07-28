@@ -353,7 +353,7 @@ def test_design_requires_story_wide_plot_node_ids() -> None:
                     {
                         "stableId": "node-shared",
                         "eventRef": "event-one",
-                        "scheduledTime": "第 2020 年 1 月 1 日 9 时",
+                        "scheduledTime": "2020 年 1 月 1 日 9 时",
                     }
                 ],
             },
@@ -364,7 +364,7 @@ def test_design_requires_story_wide_plot_node_ids() -> None:
                     {
                         "stableId": "node-shared",
                         "eventRef": "event-two",
-                        "scheduledTime": "第 2020 年 1 月 2 日 9 时",
+                        "scheduledTime": "2020 年 1 月 2 日 9 时",
                     }
                 ],
             },

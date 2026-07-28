@@ -91,6 +91,11 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         expected_version=None,
         values=_pending_write(session.story_id),
     )
+    gateway.plot_scheduling.replace_scene_opportunity(
+        session_id,
+        expected_version=None,
+        source_turn_id=2,
+    )
 
     story_copy = next(
         table
@@ -150,6 +155,7 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     assert result.messages_cleared >= 2
     assert result.narrative_outcomes_cleared == 1
     assert result.pending_plot_injections_cleared == 1
+    assert result.plot_scene_opportunities_cleared == 1
     assert result.story_memories_cleared == 1
     assert result.story_status_tables_cleared >= 1
     assert result.story_status_tables_initialized >= 1
@@ -161,6 +167,7 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     ]
     assert gateway.narrative_outcomes.list_for_turns(session_id, [2]) == []
     assert gateway.plot_scheduling.get_pending_injection(session_id) is None
+    assert gateway.plot_scheduling.get_scene_opportunity(session_id) is None
     assert _story_memory(gateway).list(session_id) == []
     rebuilt = gateway.status.get_table(session_id, template_name)
     assert rebuilt.document.rows[0].value == "Story 当前状态值"
@@ -208,7 +215,11 @@ def test_reset_rolls_back_all_database_changes_when_status_rebuild_fails(
     memories_before = _story_memory(gateway).list(session_id)
     tables_before = gateway.status.list_tables(session_id)
     pending_before = gateway.plot_scheduling.get_pending_injection(session_id)
+    opportunity_before = gateway.plot_scheduling.get_scene_opportunity(
+        session_id
+    )
     assert pending_before is not None
+    assert opportunity_before is not None
     backup_count = gateway.backup.messages.count(session_id)
 
     def fail_reset(_session_id: str, _plan: models.SessionStatusResetPlan):  # noqa: ANN202
@@ -226,6 +237,10 @@ def test_reset_rolls_back_all_database_changes_when_status_rebuild_fails(
     assert (
         gateway.plot_scheduling.get_pending_injection(session_id)
         == pending_before
+    )
+    assert (
+        gateway.plot_scheduling.get_scene_opportunity(session_id)
+        == opportunity_before
     )
     assert gateway.backup.messages.count(session_id) == backup_count
 

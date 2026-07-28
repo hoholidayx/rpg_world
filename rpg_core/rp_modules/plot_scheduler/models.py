@@ -54,6 +54,7 @@ class PlotScheduleSnapshot:
     overrides: data_models.SessionPlotOverrides
     decisions: tuple[data_models.SessionPlotScheduleDecision, ...]
     pending_injection: data_models.SessionPlotPendingInjection | None = None
+    scene_opportunity: data_models.SessionPlotSceneOpportunity | None = None
     judge_history_turns: int = 5
     soft_retry_intervening_turns: int = 1
 
@@ -67,12 +68,21 @@ class PlotScheduleSnapshot:
             overrides=data_models.SessionPlotOverrides(session_id=session_id),
             decisions=(),
             pending_injection=None,
+            scene_opportunity=None,
         )
 
     @property
     def context_gate_reserve_text(self) -> str:
-        candidate_directives = [event.directive for event in self.story.events]
-        candidate_titles = [event.title for event in self.story.events]
+        candidate_directives = (
+            [event.directive for event in self.story.events]
+            if self.scene_opportunity is not None
+            else []
+        )
+        candidate_titles = (
+            [event.title for event in self.story.events]
+            if self.scene_opportunity is not None
+            else []
+        )
         if self.pending_injection is not None:
             candidate_directives.append(self.pending_injection.directive)
             candidate_titles.append(self.pending_injection.event_title)

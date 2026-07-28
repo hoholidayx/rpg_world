@@ -151,6 +151,17 @@ class PendingPlotInjectionWrite:
 
 
 @dataclass(frozen=True)
+class SessionPlotSceneOpportunity:
+    """One committed Scene change awaiting automatic Plot scheduling."""
+
+    session_id: str
+    source_turn_id: int
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
 class SessionPlotScheduleDecision:
     id: int
     session_id: str

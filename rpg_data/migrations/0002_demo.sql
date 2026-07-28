@@ -72,7 +72,7 @@ VALUES
             SELECT id FROM rpg_stories
             WHERE workspace_id = 'demo_workspace' AND title = '北境森林 Demo'
         ),
-        '{"scene":"北境森林·石林·祭坛下层回廊","time":"第 1 年 1 月 1 日 9 时 20 分"}'
+        '{"scene":"北境森林·石林·祭坛下层回廊","time":"1 年 1 月 1 日 9 时 20 分"}'
     ),
     (
         's_academy01',
@@ -81,7 +81,7 @@ VALUES
             SELECT id FROM rpg_stories
             WHERE workspace_id = 'demo_workspace' AND title = '奥术学院 Demo'
         ),
-        '{"scene":"奥术学院·东塔侧门前","time":"第 1 年 1 月 3 日 15 时 10 分"}'
+        '{"scene":"奥术学院·东塔侧门前","time":"1 年 1 月 3 日 15 时 10 分"}'
     );
 
 INSERT OR IGNORE INTO rpg_session_profiles (
@@ -462,8 +462,8 @@ SELECT
         ELSE '奥术学院演示故事的当前场景。'
     END,
     CASE stories.title
-        WHEN '北境森林 Demo' THEN '{"schemaVersion":2,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 1 日 9 时 20 分","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"位置","value":"北境森林·石林·祭坛下层回廊","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"在场人物","value":"Bob, Alice, 灰烬守门人","runtimeKeyLocked":true,"updateRule":"","metadata":{}}],"metadata":{"ui":{}}}'
-        ELSE '{"schemaVersion":2,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 3 日 15 时 10 分","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"位置","value":"奥术学院·东塔侧门前","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"在场人物","value":"Alice, 莫兰","runtimeKeyLocked":true,"updateRule":"","metadata":{}}],"metadata":{"ui":{}}}'
+        WHEN '北境森林 Demo' THEN '{"schemaVersion":2,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"1 年 1 月 1 日 9 时 20 分","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"位置","value":"北境森林·石林·祭坛下层回廊","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"在场人物","value":"Bob, Alice, 灰烬守门人","runtimeKeyLocked":true,"updateRule":"","metadata":{}}],"metadata":{"ui":{}}}'
+        ELSE '{"schemaVersion":2,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"1 年 1 月 3 日 15 时 10 分","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"位置","value":"奥术学院·东塔侧门前","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"在场人物","value":"Alice, 莫兰","runtimeKeyLocked":true,"updateRule":"","metadata":{}}],"metadata":{"ui":{}}}'
     END,
     0,
     '{"kind":"demo"}'

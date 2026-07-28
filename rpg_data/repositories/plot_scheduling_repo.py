@@ -13,6 +13,7 @@ from rpg_data.repositories.records import (
     SessionPlotEventOverrideRecord,
     SessionPlotOutlineNodeOverrideRecord,
     SessionPlotPendingInjectionRecord,
+    SessionPlotSceneOpportunityRecord,
     SessionPlotScheduleDecisionRecord,
     StoryPlotEventPoolRecord,
     StoryPlotEventRecord,
@@ -656,6 +657,118 @@ class PlotSchedulingRepository:
             )
         return int(query.execute())
 
+    def get_scene_opportunity(
+        self,
+        session_id: str,
+    ) -> models.SessionPlotSceneOpportunity | None:
+        row = SessionPlotSceneOpportunityRecord.get_or_none(
+            SessionPlotSceneOpportunityRecord.session == str(session_id)
+        )
+        return _to_scene_opportunity(row) if row is not None else None
+
+    def create_scene_opportunity(
+        self,
+        session_id: str,
+        *,
+        source_turn_id: int,
+    ) -> models.SessionPlotSceneOpportunity:
+        SessionPlotSceneOpportunityRecord.create(
+            session=str(session_id),
+            source_turn_id=int(source_turn_id),
+        )
+        opportunity = self.get_scene_opportunity(session_id)
+        if opportunity is None:  # pragma: no cover - database create contract
+            raise RuntimeError("created Plot Scene opportunity could not be reloaded")
+        return opportunity
+
+    def update_scene_opportunity(
+        self,
+        session_id: str,
+        *,
+        expected_version: int,
+        source_turn_id: int,
+    ) -> models.SessionPlotSceneOpportunity | None:
+        changed = (
+            SessionPlotSceneOpportunityRecord.update(
+                source_turn_id=int(source_turn_id),
+                version=SessionPlotSceneOpportunityRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(
+                (SessionPlotSceneOpportunityRecord.session == str(session_id))
+                & (
+                    SessionPlotSceneOpportunityRecord.version
+                    == int(expected_version)
+                )
+            )
+            .execute()
+        )
+        return self.get_scene_opportunity(session_id) if changed else None
+
+    def delete_scene_opportunity(
+        self,
+        session_id: str,
+        *,
+        expected_version: int | None = None,
+    ) -> int:
+        query = SessionPlotSceneOpportunityRecord.delete().where(
+            SessionPlotSceneOpportunityRecord.session == str(session_id)
+        )
+        if expected_version is not None:
+            query = query.where(
+                SessionPlotSceneOpportunityRecord.version == int(expected_version)
+            )
+        return int(query.execute())
+
+    def delete_scene_opportunity_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return int(
+            SessionPlotSceneOpportunityRecord.delete()
+            .where(
+                (SessionPlotSceneOpportunityRecord.session == str(session_id))
+                & (
+                    SessionPlotSceneOpportunityRecord.source_turn_id
+                    == int(turn_id)
+                )
+            )
+            .execute()
+        )
+
+    def delete_scene_opportunity_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return int(
+            SessionPlotSceneOpportunityRecord.delete()
+            .where(
+                (SessionPlotSceneOpportunityRecord.session == str(session_id))
+                & (
+                    SessionPlotSceneOpportunityRecord.source_turn_id
+                    >= int(turn_id)
+                )
+            )
+            .execute()
+        )
+
+    def retain_scene_opportunity_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int:
+        ids = sorted({int(turn_id) for turn_id in turn_ids if int(turn_id) > 0})
+        query = SessionPlotSceneOpportunityRecord.delete().where(
+            SessionPlotSceneOpportunityRecord.session == str(session_id)
+        )
+        if ids:
+            query = query.where(
+                ~(SessionPlotSceneOpportunityRecord.source_turn_id.in_(ids))
+            )
+        return int(query.execute())
+
     def list_decisions(
         self,
         session_id: str,
@@ -1032,6 +1145,18 @@ def _to_pending_injection(
         directive=str(row.directive),
         event_snapshot=dict(snapshot),
         requested_turn_id=int(row.requested_turn_id),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def _to_scene_opportunity(
+    row: SessionPlotSceneOpportunityRecord,
+) -> models.SessionPlotSceneOpportunity:
+    return models.SessionPlotSceneOpportunity(
+        session_id=str(row.session_id),
+        source_turn_id=int(row.source_turn_id),
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),

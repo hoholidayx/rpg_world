@@ -579,6 +579,99 @@ class PlotSchedulingDataService:
             turn_ids,
         )
 
+    def get_scene_opportunity(
+        self,
+        session_id: str,
+    ) -> models.SessionPlotSceneOpportunity | None:
+        self._require_session(session_id)
+        return self._records.get_scene_opportunity(str(session_id))
+
+    def replace_scene_opportunity(
+        self,
+        session_id: str,
+        *,
+        expected_version: int | None,
+        source_turn_id: int,
+    ) -> models.SessionPlotSceneOpportunity:
+        session = self._require_session(session_id)
+        source_turn = _positive_integer(source_turn_id, "source_turn_id")
+        try:
+            with self.transaction():
+                if expected_version is None:
+                    return self._records.create_scene_opportunity(
+                        session.id,
+                        source_turn_id=source_turn,
+                    )
+                updated = self._records.update_scene_opportunity(
+                    session.id,
+                    expected_version=_positive_integer(
+                        expected_version,
+                        "expected_version",
+                    ),
+                    source_turn_id=source_turn,
+                )
+                if updated is None:
+                    raise DataConditionalWriteError(
+                        "Plot Scene opportunity changed before it could be "
+                        "replaced"
+                    )
+                return updated
+        except IntegrityError as exc:
+            raise DataConditionalWriteError(
+                "Plot Scene opportunity changed before it could be replaced"
+            ) from exc
+
+    def clear_scene_opportunity(
+        self,
+        session_id: str,
+        *,
+        expected_version: int | None = None,
+    ) -> int:
+        self._require_session(session_id)
+        deleted = self._records.delete_scene_opportunity(
+            str(session_id),
+            expected_version=(
+                _positive_integer(expected_version, "expected_version")
+                if expected_version is not None
+                else None
+            ),
+        )
+        if expected_version is not None and deleted != 1:
+            raise DataConditionalWriteError(
+                "Plot Scene opportunity changed before it could be cleared"
+            )
+        return deleted
+
+    def delete_scene_opportunity_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._records.delete_scene_opportunity_for_turn(
+            str(session_id),
+            _positive_integer(turn_id, "turn_id"),
+        )
+
+    def delete_scene_opportunity_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._records.delete_scene_opportunity_from_turn(
+            str(session_id),
+            _positive_integer(turn_id, "turn_id"),
+        )
+
+    def retain_scene_opportunity_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int:
+        return self._records.retain_scene_opportunity_turns(
+            str(session_id),
+            turn_ids,
+        )
+
     def append_decisions(
         self,
         session_id: str,

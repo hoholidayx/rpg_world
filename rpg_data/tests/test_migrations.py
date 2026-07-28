@@ -52,6 +52,7 @@ def test_run_migrations_creates_consolidated_final_schema() -> None:
             "rpg_story_plot_events",
             "rpg_story_plot_outlines",
             "rpg_story_plot_outline_nodes",
+            "rpg_session_plot_scene_opportunities",
             "rpg_session_plot_schedule_decisions",
             "rpg_session_story_memories",
             "rpg_session_story_memory_evidence",

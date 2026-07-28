@@ -289,6 +289,100 @@ def test_pending_plot_injection_snapshot_uses_cas_and_survives_event_delete() ->
         gateway.close()
 
 
+def test_scene_change_opportunity_uses_cas_and_history_cleanup_primitives() -> None:
+    gateway = DataServiceGateway(":memory:")
+    try:
+        gateway.initialize()
+        service = gateway.plot_scheduling
+        session = gateway.catalog.create_session(
+            "demo_workspace",
+            1,
+            session_id="s_plot_scene_opportunity",
+            title="Scene 调度机会",
+        )
+        assert session is not None
+        assert service.get_scene_opportunity(session.id) is None
+
+        created = service.replace_scene_opportunity(
+            session.id,
+            expected_version=None,
+            source_turn_id=2,
+        )
+        assert created == models.SessionPlotSceneOpportunity(
+            session_id=session.id,
+            source_turn_id=2,
+            version=1,
+            created_at=created.created_at,
+            updated_at=created.updated_at,
+        )
+        assert service.get_scene_opportunity(session.id) == created
+        with pytest.raises(DataConditionalWriteError):
+            service.replace_scene_opportunity(
+                session.id,
+                expected_version=None,
+                source_turn_id=3,
+            )
+
+        replaced = service.replace_scene_opportunity(
+            session.id,
+            expected_version=created.version,
+            source_turn_id=3,
+        )
+        assert replaced.source_turn_id == 3
+        assert replaced.version == 2
+        with pytest.raises(DataConditionalWriteError):
+            service.replace_scene_opportunity(
+                session.id,
+                expected_version=created.version,
+                source_turn_id=4,
+            )
+        with pytest.raises(DataConditionalWriteError):
+            service.clear_scene_opportunity(
+                session.id,
+                expected_version=created.version,
+            )
+
+        assert service.delete_scene_opportunity_for_turn(session.id, 2) == 0
+        assert service.retain_scene_opportunity_turns(session.id, (3,)) == 0
+        assert service.retain_scene_opportunity_turns(session.id, (2,)) == 1
+        assert service.get_scene_opportunity(session.id) is None
+
+        service.replace_scene_opportunity(
+            session.id,
+            expected_version=None,
+            source_turn_id=5,
+        )
+        assert service.delete_scene_opportunity_from_turn(session.id, 6) == 0
+        assert service.delete_scene_opportunity_from_turn(session.id, 5) == 1
+        assert service.get_scene_opportunity(session.id) is None
+
+        recreated = service.replace_scene_opportunity(
+            session.id,
+            expected_version=None,
+            source_turn_id=7,
+        )
+        assert service.clear_scene_opportunity(
+            session.id,
+            expected_version=recreated.version,
+        ) == 1
+        assert service.get_scene_opportunity(session.id) is None
+
+        service.replace_scene_opportunity(
+            session.id,
+            expected_version=None,
+            source_turn_id=8,
+        )
+        assert gateway.sessions.delete_session(session.id) is True
+        count = gateway.database.execute_sql(
+            "SELECT COUNT(*) FROM rpg_session_plot_scene_opportunities "
+            "WHERE session_id = ?",
+            (session.id,),
+        ).fetchone()[0]
+        assert count == 0
+    finally:
+        gateway.close()
+
+
 def test_plot_data_constraints_and_transaction_rollback() -> None:
     gateway = DataServiceGateway(":memory:")
     try:

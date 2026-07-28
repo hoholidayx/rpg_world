@@ -85,7 +85,7 @@ const quietButton = 'inline-flex h-10 items-center justify-center gap-2 rounded-
 function formatSceneTime(value: SceneTimeValue | null | undefined) {
   if (!value) return '未设置时间'
   const minute = value.minute ? ` ${value.minute} 分` : ''
-  return `第 ${value.year} 年 ${value.month} 月 ${value.day} 日 ${value.hour} 时${minute}`
+  return `${value.year} 年 ${value.month} 月 ${value.day} 日 ${value.hour} 时${minute}`
 }
 
 function isValidSceneTime(value: SceneTimeValue) {

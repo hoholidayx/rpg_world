@@ -526,21 +526,34 @@ def test_history_mutations_clear_pending_plot_mark_from_affected_turn(
             ),
         )
 
+    def seed_scene_opportunity():
+        return rpg_data_gateway.plot_scheduling.replace_scene_opportunity(
+            "s1",
+            expected_version=None,
+            source_turn_id=2,
+        )
+
     seed_pending()
+    seed_scene_opportunity()
     assistant = next(
         message for message in mgr.history if message.content == "a2"
     )
     mgr.update_message_content(assistant.uid, "a2 edited")
     assert rpg_data_gateway.plot_scheduling.get_pending_injection("s1") is None
+    assert rpg_data_gateway.plot_scheduling.get_scene_opportunity("s1") is None
 
     seed_pending()
+    seed_scene_opportunity()
     user = next(message for message in mgr.history if message.content == "u2")
     mgr.delete_message(user.uid)
     assert rpg_data_gateway.plot_scheduling.get_pending_injection("s1") is None
+    assert rpg_data_gateway.plot_scheduling.get_scene_opportunity("s1") is None
 
     seed_pending()
+    seed_scene_opportunity()
     mgr.truncate_from_turn(2)
     assert rpg_data_gateway.plot_scheduling.get_pending_injection("s1") is None
+    assert rpg_data_gateway.plot_scheduling.get_scene_opportunity("s1") is None
 
 
 def test_reload_history_keeps_session_identity(

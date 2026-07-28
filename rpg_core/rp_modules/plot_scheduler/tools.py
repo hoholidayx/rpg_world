@@ -31,7 +31,7 @@ class PlotSandboxReadTool(_PlotSandboxTool):
     name = PLOT_SANDBOX_READ_TOOL_NAME
     description = (
         "读取当前 Session 所属 Story 的剧情沙盘定义。可列出或读取事件池、事件、"
-        "剧情大纲及节点，也可查看下一次世界推进 turn 的待注入事件快照。"
+        "剧情大纲及节点，也可查看下一次非 OOC turn 的待注入事件快照。"
         "这是只读工具，不会修改任何剧情定义。"
     )
 
@@ -197,7 +197,7 @@ class PlotSandboxReadTool(_PlotSandboxTool):
                     "pool": _pool_summary(pool) if pool is not None else None,
                     "outlineNodeRefs": page,
                     "outlineNodeRefPage": info,
-                    "pendingForNextWorldTurn": (
+                    "pendingForNextNonOocTurn": (
                         _pending_event_id(self._effective_pending()) == event.id
                     ),
                 },
@@ -323,7 +323,7 @@ class PlotEventMarkNextTool(_PlotSandboxTool):
                 return _json({
                     "ok": True,
                     "changed": previous is not None,
-                    "pendingForNextWorldTurn": False,
+                    "pendingForNextNonOocTurn": False,
                     "pendingInjection": None,
                     "replacedOrCleared": _pending_payload(previous),
                 })
@@ -387,7 +387,7 @@ class PlotEventMarkNextTool(_PlotSandboxTool):
             return _json({
                 "ok": True,
                 "changed": True,
-                "pendingForNextWorldTurn": True,
+                "pendingForNextNonOocTurn": True,
                 "pendingInjection": _pending_payload(desired),
                 "replacedOrCleared": _pending_payload(previous),
             })

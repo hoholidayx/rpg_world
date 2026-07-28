@@ -280,7 +280,7 @@ def test_scene_policy_and_status_manager_use_session_runtime_tables(tmp_path) ->
         story.id,
         "后备场景",
         status_kind=models.STATUS_KIND_SCENE,
-        document=_document(("时间", "第 1 年 1 月 2 日"), ("位置", "学院")),
+        document=_document(("时间", "1 年 1 月 2 日"), ("位置", "学院")),
         sort_order=20,
     )
     administration.create_story_table(
@@ -288,7 +288,7 @@ def test_scene_policy_and_status_manager_use_session_runtime_tables(tmp_path) ->
         story.id,
         "当前场景",
         status_kind=models.STATUS_KIND_SCENE,
-        document=_document(("时间", "第 1 年 1 月 1 日"), ("位置", "森林")),
+        document=_document(("时间", "1 年 1 月 1 日"), ("位置", "森林")),
         sort_order=10,
     )
     administration.create_story_table(

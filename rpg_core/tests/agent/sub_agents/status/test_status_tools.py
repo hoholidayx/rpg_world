@@ -261,6 +261,45 @@ def test_status_scratch_removes_net_no_op_document() -> None:
     assert scratch.staged_changes == []
 
 
+def test_status_scratch_tracks_only_net_active_scene_changes() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[2] = StatusTableDocument.from_rows(
+        rows=[
+            StatusTableRow(
+                "时间",
+                "2 年 3 月 4 日 5 时",
+                runtime_key_locked=True,
+            ),
+            StatusTableRow("位置", "森林", runtime_key_locked=True),
+            StatusTableRow("天气", "晴"),
+        ]
+    )
+    scratch, runtime = _scratch_runtime(manager)
+
+    runtime.runtime_set_existing_values(1, [("生命", "8")])
+    assert scratch.scene_changed is False
+
+    runtime.runtime_set_key_value(2, "位置", "城堡")
+    assert scratch.scene_changed is True
+    runtime.runtime_set_key_value(2, "位置", "森林")
+    assert scratch.scene_changed is False
+
+    runtime.runtime_set_key_value(2, "时间", "2 年 3 月 4 日 6 时")
+    assert scratch.scene_changed is True
+    runtime.runtime_set_key_value(2, "时间", "2 年 3 月 4 日 5 时")
+    assert scratch.scene_changed is False
+
+    runtime.runtime_delete_key_value(2, "天气")
+    assert scratch.scene_changed is True
+    runtime.runtime_set_key_value(2, "天气", "晴")
+    assert scratch.scene_changed is False
+
+    runtime.runtime_set_key_value(2, "光照", "昏暗")
+    assert scratch.scene_changed is True
+    runtime.runtime_delete_key_value(2, "光照")
+    assert scratch.scene_changed is False
+
+
 def test_status_scratch_keeps_first_read_snapshot_during_turn() -> None:
     manager = FakeRuntimeStatusManager()
     scratch, runtime = _scratch_runtime(manager)
@@ -788,7 +827,7 @@ async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
 async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> None:
     manager = FakeRuntimeStatusManager()
     manager.documents[2] = _document(
-        ("时间", "第 1 年 1 月 1 日 6 时"),
+        ("时间", "1 年 1 月 1 日 6 时"),
         ("位置", "森林"),
     )
     scratch, runtime = _scratch_runtime(manager)
@@ -879,7 +918,7 @@ async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> N
     assert [change.table_id for change in scratch.staged_changes] == [1]
     assert runtime.get_table_by_id(1)["rows"] == [["生命", "8"]]
     assert runtime.get_table_by_id(2)["rows"] == [
-        ["时间", "第 1 年 1 月 1 日 6 时"],
+        ["时间", "1 年 1 月 1 日 6 时"],
         ["位置", "森林"],
     ]
     assert [record.status for record in result.records] == [

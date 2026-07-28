@@ -1105,6 +1105,18 @@ CREATE TABLE rpg_session_plot_pending_injections (
 CREATE INDEX idx_rpg_session_plot_pending_requested_turn
 ON rpg_session_plot_pending_injections(session_id, requested_turn_id);
 
+CREATE TABLE rpg_session_plot_scene_opportunities (
+    session_id TEXT PRIMARY KEY,
+    source_turn_id INTEGER NOT NULL CHECK (source_turn_id > 0),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_rpg_session_plot_scene_opportunity_turn
+ON rpg_session_plot_scene_opportunities(session_id, source_turn_id);
+
 CREATE TABLE rpg_session_plot_schedule_decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,

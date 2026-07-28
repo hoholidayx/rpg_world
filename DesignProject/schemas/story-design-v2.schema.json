@@ -593,7 +593,7 @@
           "default": null,
           "description": "事件窗口的排他上界；到达此时即不再候选。",
           "examples": [
-            "第 2020 年 7 月 21 日 18 时"
+            "2020 年 7 月 21 日 18 时"
           ],
           "title": "Deadlinetime",
           "x-authoringRuleId": "field.plot-event.deadline-time",
@@ -692,7 +692,7 @@
           "default": null,
           "description": "事件或节点最早可进入候选的 SceneTime。",
           "examples": [
-            "第 2020 年 7 月 18 日 9 时"
+            "2020 年 7 月 18 日 9 时"
           ],
           "title": "Scheduledtime",
           "x-authoringRuleId": "field.plot-event.scheduled-time",
@@ -794,7 +794,7 @@
         "scheduledTime": {
           "description": "节点最早可注入时间；注入只代表触发 directive，不代表章节完成。",
           "examples": [
-            "第 2020 年 7 月 18 日 9 时"
+            "2020 年 7 月 18 日 9 时"
           ],
           "title": "Scheduledtime",
           "type": "string",
@@ -1380,7 +1380,7 @@
           "default": "",
           "description": "当前初始值，以字符串表达；可按表约定表示数值、枚举、列表、简短描述或当前事实状态。运行时可在本 turn 依据已确认事实即时更新。",
           "examples": [
-            "第 2020 年 7 月 18 日 9 时"
+            "2020 年 7 月 18 日 9 时"
           ],
           "title": "Value",
           "type": "string",
@@ -1457,7 +1457,7 @@
                 "metadata": {},
                 "runtimeKeyLocked": true,
                 "updateRule": "当当前 Scene 中已确认发生时间推进时立即更新。",
-                "value": "第 2020 年 7 月 18 日 9 时"
+                "value": "2020 年 7 月 18 日 9 时"
               },
               {
                 "key": "位置",
@@ -2002,6 +2002,6 @@
   },
   "title": "Portable Story Design v2",
   "type": "object",
-  "x-authoringRulesDigest": "b3c6a15dd767c9c44e90fd9371f900df9be17582c0f2f46175e460447d8d4b1c",
+  "x-authoringRulesDigest": "1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a",
   "x-authoringRulesVersion": "1.1"
 }

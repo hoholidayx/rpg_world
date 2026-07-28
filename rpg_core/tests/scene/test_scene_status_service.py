@@ -55,7 +55,7 @@ def test_scene_service_uses_first_data_sorted_table() -> None:
 def test_scene_document_policy_locks_core_fields() -> None:
     document = StatusTableDocument.from_rows(
         rows=[
-            StatusTableRow("时间", "第 1 年 1 月 1 日 6 时"),
+            StatusTableRow("时间", "1 年 1 月 1 日 6 时"),
             StatusTableRow("位置", "森林"),
             StatusTableRow("天气", "晴"),
         ]

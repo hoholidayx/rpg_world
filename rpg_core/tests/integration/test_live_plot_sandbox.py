@@ -121,7 +121,7 @@ async def test_live_llm_reads_plot_event_with_sandbox_tool(
 
 
 @pytest.mark.asyncio
-async def test_live_llm_marks_and_executes_plot_event_on_next_world_turn(
+async def test_live_llm_marks_and_executes_plot_event_on_next_non_ooc_turn(
     live_demo_harness,
     integration_data_gateway,
 ) -> None:
@@ -188,7 +188,7 @@ async def test_live_llm_marks_and_executes_plot_event_on_next_world_turn(
     payload = matching_calls[-1].result
     assert isinstance(payload, dict)
     assert payload["ok"] is True
-    assert payload["pendingForNextWorldTurn"] is True
+    assert payload["pendingForNextNonOocTurn"] is True
     assert payload["pendingInjection"]["sourceEventId"] == event.id
     assert payload["pendingInjection"]["eventTitle"] == temporary_title
     assert payload["pendingInjection"]["directive"] == temporary_directive

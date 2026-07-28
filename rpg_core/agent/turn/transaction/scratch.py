@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     from rpg_core.rp_modules.plot_scheduler.manual_injection import (
         PlotPendingInjectionTurnState,
     )
+    from rpg_core.rp_modules.plot_scheduler.scene_opportunity import (
+        PlotSceneOpportunityTurnState,
+    )
 
 
 @dataclass
@@ -40,6 +43,7 @@ class TurnScratch:
     plot_schedule_decisions: list["StagedPlotScheduleDecision"] = field(default_factory=list)
     plot_schedule_injections: list["PlotScheduleInjection"] = field(default_factory=list)
     plot_pending_injection: "PlotPendingInjectionTurnState | None" = None
+    plot_scene_opportunity: "PlotSceneOpportunityTurnState | None" = None
 
     @property
     def turn_id(self) -> int:

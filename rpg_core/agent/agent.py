@@ -41,6 +41,9 @@ from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
 from rpg_core.rp_modules.plot_scheduler.manual_injection import (
     PlotPendingInjectionCommitService,
 )
+from rpg_core.rp_modules.plot_scheduler.scene_opportunity import (
+    PlotSceneOpportunityCommitService,
+)
 from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
 from rpg_core.rp_modules.application import RPModuleApplicationService
 from rpg_core.rp_modules.registry import RPModuleRegistry
@@ -189,6 +192,9 @@ class RPGGameAgent:
                     gateway.plot_scheduling
                 ),
                 plot_pending_injection_commit=PlotPendingInjectionCommitService(
+                    gateway.plot_scheduling
+                ),
+                plot_scene_opportunity_commit=PlotSceneOpportunityCommitService(
                     gateway.plot_scheduling
                 ),
             ),

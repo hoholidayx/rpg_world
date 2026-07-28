@@ -55,7 +55,7 @@ def _pack() -> dict:
                 {
                     "stableId": "opening-main",
                     "title": "雨夜",
-                    "message": "第 2019 年 1 月 1 日，{USER_PLAY_ROLE_NAME}抵达车站。",
+                    "message": "2019 年 1 月 1 日，{USER_PLAY_ROLE_NAME}抵达车站。",
                     "sortOrder": 10,
                 }
             ],
@@ -111,7 +111,7 @@ def _pack() -> dict:
                     "rows": [
                         {
                             "key": "时间",
-                            "value": "第 2019 年 1 月 1 日 9 时",
+                            "value": "2019 年 1 月 1 日 9 时",
                             "runtimeKeyLocked": True,
                             "updateRule": "",
                             "metadata": {},
@@ -217,7 +217,7 @@ def _pack() -> dict:
                             {
                                 "stableId": "node-arrival",
                                 "eventRef": "event-arrival",
-                                "scheduledTime": "第 2019 年 1 月 1 日 9 时",
+                                "scheduledTime": "2019 年 1 月 1 日 9 时",
                                 "dispatchMode": "soft",
                                 "position": 0,
                                 "enabled": True,

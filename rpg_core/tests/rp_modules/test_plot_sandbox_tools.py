@@ -162,7 +162,7 @@ async def test_plot_event_mark_null_clears_and_rejects_temporary_fields() -> Non
     assert cleared == {
         "ok": True,
         "changed": True,
-        "pendingForNextWorldTurn": False,
+        "pendingForNextNonOocTurn": False,
         "pendingInjection": None,
         "replacedOrCleared": {
             "sourceEventId": 11,

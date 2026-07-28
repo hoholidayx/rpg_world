@@ -37,6 +37,7 @@ __all__ = [
     "SessionPlotEventOverrideRecord",
     "SessionPlotOutlineNodeOverrideRecord",
     "SessionPlotPendingInjectionRecord",
+    "SessionPlotSceneOpportunityRecord",
     "SessionPlotScheduleDecisionRecord",
     "SessionBackupMessageRecord",
     "SessionDreamProposalItemEvidenceRecord",
@@ -1249,6 +1250,23 @@ class SessionPlotPendingInjectionRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_session_plot_pending_injections"
+
+
+class SessionPlotSceneOpportunityRecord(BaseRecord):
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="plot_scene_opportunity",
+        column_name="session_id",
+        primary_key=True,
+        on_delete="CASCADE",
+    )
+    source_turn_id = IntegerField()
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_plot_scene_opportunities"
 
 
 class SessionPlotScheduleDecisionRecord(BaseRecord):

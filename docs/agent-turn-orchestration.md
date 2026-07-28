@@ -455,12 +455,14 @@ V1 不拦截当前正文，也没有后置验收、自动修订或针对正文�
 
 Plot Scheduler 有效时，OOC 与 GM 的主工具 registry 额外提供：
 
-- `plot_sandbox_read(resource, id?, offset?, limit?)`：读取本轮不可变的 `schedule | pool | event | outline` snapshot；schedule 同时返回当前 scratch 中对下一次世界推进 turn 生效的待注入快照。
+- `plot_sandbox_read(resource, id?, offset?, limit?)`：读取本轮不可变的 `schedule | pool | event | outline` snapshot；schedule 同时返回当前 scratch 中对下一次非 OOC turn 生效的待注入快照。
 - `plot_event_mark_next(event_id, title?, directive?)`：正事件 ID 重新冻结当前 Story 事件，临时 title/directive 只改变一次性快照；省略时冻结原内容。`event_id=null` 清空，且不得带临时字段。
 
-每个 Session 只有一个待注入快照，后一次 mark 替换前一次。快照不持有来源 Event/Pool 外键，因而来源编辑、移动或删除都不会改变或级联删除它；Story 与 Session 归属仍受外键约束。OOC 回合只标记而不消费，中间任意数量的 OOC 回合保持快照。下一次 `neutral | ic | gm` preflight 在自动 selector 前将其作为 forced pool lane 注入，即使没有可解析 SceneTime 也执行；显式手动注入不受源事件启用、时间窗、重复与冷却等自动候选规则限制，无 SceneTime 的手动触发也覆盖既有冷却锚点。手动注入占用 pool lane，并阻止同一事件在 outline lane 重复。对应 ledger 行使用 `selectionOrigin=manual`，此时 `sceneTime` 与 `sceneTimeOrdinal` 可以为 null。
+自动 selector 不按每个非 OOC turn 运行：成功 turn 的 active Scene document 最终实际变化时，提交事务留下一个 Scene 调度机会；下一次 `neutral | ic | gm` turn 在 `StatusPreflight` 后消费该机会并使用最新 scratch Scene 抽取候选。消费轮若再次改变 Scene，会留下供再下一轮使用的新机会。OOC、命令、模块禁用、失败或取消不消费也不创建机会；无机会时不调用 selector 或 Judge。
 
-mark/clear 和 consume 都是 `TurnScratch` 的 copy-on-write 状态。标记回合取消或 Provider/commit 失败时不落库；目标回合取消或失败时不消费。成功 commit 才在消息、手动 Plot decision 与状态的同一数据库事务中 CAS 消费/替换；因此 GM 可以在消费旧快照的同一回合标记下一条快照。`/clear`、请求 turn 的 edit/delete/truncate/replace 会清除受影响快照，Session 派生不复制待注入快照。
+每个 Session 只有一个待注入快照，后一次 mark 替换前一次。快照不持有来源 Event/Pool 外键，因而来源编辑、移动或删除都不会改变或级联删除它；Story 与 Session 归属仍受外键约束。OOC 回合只标记而不消费，中间任意数量的 OOC 回合保持快照。下一次 `neutral | ic | gm` preflight 在自动 selector 前将其作为 forced pool lane 注入，即使没有可解析 SceneTime 也执行；显式手动注入不依赖 Scene 调度机会，不受源事件启用、时间窗、重复与冷却等自动候选规则限制，无 SceneTime 的手动触发也覆盖既有冷却锚点。手动注入占用 pool lane，并阻止同一事件在 outline lane 重复。对应 ledger 行使用 `selectionOrigin=manual`，此时 `sceneTime` 与 `sceneTimeOrdinal` 可以为 null。
+
+mark/clear、手动 consume 和 Scene 机会 consume/replace 都是 `TurnScratch` 的 copy-on-write 状态。标记回合取消或 Provider/commit 失败时不落库；目标回合取消或失败时不消费。成功 commit 才在消息、Plot decision 与状态的同一数据库事务中 CAS 消费/替换；因此 GM 可以在消费旧快照的同一回合标记下一条快照。`/clear`、请求 turn 的 edit/delete/truncate/replace 会清除受影响快照和 Scene 机会，Session 派生不复制二者。
 
 “只能有一条且必须首位 system”不是跨 provider 的行业准则，而是具体 API 或 chat template 的兼容能力。本项目不再为某个模型全局合并 system。局域网原生 llama.cpp/Qwen 部署可以使用 `--jinja` 和 `--chat-template` / `--chat-template-file` 配置服务端模板；模板上线前必须用包含“Hot History 后再次出现 system”的请求验证角色顺序和生成结果。若某个部署不支持，应在该 provider/chat-template 边界修复，不得改变 canonical Context。
 
@@ -481,7 +483,8 @@ mark/clear 和 consume 都是 `TurnScratch` 的 copy-on-write 状态。标记回
 - 当前 user message；
 - 最终 assistant message；
 - 本 turn Narrative Outcome；
-- scratch 中变化过的 scene/normal status documents。
+- scratch 中变化过的 scene/normal status documents；
+- 上一轮 Scene 调度机会的消费，以及当前 Scene 最终变化生成的下一轮机会。
 
 持久化 session 使用 `rpg_data` database atomic 完成这些写入。数据库事务只覆盖短 commit 点，不跨任何 LLM 调用。状态表发现持久化 document 偏离 scratch baseline 时记录 warning，并按当前 last-write-wins 策略覆盖。
 

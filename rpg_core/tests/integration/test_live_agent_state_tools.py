@@ -119,7 +119,7 @@ async def test_live_status_sub_agent_updates_scene_time_and_location(
     user_input = (
         "以 GM 指令推进这一小段：东塔侧门已经打开。"
         "Alice 与莫兰沿唯一通道走了二十分钟，"
-        "在第 1 年 1 月 3 日 15 时 30 分抵达东塔地下库前厅。"
+        "在1 年 1 月 3 日 15 时 30 分抵达东塔地下库前厅。"
         "前厅里仍然只有 Alice 和莫兰。请从两人抵达后的现场继续描写。"
     )
 
@@ -165,7 +165,7 @@ async def test_live_status_sub_agent_updates_scene_time_and_location(
         harness.session_id,
     )
     scene_after = after["奥术学院当前场景"]
-    assert scene_after["时间"] == "第 1 年 1 月 3 日 15 时 30 分"
+    assert scene_after["时间"] == "1 年 1 月 3 日 15 时 30 分"
     assert "地下库前厅" in scene_after["位置"]
     assert reply.committed_turn_id is not None
     _assert_committed_world_turn(
