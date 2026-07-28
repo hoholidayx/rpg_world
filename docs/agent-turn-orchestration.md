@@ -151,16 +151,16 @@ Story、Session 或模型配置在生成中的修改只影响下一 turn，不�
 
 ### mode policy
 
-| mode | Status preflight | scene/status 工具 | 世界事实 RP Modules | `message_mode` 动态指令 | 叙事风格 Fixed section |
-|---|---:|---:|---:|---:|---:|
-| `neutral` | 开启 | 开启 | 开启 | 无 | 保留 |
-| `ic` | 开启 | 开启 | 开启 | IC | 保留 |
-| `gm` | 开启 | 开启 | 开启 | GM + 本 turn 托管 | 保留 |
-| `ooc` | 关闭 | 关闭 | 关闭 | OOC | 保留但由 OOC 指令覆盖 |
+| mode | Status preflight | scene/status 工具 | 世界事实 RP Modules | Plot 沙盘工具 | `message_mode` 动态指令 | 叙事风格 Fixed section |
+|---|---:|---:|---:|---:|---:|---:|
+| `neutral` | 开启 | 开启 | 开启 | 关闭 | 无 | 保留 |
+| `ic` | 开启 | 开启 | 开启 | 关闭 | IC | 保留 |
+| `gm` | 开启 | 开启 | 开启 | Plot 有效时开启 | GM + 本 turn 托管 | 保留 |
+| `ooc` | 关闭 | 关闭 | 关闭 | Plot 有效时开启 | OOC | 保留但由 OOC 指令覆盖 |
 
 `neutral` 是空值、null 和未传 mode 的默认语义，不额外引导表达方式，但仍可推进世界、运行 Plot/状态并进入 Story Memory 与 Dream 事实链路。`ic` 把玩家输入视为玩家已经明确表达的台词、行动或意图，但不允许补写玩家未声明的内容。`gm` 允许当前 turn 托管玩家角色，且只在此动态 section 中附带该玩家角色被 Fixed Layer 排除的 `scope:npc_portrayal` 详情。
 
-`ooc` 仍是普通正文 turn，会进入主 Context 门禁、事务、主 runner 和 commit；它只是通过 `TurnExecutionPolicy` 关闭世界事实 RP Modules、状态写入和后置事实提取。显式传入的 style ID 仍会被校验。为保持四种 mode 的 Fixed Layer 字节稳定，叙事风格 section 不再因 OOC 被移除，而是由 Hot History 后的 OOC 动态指令要求直接讨论、不使用 RP 正文标签。
+`ooc` 仍是普通正文 turn，会进入主 Context 门禁、事务、主 runner 和 commit；它通过 `TurnExecutionPolicy` 关闭世界事实 RP Modules、状态写入和后置事实提取。唯一例外是 Plot Scheduler 有效时注册只读/暂存型沙盘工具：它们不会让当前 OOC turn 运行自动调度或写入世界事实。显式传入的 style ID 仍会被校验。为保持四种 mode 的 Fixed Layer 字节稳定，叙事风格 section 不再因 OOC 被移除，而是由 Hot History 后的 OOC 动态指令要求直接讨论、不使用 RP 正文标签。
 
 该 policy 不移除 scene 和普通状态表的只读 Context 投影，因此 OOC 主 Agent 仍可理解当前世界状态，但不能通过 scene/status 工具写回。SQL History 与文件 Summary 查询由 `agent.lookup_tools.enabled` 统一控制且默认关闭；开启后 `history_search` / `history_read` / `summary_search` / `summary_read` 才在四种 mode 中保留。遗留 `list_files / read_file / write_file / grep` 不再默认注册；若通过 `extra_tools` 显式注入，OOC 仍按既有策略隐藏 `WriteFileTool`。
 
@@ -452,6 +452,15 @@ Summary 的正文与 front matter 真源仍是 `{session_runtime}/summaries/*.md
 Plot Scheduler 是例外 placement：实际触发的至多两条事件不进入 `RP_MODULES`，而由 `ContextRenderer` 以 `[engine_plot_directive]` 追加到当前 user message 最后，晚于原始输入和普通 user suffix。载荷只含按序事件标题与 directive。它可覆盖玩家对世界/NPC 结果的冲突要求，但不能覆盖系统契约、已暂存 Outcome、实际工具边界或非 GM turn 的玩家角色主权。这个 suffix 只供当前 LLM 请求使用；事务中已暂存的 user message 不含它，因此历史、Summary、Memory、Dream 和正文 SSE 都不会看到它。
 
 V1 不拦截当前正文，也没有后置验收、自动修订或针对正文遗漏的失败重试；ledger 的 `triggered` 仅表示事件已选择并注入，不表示模型已落实或剧情已完成。
+
+Plot Scheduler 有效时，OOC 与 GM 的主工具 registry 额外提供：
+
+- `plot_sandbox_read(resource, id?, offset?, limit?)`：读取本轮不可变的 `schedule | pool | event | outline` snapshot；schedule 同时返回当前 scratch 中对下一次世界推进 turn 生效的待注入快照。
+- `plot_event_mark_next(event_id, title?, directive?)`：正事件 ID 重新冻结当前 Story 事件，临时 title/directive 只改变一次性快照；省略时冻结原内容。`event_id=null` 清空，且不得带临时字段。
+
+每个 Session 只有一个待注入快照，后一次 mark 替换前一次。快照不持有来源 Event/Pool 外键，因而来源编辑、移动或删除都不会改变或级联删除它；Story 与 Session 归属仍受外键约束。OOC 回合只标记而不消费，中间任意数量的 OOC 回合保持快照。下一次 `neutral | ic | gm` preflight 在自动 selector 前将其作为 forced pool lane 注入，即使没有可解析 SceneTime 也执行；显式手动注入不受源事件启用、时间窗、重复与冷却等自动候选规则限制，无 SceneTime 的手动触发也覆盖既有冷却锚点。手动注入占用 pool lane，并阻止同一事件在 outline lane 重复。对应 ledger 行使用 `selectionOrigin=manual`，此时 `sceneTime` 与 `sceneTimeOrdinal` 可以为 null。
+
+mark/clear 和 consume 都是 `TurnScratch` 的 copy-on-write 状态。标记回合取消或 Provider/commit 失败时不落库；目标回合取消或失败时不消费。成功 commit 才在消息、手动 Plot decision 与状态的同一数据库事务中 CAS 消费/替换；因此 GM 可以在消费旧快照的同一回合标记下一条快照。`/clear`、请求 turn 的 edit/delete/truncate/replace 会清除受影响快照，Session 派生不复制待注入快照。
 
 “只能有一条且必须首位 system”不是跨 provider 的行业准则，而是具体 API 或 chat template 的兼容能力。本项目不再为某个模型全局合并 system。局域网原生 llama.cpp/Qwen 部署可以使用 `--jinja` 和 `--chat-template` / `--chat-template-file` 配置服务端模板；模板上线前必须用包含“Hot History 后再次出现 system”的请求验证角色顺序和生成结果。若某个部署不支持，应在该 provider/chat-template 边界修复，不得改变 canonical Context。
 

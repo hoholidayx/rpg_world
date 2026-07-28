@@ -26,6 +26,8 @@ class SessionResetDataPort(SessionRoleDataPort, SessionStatusDataPort, Protocol)
 
     def clear_plot_decisions(self, session_id: str) -> int: ...
 
+    def clear_pending_plot_injection(self, session_id: str) -> int: ...
+
     def clear_story_memories(self, session_id: str) -> int: ...
 
     def clear_dream_memory(self, session_id: str) -> DreamResetResult: ...
@@ -42,6 +44,7 @@ class SessionResetResult:
     messages_cleared: int = 0
     narrative_outcomes_cleared: int = 0
     plot_schedule_decisions_cleared: int = 0
+    pending_plot_injections_cleared: int = 0
     story_memories_cleared: int = 0
     dream_memories_cleared: int = 0
     dream_proposals_cleared: int = 0
@@ -73,6 +76,11 @@ class SessionResetService:
             plot_decisions_cleared = self._data.clear_plot_decisions(
                 normalized_session_id
             )
+            pending_plot_injections_cleared = (
+                self._data.clear_pending_plot_injection(
+                    normalized_session_id
+                )
+            )
             story_memories_cleared = self._data.clear_story_memories(
                 normalized_session_id
             )
@@ -92,6 +100,7 @@ class SessionResetService:
             messages_cleared=messages_cleared,
             narrative_outcomes_cleared=outcomes_cleared,
             plot_schedule_decisions_cleared=plot_decisions_cleared,
+            pending_plot_injections_cleared=pending_plot_injections_cleared,
             story_memories_cleared=story_memories_cleared,
             dream_memories_cleared=dream_result.memories_cleared,
             dream_proposals_cleared=dream_result.proposals_cleared,

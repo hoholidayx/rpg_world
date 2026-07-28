@@ -12,6 +12,7 @@ from rpg_data import models
 from rpg_data.repositories.records import (
     SessionPlotEventOverrideRecord,
     SessionPlotOutlineNodeOverrideRecord,
+    SessionPlotPendingInjectionRecord,
     SessionPlotScheduleDecisionRecord,
     StoryPlotEventPoolRecord,
     StoryPlotEventRecord,
@@ -432,6 +433,229 @@ class PlotSchedulingRepository:
             disabled=True,
         ).on_conflict_replace().execute()
 
+    def get_pending_injection(
+        self,
+        session_id: str,
+    ) -> models.SessionPlotPendingInjection | None:
+        row = SessionPlotPendingInjectionRecord.get_or_none(
+            (
+                SessionPlotPendingInjectionRecord.session
+                == str(session_id)
+            )
+            & (SessionPlotPendingInjectionRecord.active == True)  # noqa: E712
+        )
+        return _to_pending_injection(row) if row is not None else None
+
+    def create_pending_injection(
+        self,
+        session_id: str,
+        values: models.PendingPlotInjectionWrite,
+    ) -> models.SessionPlotPendingInjection | None:
+        inserted_or_reactivated = int(
+            SessionPlotPendingInjectionRecord.insert(
+                session=str(session_id),
+                story=int(values.story_id),
+                source_event_id=int(values.source_event_id),
+                source_event_version=int(values.source_event_version),
+                source_pool_id=int(values.source_pool_id),
+                source_pool_name=values.source_pool_name,
+                event_title=values.event_title,
+                directive=values.directive,
+                event_snapshot_json=_serialize_mapping(values.event_snapshot),
+                requested_turn_id=int(values.requested_turn_id),
+                active=True,
+            )
+            .on_conflict(
+                conflict_target=[SessionPlotPendingInjectionRecord.session],
+                update={
+                    SessionPlotPendingInjectionRecord.story: int(
+                        values.story_id
+                    ),
+                    SessionPlotPendingInjectionRecord.source_event_id: int(
+                        values.source_event_id
+                    ),
+                    SessionPlotPendingInjectionRecord.source_event_version: int(
+                        values.source_event_version
+                    ),
+                    SessionPlotPendingInjectionRecord.source_pool_id: int(
+                        values.source_pool_id
+                    ),
+                    SessionPlotPendingInjectionRecord.source_pool_name: (
+                        values.source_pool_name
+                    ),
+                    SessionPlotPendingInjectionRecord.event_title: (
+                        values.event_title
+                    ),
+                    SessionPlotPendingInjectionRecord.directive: (
+                        values.directive
+                    ),
+                    SessionPlotPendingInjectionRecord.event_snapshot_json: (
+                        _serialize_mapping(values.event_snapshot)
+                    ),
+                    SessionPlotPendingInjectionRecord.requested_turn_id: int(
+                        values.requested_turn_id
+                    ),
+                    SessionPlotPendingInjectionRecord.active: True,
+                    SessionPlotPendingInjectionRecord.version: (
+                        SessionPlotPendingInjectionRecord.version + 1
+                    ),
+                    SessionPlotPendingInjectionRecord.created_at: SQL(
+                        "CURRENT_TIMESTAMP"
+                    ),
+                    SessionPlotPendingInjectionRecord.updated_at: SQL(
+                        "CURRENT_TIMESTAMP"
+                    ),
+                },
+                where=(
+                    SessionPlotPendingInjectionRecord.active == False  # noqa: E712
+                ),
+            )
+            .as_rowcount()
+            .execute()
+        )
+        if inserted_or_reactivated != 1:
+            return None
+        pending = self.get_pending_injection(session_id)
+        if pending is None:  # pragma: no cover - database create contract
+            raise RuntimeError("created pending Plot injection could not be reloaded")
+        return pending
+
+    def update_pending_injection(
+        self,
+        session_id: str,
+        *,
+        expected_version: int,
+        values: models.PendingPlotInjectionWrite,
+    ) -> models.SessionPlotPendingInjection | None:
+        changed = (
+            SessionPlotPendingInjectionRecord.update(
+                story=int(values.story_id),
+                source_event_id=int(values.source_event_id),
+                source_event_version=int(values.source_event_version),
+                source_pool_id=int(values.source_pool_id),
+                source_pool_name=values.source_pool_name,
+                event_title=values.event_title,
+                directive=values.directive,
+                event_snapshot_json=_serialize_mapping(values.event_snapshot),
+                requested_turn_id=int(values.requested_turn_id),
+                version=SessionPlotPendingInjectionRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(
+                (SessionPlotPendingInjectionRecord.session == str(session_id))
+                & (
+                    SessionPlotPendingInjectionRecord.active
+                    == True  # noqa: E712
+                )
+                & (
+                    SessionPlotPendingInjectionRecord.version
+                    == int(expected_version)
+                )
+            )
+            .execute()
+        )
+        return self.get_pending_injection(session_id) if changed else None
+
+    def delete_pending_injection(
+        self,
+        session_id: str,
+        *,
+        expected_version: int | None = None,
+    ) -> int:
+        query = SessionPlotPendingInjectionRecord.update(
+            active=False,
+            version=SessionPlotPendingInjectionRecord.version + 1,
+            updated_at=SQL("CURRENT_TIMESTAMP"),
+        ).where(
+            (
+                SessionPlotPendingInjectionRecord.session
+                == str(session_id)
+            )
+            & (SessionPlotPendingInjectionRecord.active == True)  # noqa: E712
+        )
+        if expected_version is not None:
+            query = query.where(
+                SessionPlotPendingInjectionRecord.version == int(expected_version)
+            )
+        return int(query.execute())
+
+    def delete_pending_injection_requested_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return int(
+            SessionPlotPendingInjectionRecord.update(
+                active=False,
+                version=SessionPlotPendingInjectionRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(
+                (SessionPlotPendingInjectionRecord.session == str(session_id))
+                & (
+                    SessionPlotPendingInjectionRecord.active
+                    == True  # noqa: E712
+                )
+                & (
+                    SessionPlotPendingInjectionRecord.requested_turn_id
+                    == int(turn_id)
+                )
+            )
+            .execute()
+        )
+
+    def delete_pending_injection_requested_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return int(
+            SessionPlotPendingInjectionRecord.update(
+                active=False,
+                version=SessionPlotPendingInjectionRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(
+                (SessionPlotPendingInjectionRecord.session == str(session_id))
+                & (
+                    SessionPlotPendingInjectionRecord.active
+                    == True  # noqa: E712
+                )
+                & (
+                    SessionPlotPendingInjectionRecord.requested_turn_id
+                    >= int(turn_id)
+                )
+            )
+            .execute()
+        )
+
+    def retain_pending_injection_requested_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int:
+        ids = sorted({int(turn_id) for turn_id in turn_ids if int(turn_id) > 0})
+        query = SessionPlotPendingInjectionRecord.update(
+            active=False,
+            version=SessionPlotPendingInjectionRecord.version + 1,
+            updated_at=SQL("CURRENT_TIMESTAMP"),
+        ).where(
+            (
+                SessionPlotPendingInjectionRecord.session
+                == str(session_id)
+            )
+            & (SessionPlotPendingInjectionRecord.active == True)  # noqa: E712
+        )
+        if ids:
+            query = query.where(
+                ~(
+                    SessionPlotPendingInjectionRecord.requested_turn_id.in_(
+                        ids
+                    )
+                )
+            )
+        return int(query.execute())
+
     def list_decisions(
         self,
         session_id: str,
@@ -577,8 +801,13 @@ class PlotSchedulingRepository:
                 container_id=int(decision.container_id),
                 decision_status=decision.decision_status,
                 dispatch_mode=decision.dispatch_mode,
+                selection_origin=decision.selection_origin,
                 scene_time_json=_serialize_time(decision.scene_time),
-                scene_time_ordinal=decision.scene_time.ordinal_minutes,
+                scene_time_ordinal=(
+                    decision.scene_time.ordinal_minutes
+                    if decision.scene_time is not None
+                    else None
+                ),
                 event_snapshot_json=json.dumps(
                     dict(decision.event_snapshot),
                     ensure_ascii=False,
@@ -659,8 +888,17 @@ class PlotSchedulingRepository:
                 container_id=int(row.container_id),
                 decision_status=str(row.decision_status),
                 dispatch_mode=str(row.dispatch_mode),
-                scene_time_json=str(row.scene_time_json),
-                scene_time_ordinal=int(row.scene_time_ordinal),
+                selection_origin=str(row.selection_origin),
+                scene_time_json=(
+                    str(row.scene_time_json)
+                    if row.scene_time_json is not None
+                    else None
+                ),
+                scene_time_ordinal=(
+                    int(row.scene_time_ordinal)
+                    if row.scene_time_ordinal is not None
+                    else None
+                ),
                 event_snapshot_json=str(row.event_snapshot_json),
                 reason=str(row.reason or ""),
                 error_code=str(row.error_code or ""),
@@ -681,6 +919,15 @@ def _serialize_time(value: SceneTime | None) -> str | None:
     if value is None:
         return None
     return json.dumps(value.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _serialize_mapping(value: Mapping[str, object]) -> str:
+    return json.dumps(
+        dict(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _parse_time(value: str | None, *, required: bool) -> SceneTime | None:
@@ -768,12 +1015,39 @@ def _to_outline(
     )
 
 
+def _to_pending_injection(
+    row: SessionPlotPendingInjectionRecord,
+) -> models.SessionPlotPendingInjection:
+    snapshot = json.loads(str(row.event_snapshot_json))
+    if not isinstance(snapshot, Mapping):
+        raise ValueError("persisted pending Plot event snapshot must be an object")
+    return models.SessionPlotPendingInjection(
+        session_id=str(row.session_id),
+        story_id=int(row.story_id),
+        source_event_id=int(row.source_event_id),
+        source_event_version=int(row.source_event_version),
+        source_pool_id=int(row.source_pool_id),
+        source_pool_name=str(row.source_pool_name),
+        event_title=str(row.event_title),
+        directive=str(row.directive),
+        event_snapshot=dict(snapshot),
+        requested_turn_id=int(row.requested_turn_id),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
 def _to_decision(
     row: SessionPlotScheduleDecisionRecord,
 ) -> models.SessionPlotScheduleDecision:
-    scene_time = _parse_time(row.scene_time_json, required=True)
-    if scene_time is None:  # pragma: no cover - required above
-        raise ValueError("persisted plot decision is missing SceneTime")
+    selection_origin = str(row.selection_origin)
+    scene_time = _parse_time(
+        row.scene_time_json,
+        required=(
+            selection_origin == models.PLOT_SELECTION_ORIGIN_SCHEDULER
+        ),
+    )
     snapshot = json.loads(str(row.event_snapshot_json))
     if not isinstance(snapshot, Mapping):
         raise ValueError("persisted plot event snapshot must be an object")
@@ -787,8 +1061,13 @@ def _to_decision(
         container_id=int(row.container_id),
         decision_status=str(row.decision_status),
         dispatch_mode=str(row.dispatch_mode),
+        selection_origin=selection_origin,
         scene_time=scene_time,
-        scene_time_ordinal=int(row.scene_time_ordinal),
+        scene_time_ordinal=(
+            int(row.scene_time_ordinal)
+            if row.scene_time_ordinal is not None
+            else None
+        ),
         event_snapshot=dict(snapshot),
         reason=str(row.reason or ""),
         error_code=str(row.error_code or ""),

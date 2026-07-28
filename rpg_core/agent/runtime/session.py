@@ -315,11 +315,12 @@ class AgentSessionService:
 
         logger.info(
             _TAG
-            + " session reset completed: session_id={}, messages={}, outcomes={}, plot_decisions={}, story_memories={}, story_status_tables_cleared={}, story_status_tables_initialized={}, native_status_tables_reset={}, first_message_appended={}",
+            + " session reset completed: session_id={}, messages={}, outcomes={}, plot_decisions={}, pending_plot_injections={}, story_memories={}, story_status_tables_cleared={}, story_status_tables_initialized={}, native_status_tables_reset={}, first_message_appended={}",
             session_id,
             result.messages_cleared,
             result.narrative_outcomes_cleared,
             result.plot_schedule_decisions_cleared,
+            result.pending_plot_injections_cleared,
             result.story_memories_cleared,
             result.story_status_tables_cleared,
             result.story_status_tables_initialized,

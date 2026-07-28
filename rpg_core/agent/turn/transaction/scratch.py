@@ -18,6 +18,9 @@ if TYPE_CHECKING:
     from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
     from rpg_core.rp_modules.narrative_outcome.models import NarrativeOutcomeSelection
     from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
+    from rpg_core.rp_modules.plot_scheduler.manual_injection import (
+        PlotPendingInjectionTurnState,
+    )
 
 
 @dataclass
@@ -36,6 +39,7 @@ class TurnScratch:
     rp_module_runtime: "RPModuleTurnRuntime | None" = None
     plot_schedule_decisions: list["StagedPlotScheduleDecision"] = field(default_factory=list)
     plot_schedule_injections: list["PlotScheduleInjection"] = field(default_factory=list)
+    plot_pending_injection: "PlotPendingInjectionTurnState | None" = None
 
     @property
     def turn_id(self) -> int:

@@ -260,8 +260,9 @@ class PlotDecisionResponse(BaseModel):
     container_id: int = Field(alias="containerId")
     decision_status: str = Field(alias="decisionStatus")
     dispatch_mode: str = Field(alias="dispatchMode")
-    scene_time: SceneTimePayload = Field(alias="sceneTime")
-    scene_time_ordinal: int = Field(alias="sceneTimeOrdinal")
+    selection_origin: str = Field(alias="selectionOrigin")
+    scene_time: SceneTimePayload | None = Field(alias="sceneTime")
+    scene_time_ordinal: int | None = Field(alias="sceneTimeOrdinal")
     event_snapshot: dict[str, object] = Field(alias="eventSnapshot")
     reason: str
     error_code: str = Field(alias="errorCode")
@@ -465,6 +466,7 @@ def _decision_response(
         containerId=value.container_id,
         decisionStatus=value.decision_status,
         dispatchMode=value.dispatch_mode,
+        selectionOrigin=value.selection_origin,
         sceneTime=_time_response(value.scene_time),
         sceneTimeOrdinal=value.scene_time_ordinal,
         eventSnapshot=dict(value.event_snapshot),

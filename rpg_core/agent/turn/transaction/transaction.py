@@ -17,6 +17,9 @@ from rpg_core.agent.turn.transaction.status_scratch import (
     StatusDocumentScratch,
 )
 from rpg_core.agent.turn.transaction.scratch import TurnScratch
+from rpg_core.rp_modules.plot_scheduler.manual_injection import (
+    PlotPendingInjectionTurnState,
+)
 
 if TYPE_CHECKING:
     from rpg_core.agent.telemetry import TurnStats
@@ -26,6 +29,10 @@ if TYPE_CHECKING:
     from rpg_core.agent.turn.transaction.commit_plan import TurnCommitTransactionPort
     from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
     from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
+    from rpg_core.rp_modules.plot_scheduler.manual_injection import (
+        PlotPendingInjectionCommitService,
+    )
+    from rpg_data.models import SessionPlotPendingInjection
 
 _TAG = "[AgentTurnTransaction]"
 
@@ -42,6 +49,7 @@ class AgentTurnTransaction:
         transaction_data: "TurnCommitTransactionPort | None" = None,
         narrative_outcome_ledger: "NarrativeOutcomeLedgerService | None" = None,
         plot_schedule_ledger: "PlotScheduleLedgerService | None" = None,
+        plot_pending_injection_commit: "PlotPendingInjectionCommitService | None" = None,
     ) -> None:
         self._session = session
         self._status_mgr = status_mgr
@@ -49,6 +57,7 @@ class AgentTurnTransaction:
         self._transaction_data = transaction_data
         self._narrative_outcome_ledger = narrative_outcome_ledger
         self._plot_schedule_ledger = plot_schedule_ledger
+        self._plot_pending_injection_commit = plot_pending_injection_commit
         self._turn_id: int | None = None
         self._scratch: TurnScratch | None = None
         self._committed = False
@@ -64,6 +73,7 @@ class AgentTurnTransaction:
         turn_stats: "TurnStats",
         *,
         mode: TurnMode | str = TurnMode.NEUTRAL,
+        pending_plot_injection: "SessionPlotPendingInjection | None" = None,
     ) -> TurnScratch:
         turn_id: int | None = None
         try:
@@ -83,6 +93,9 @@ class AgentTurnTransaction:
                 status_manager=scratch_status_mgr,
                 scene_tracker=scratch_scene_tracker,
                 turn_stats=turn_stats,
+                plot_pending_injection=PlotPendingInjectionTurnState(
+                    base=pending_plot_injection
+                ),
             )
         except Exception as exc:
             if turn_id is not None:
@@ -108,8 +121,10 @@ class AgentTurnTransaction:
             transaction_data=self._transaction_data,
             narrative_outcome_ledger=self._narrative_outcome_ledger,
             plot_schedule_ledger=self._plot_schedule_ledger,
+            plot_pending_injection_commit=self._plot_pending_injection_commit,
             narrative_outcome=self.scratch.narrative_outcome,
             plot_schedule_decisions=tuple(self.scratch.plot_schedule_decisions),
+            plot_pending_injection=self.scratch.plot_pending_injection,
         )
 
     def commit(self) -> list[StatusDocumentChange]:

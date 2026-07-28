@@ -1083,6 +1083,28 @@ CREATE TABLE rpg_session_plot_outline_node_overrides (
     FOREIGN KEY (node_id) REFERENCES rpg_story_plot_outline_nodes(id) ON DELETE CASCADE
 );
 
+CREATE TABLE rpg_session_plot_pending_injections (
+    session_id TEXT PRIMARY KEY,
+    story_id INTEGER NOT NULL,
+    source_event_id INTEGER NOT NULL CHECK (source_event_id > 0),
+    source_event_version INTEGER NOT NULL CHECK (source_event_version > 0),
+    source_pool_id INTEGER NOT NULL CHECK (source_pool_id > 0),
+    source_pool_name TEXT NOT NULL CHECK (length(trim(source_pool_name)) > 0),
+    event_title TEXT NOT NULL CHECK (length(trim(event_title)) > 0),
+    directive TEXT NOT NULL CHECK (length(trim(directive)) > 0),
+    event_snapshot_json TEXT NOT NULL,
+    requested_turn_id INTEGER NOT NULL CHECK (requested_turn_id > 0),
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (story_id) REFERENCES rpg_stories(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_rpg_session_plot_pending_requested_turn
+ON rpg_session_plot_pending_injections(session_id, requested_turn_id);
+
 CREATE TABLE rpg_session_plot_schedule_decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
@@ -1094,8 +1116,10 @@ CREATE TABLE rpg_session_plot_schedule_decisions (
     decision_status TEXT NOT NULL
         CHECK (decision_status IN ('triggered', 'deferred', 'error')),
     dispatch_mode TEXT NOT NULL CHECK (dispatch_mode IN ('forced', 'soft')),
-    scene_time_json TEXT NOT NULL,
-    scene_time_ordinal INTEGER NOT NULL CHECK (scene_time_ordinal >= 0),
+    selection_origin TEXT NOT NULL DEFAULT 'scheduler'
+        CHECK (selection_origin IN ('scheduler', 'manual')),
+    scene_time_json TEXT,
+    scene_time_ordinal INTEGER CHECK (scene_time_ordinal IS NULL OR scene_time_ordinal >= 0),
     event_snapshot_json TEXT NOT NULL,
     reason TEXT NOT NULL DEFAULT '',
     error_code TEXT NOT NULL DEFAULT '',
@@ -1104,6 +1128,16 @@ CREATE TABLE rpg_session_plot_schedule_decisions (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE,
+    CHECK (
+        (selection_origin = 'scheduler' AND scene_time_json IS NOT NULL AND scene_time_ordinal IS NOT NULL)
+        OR (
+            selection_origin = 'manual'
+            AND (
+                (scene_time_json IS NULL AND scene_time_ordinal IS NULL)
+                OR (scene_time_json IS NOT NULL AND scene_time_ordinal IS NOT NULL)
+            )
+        )
+    ),
     UNIQUE (session_id, turn_id, source_kind)
 );
 

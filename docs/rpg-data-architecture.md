@@ -198,7 +198,7 @@ RP Module 的内置定义、config schema、snapshot builder 和 runtime factory
 
 消息业务由 `SessionManager` 门面下的 `SessionHistory` / `SessionProgress` 持有：前者决定主历史与 append-only backup 的共同写入、编辑/删除/truncate/replace 对 Outcome 与 Plot ledger 的联动矩阵，后者决定 Summary/Story Memory 的候选分组、保留窗口和处理时机。`MessageDataService` 只执行调用方明确指定的消息与 processed flag 操作；修改一行消息是否应重置进度，不是数据层默认行为。
 
-Narrative Outcome 的五档规则、sample 与 code 一致性、来源合法性和 turn ledger 冲突映射由 `rpg_core.rp_modules.narrative_outcome.NarrativeOutcomeLedgerService` 持有。`NarrativeOutcomeDataService` 只检查 Session 数据归属并持久化 typed payload。Plot Management/Ledger 同样依赖自身声明的窄 Port，只捕获通用 `DataIntegrityError`，不导入具体 `PlotSchedulingDataService`。
+Narrative Outcome 的五档规则、sample 与 code 一致性、来源合法性和 turn ledger 冲突映射由 `rpg_core.rp_modules.narrative_outcome.NarrativeOutcomeLedgerService` 持有。`NarrativeOutcomeDataService` 只检查 Session 数据归属并持久化 typed payload。Plot Management/Ledger 同样依赖自身声明的窄 Port，只捕获通用 `DataIntegrityError`，不导入具体 `PlotSchedulingDataService`。OOC/GM 手动 Plot 注入的一次性快照、CAS replace/clear 和按请求 turn 的批量清理由 `PlotSchedulingDataService` 作为 typed 数据事实提供；是否允许工具、何时冻结/消费、无 SceneTime 强制注入、lane 仲裁与历史清理矩阵仍由 Core 的 turn policy、Plot hook/commit service 和 SessionHistory 决定。快照的来源 event/pool ID 是审计值而非外键，确保源定义删除后快照仍可消费；Session/Story 归属外键仍负责生命周期级联。
 
 ## Gateway 与窄依赖的标准写法
 

@@ -18,6 +18,20 @@ def _story_memory(gateway):  # noqa: ANN001, ANN202
     return StoryMemoryApplicationService(gateway.story_memory)
 
 
+def _pending_write(story_id: int, *, requested_turn_id: int = 2):
+    return models.PendingPlotInjectionWrite(
+        story_id=story_id,
+        source_event_id=901,
+        source_event_version=3,
+        source_pool_id=902,
+        source_pool_name="重置测试事件池",
+        event_title="重置测试事件",
+        directive="该快照应由重置清除。",
+        event_snapshot={"eventTitle": "重置测试事件"},
+        requested_turn_id=requested_turn_id,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _reset_gateways(tmp_path, monkeypatch):  # noqa: ANN001
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path / "workspaces"))
@@ -72,6 +86,11 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         effective_weights=models.NarrativeOutcomeWeights(),
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
     ))
+    gateway.plot_scheduling.replace_pending_injection(
+        session_id,
+        expected_version=None,
+        values=_pending_write(session.story_id),
+    )
 
     story_copy = next(
         table
@@ -130,6 +149,7 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     assert result.session_id == session_id
     assert result.messages_cleared >= 2
     assert result.narrative_outcomes_cleared == 1
+    assert result.pending_plot_injections_cleared == 1
     assert result.story_memories_cleared == 1
     assert result.story_status_tables_cleared >= 1
     assert result.story_status_tables_initialized >= 1
@@ -140,6 +160,7 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
         (models.MESSAGE_ROLE_ASSISTANT, result.first_message, 1, 1)
     ]
     assert gateway.narrative_outcomes.list_for_turns(session_id, [2]) == []
+    assert gateway.plot_scheduling.get_pending_injection(session_id) is None
     assert _story_memory(gateway).list(session_id) == []
     rebuilt = gateway.status.get_table(session_id, template_name)
     assert rebuilt.document.rows[0].value == "Story 当前状态值"
@@ -186,6 +207,8 @@ def test_reset_rolls_back_all_database_changes_when_status_rebuild_fails(
     messages_before = gateway.messages.list(session_id)
     memories_before = _story_memory(gateway).list(session_id)
     tables_before = gateway.status.list_tables(session_id)
+    pending_before = gateway.plot_scheduling.get_pending_injection(session_id)
+    assert pending_before is not None
     backup_count = gateway.backup.messages.count(session_id)
 
     def fail_reset(_session_id: str, _plan: models.SessionStatusResetPlan):  # noqa: ANN202
@@ -200,6 +223,10 @@ def test_reset_rolls_back_all_database_changes_when_status_rebuild_fails(
     assert _story_memory(gateway).list(session_id) == memories_before
     assert gateway.status.list_tables(session_id) == tables_before
     assert gateway.narrative_outcomes.get_for_turn(session_id, 2) is not None
+    assert (
+        gateway.plot_scheduling.get_pending_injection(session_id)
+        == pending_before
+    )
     assert gateway.backup.messages.count(session_id) == backup_count
 
 

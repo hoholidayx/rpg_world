@@ -355,6 +355,29 @@ def test_plot_ledger_policy_validates_lanes_and_owns_derivation_selection() -> N
                 2,
                 (replace(pool_decision, decision_status="invalid-status"),),
             )
+        manual_decision = replace(
+            pool_decision,
+            selection_origin=models.PLOT_SELECTION_ORIGIN_MANUAL,
+            scene_time=None,
+        )
+        created_manual = ledger.record(
+            "s_forest001",
+            2,
+            (manual_decision,),
+        )
+        assert created_manual[0].selection_origin == "manual"
+        assert created_manual[0].scene_time is None
+        with pytest.raises(ValueError, match="forced triggered pool"):
+            ledger.record(
+                "s_forest001",
+                3,
+                (
+                    replace(
+                        manual_decision,
+                        dispatch_mode=models.PLOT_DISPATCH_SOFT,
+                    ),
+                ),
+            )
         with pytest.raises(PlotScheduleLedgerConflictError):
             ledger.record("s_forest001", 1, (pool_decision,))
 

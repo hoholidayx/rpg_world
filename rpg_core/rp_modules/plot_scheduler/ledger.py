@@ -86,11 +86,40 @@ def validate_plot_decision_batch(
             raise ValueError(
                 f"unsupported plot dispatch mode: {decision.dispatch_mode}"
             )
+        if decision.selection_origin not in data_models.PLOT_SELECTION_ORIGINS:
+            raise ValueError(
+                f"unsupported plot selection origin: {decision.selection_origin}"
+            )
         _positive(decision.source_id, "source_id")
         _positive(decision.event_id, "event_id")
         _positive(decision.container_id, "container_id")
-        if not isinstance(decision.scene_time, SceneTime):
-            raise ValueError("plot decision scene_time must be a SceneTime")
+        if (
+            decision.selection_origin
+            == data_models.PLOT_SELECTION_ORIGIN_SCHEDULER
+            and not isinstance(decision.scene_time, SceneTime)
+        ):
+            raise ValueError(
+                "scheduler plot decision scene_time must be a SceneTime"
+            )
+        if (
+            decision.scene_time is not None
+            and not isinstance(decision.scene_time, SceneTime)
+        ):
+            raise ValueError("plot decision scene_time must be a SceneTime or null")
+        if (
+            decision.selection_origin
+            == data_models.PLOT_SELECTION_ORIGIN_MANUAL
+            and (
+                decision.source_kind != data_models.PLOT_SOURCE_POOL
+                or decision.decision_status
+                != data_models.PLOT_DECISION_TRIGGERED
+                or decision.dispatch_mode
+                != data_models.PLOT_DISPATCH_FORCED
+            )
+        ):
+            raise ValueError(
+                "manual plot decisions must be forced triggered pool decisions"
+            )
         if not isinstance(decision.event_snapshot, Mapping):
             raise ValueError("plot decision event_snapshot must be a mapping")
     return staged

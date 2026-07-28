@@ -11,6 +11,10 @@ from rpg_core.agent.turn.transaction.message_scratch import MessageScratch
 from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentChange, StatusDocumentScratch
 from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
 from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
+from rpg_core.rp_modules.plot_scheduler.manual_injection import (
+    PlotPendingInjectionCommitService,
+    PlotPendingInjectionTurnState,
+)
 from rpg_core.session import InvalidTurnMetadataError
 
 if TYPE_CHECKING:
@@ -37,8 +41,10 @@ class TurnCommitPlan:
     transaction_data: TurnCommitTransactionPort | None = None
     narrative_outcome_ledger: NarrativeOutcomeLedgerService | None = None
     plot_schedule_ledger: PlotScheduleLedgerService | None = None
+    plot_pending_injection_commit: PlotPendingInjectionCommitService | None = None
     narrative_outcome: "StagedNarrativeOutcome | None" = None
     plot_schedule_decisions: tuple["StagedPlotScheduleDecision", ...] = ()
+    plot_pending_injection: PlotPendingInjectionTurnState | None = None
 
     def commit(self) -> list[StatusDocumentChange]:
         snapshot = self.session.history
@@ -50,6 +56,7 @@ class TurnCommitPlan:
                     self._append_messages()
                     self._commit_narrative_outcome()
                     self._commit_plot_schedule()
+                    self._commit_plot_pending_injection()
                     changes = self.status_scratch.commit(self.status_mgr)
             else:
                 # Non-persistent sessions are test/in-memory mode. They restore
@@ -101,6 +108,17 @@ class TurnCommitPlan:
             self.session.session_id,
             self.message_scratch.turn_id,
             self.plot_schedule_decisions,
+        )
+
+    def _commit_plot_pending_injection(self) -> None:
+        state = self.plot_pending_injection
+        if state is None or (not state.dirty and not state.consume_base):
+            return
+        if self.plot_pending_injection_commit is None:
+            raise RuntimeError("Plot pending injection commit is not configured")
+        self.plot_pending_injection_commit.commit(
+            self.session.session_id,
+            state,
         )
 
     def _staged_turn_metadata(self) -> list[dict[str, object]]:

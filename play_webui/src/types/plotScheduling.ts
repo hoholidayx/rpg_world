@@ -102,8 +102,9 @@ export type PlotScheduleDecision = {
   containerId: number
   decisionStatus: 'triggered' | 'deferred' | 'error'
   dispatchMode: PlotDispatchMode
-  sceneTime: SceneTimeValue
-  sceneTimeOrdinal: number
+  selectionOrigin: 'scheduler' | 'manual'
+  sceneTime: SceneTimeValue | null
+  sceneTimeOrdinal: number | null
   eventSnapshot: Record<string, unknown>
   reason: string
   errorCode: string

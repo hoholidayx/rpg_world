@@ -6,6 +6,7 @@ import pytest
 
 from commons.scene_time import SceneTime
 from rpg_data import models
+from rpg_data.errors import DataConditionalWriteError
 from rpg_data.services import PlotScheduleDataIntegrityError
 from rpg_data.services.gateway import DataServiceGateway
 
@@ -155,6 +156,135 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
         assert service.delete_event(first.id) == 1
         assert service.delete_event(second.id) == 1
         assert service.delete_pool(pool.id) == 1
+    finally:
+        gateway.close()
+
+
+def test_pending_plot_injection_snapshot_uses_cas_and_survives_event_delete() -> None:
+    gateway = DataServiceGateway(":memory:")
+    try:
+        gateway.initialize()
+        service = gateway.plot_scheduling
+        story = gateway.catalog.create_story(
+            "demo_workspace",
+            title="手动注入快照",
+        )
+        assert story is not None
+        session = gateway.catalog.create_session(
+            "demo_workspace",
+            story.id,
+            session_id="s_pending_plot",
+        )
+        assert session is not None
+        pool = service.create_pool(
+            story_id=story.id,
+            name="临时池",
+            description="",
+            selection_mode=models.PLOT_POOL_RANDOM,
+            priority=0,
+            enabled=True,
+        )
+        event = service.create_event(
+            story_id=story.id,
+            pool_id=pool.id,
+            title="原标题",
+            directive="原指令。",
+            description="",
+            suitability_hint="",
+            dispatch_mode=models.PLOT_DISPATCH_SOFT,
+            scheduled_time=None,
+            deadline_time=None,
+            position=0,
+            enabled=True,
+            allow_repeat=False,
+            repeat_cooldown_minutes=0,
+        )
+        write = models.PendingPlotInjectionWrite(
+            story_id=story.id,
+            source_event_id=event.id,
+            source_event_version=event.version,
+            source_pool_id=pool.id,
+            source_pool_name=pool.name,
+            event_title="临时标题",
+            directive="临时指令。",
+            event_snapshot={"eventTitle": "临时标题", "directive": "临时指令。"},
+            requested_turn_id=3,
+        )
+
+        created = service.replace_pending_injection(
+            session.id,
+            expected_version=None,
+            values=write,
+        )
+        assert created.version == 1
+        assert service.get_pending_injection(session.id) == created
+        with pytest.raises(DataConditionalWriteError):
+            service.replace_pending_injection(
+                session.id,
+                expected_version=None,
+                values=write,
+            )
+
+        updated = service.replace_pending_injection(
+            session.id,
+            expected_version=created.version,
+            values=replace(write, event_title="第二标题"),
+        )
+        assert updated.version == 2
+        assert updated.event_title == "第二标题"
+        with pytest.raises(DataConditionalWriteError):
+            service.clear_pending_injection(
+                session.id,
+                expected_version=created.version,
+            )
+
+        assert service.delete_event(event.id) == 1
+        assert service.get_pending_injection(session.id) == updated
+        manual = service.append_decisions(
+            session.id,
+            4,
+            (
+                models.StagedPlotScheduleDecision(
+                    source_kind=models.PLOT_SOURCE_POOL,
+                    source_id=event.id,
+                    event_id=event.id,
+                    container_id=pool.id,
+                    decision_status=models.PLOT_DECISION_TRIGGERED,
+                    dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                    scene_time=None,
+                    event_snapshot=dict(updated.event_snapshot),
+                    selection_origin=models.PLOT_SELECTION_ORIGIN_MANUAL,
+                ),
+            ),
+        )[0]
+        assert manual.selection_origin == models.PLOT_SELECTION_ORIGIN_MANUAL
+        assert manual.scene_time is None
+        assert manual.scene_time_ordinal is None
+        assert service.clear_pending_injection(
+            session.id,
+            expected_version=updated.version,
+        ) == 1
+        assert service.get_pending_injection(session.id) is None
+
+        recreated = service.replace_pending_injection(
+            session.id,
+            expected_version=None,
+            values=replace(write, event_title="重建后的快照"),
+        )
+        assert recreated.version == updated.version + 2
+        assert recreated.event_title == "重建后的快照"
+        with pytest.raises(DataConditionalWriteError):
+            service.clear_pending_injection(
+                session.id,
+                expected_version=created.version,
+            )
+        with pytest.raises(DataConditionalWriteError):
+            service.replace_pending_injection(
+                session.id,
+                expected_version=created.version,
+                values=replace(write, event_title="旧版本不得覆盖"),
+            )
+        assert service.get_pending_injection(session.id) == recreated
     finally:
         gateway.close()
 

@@ -21,7 +21,7 @@ class PlotScheduleInjection:
     event_title: str
     directive: str
     dispatch_mode: str
-    scene_time: SceneTime
+    scene_time: SceneTime | None
     reason: str = ""
 
 
@@ -53,6 +53,7 @@ class PlotScheduleSnapshot:
     story: data_models.StoryPlotSchedule
     overrides: data_models.SessionPlotOverrides
     decisions: tuple[data_models.SessionPlotScheduleDecision, ...]
+    pending_injection: data_models.SessionPlotPendingInjection | None = None
     judge_history_turns: int = 5
     soft_retry_intervening_turns: int = 1
 
@@ -65,20 +66,26 @@ class PlotScheduleSnapshot:
             story=data_models.StoryPlotSchedule(story_id=story_id),
             overrides=data_models.SessionPlotOverrides(session_id=session_id),
             decisions=(),
+            pending_injection=None,
         )
 
     @property
     def context_gate_reserve_text(self) -> str:
+        candidate_directives = [event.directive for event in self.story.events]
+        candidate_titles = [event.title for event in self.story.events]
+        if self.pending_injection is not None:
+            candidate_directives.append(self.pending_injection.directive)
+            candidate_titles.append(self.pending_injection.event_title)
         directives = sorted(
-            (event.directive for event in self.story.events),
+            candidate_directives,
             key=_json_encoded_size,
             reverse=True,
         )
         if not directives:
             return ""
-        slot_count = min(2, len(self.story.events))
+        slot_count = min(2, len(candidate_directives))
         event_titles = sorted(
-            (event.title for event in self.story.events),
+            candidate_titles,
             key=_json_encoded_size,
             reverse=True,
         )

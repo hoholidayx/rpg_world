@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +17,7 @@ from rpg_core.agent.turn.models import (
 )
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.plot_scheduler import (
+    PlotPendingInjectionTurnState,
     PlotScheduleSnapshot,
     PlotSuitabilityDecision,
 )
@@ -225,3 +227,121 @@ async def test_expired_plot_candidate_never_calls_judge_or_stages_a_decision() -
     assert context.calls == []
     assert scratch.plot_schedule_injections == []
     assert scratch.plot_schedule_decisions == []
+
+
+@pytest.mark.asyncio
+async def test_manual_pending_injection_bypasses_scene_and_uses_frozen_snapshot() -> None:
+    pending = models.SessionPlotPendingInjection(
+        session_id="s1",
+        story_id=1,
+        source_event_id=999,
+        source_event_version=7,
+        source_pool_id=88,
+        source_pool_name="已删除池",
+        event_title="临时标题",
+        directive="临时强制指令。",
+        event_snapshot={
+            "originalEventTitle": "原标题",
+            "originalDirective": "原指令。",
+        },
+        requested_turn_id=1,
+        version=3,
+    )
+    plan = _plan()
+    plan = replace(
+        plan,
+        plot_schedule=replace(
+            plan.plot_schedule,
+            pending_injection=pending,
+        ),
+    )
+    scratch = _scratch()
+    scratch.scene_tracker = SimpleNamespace(
+        get_scene_time=lambda: None,
+        scene_time_error="没有 Scene",
+    )
+    scratch.plot_pending_injection = PlotPendingInjectionTurnState(base=pending)
+    judge = _Judge(PlotSuitabilityDecision(True, "不应调用"))
+    hook = PlotSchedulingPreflightHook(
+        context_service=_Context(),
+        session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
+        judge=judge,
+    )
+
+    await hook.run(
+        plan=plan,
+        turn_scratch=scratch,
+        turn_stats=TurnStats(),
+    )
+
+    assert judge.calls == 0
+    assert len(scratch.plot_schedule_injections) == 1
+    injection = scratch.plot_schedule_injections[0]
+    assert injection.event_id == 999
+    assert injection.event_title == "临时标题"
+    assert injection.directive == "临时强制指令。"
+    assert injection.scene_time is None
+    decision = scratch.plot_schedule_decisions[0]
+    assert decision.selection_origin == models.PLOT_SELECTION_ORIGIN_MANUAL
+    assert decision.scene_time is None
+    assert decision.event_snapshot["eventTitle"] == "临时标题"
+    assert scratch.plot_pending_injection.consume_base is True
+
+
+@pytest.mark.asyncio
+async def test_manual_pending_replaces_pool_lane_and_ooc_does_not_consume() -> None:
+    pending = models.SessionPlotPendingInjection(
+        session_id="s1",
+        story_id=1,
+        source_event_id=10,
+        source_event_version=1,
+        source_pool_id=20,
+        source_pool_name="主池",
+        event_title="手动标题",
+        directive="手动指令。",
+        event_snapshot={},
+        requested_turn_id=1,
+    )
+    plan = _plan(models.PLOT_DISPATCH_SOFT)
+    plan = replace(
+        plan,
+        plot_schedule=replace(plan.plot_schedule, pending_injection=pending),
+    )
+    scratch = _scratch()
+    scratch.plot_pending_injection = PlotPendingInjectionTurnState(base=pending)
+    judge = _Judge(PlotSuitabilityDecision(True, "不应调用自动池 Judge"))
+    hook = PlotSchedulingPreflightHook(
+        context_service=_Context(),
+        session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
+        judge=judge,
+    )
+
+    await hook.run(
+        plan=plan,
+        turn_scratch=scratch,
+        turn_stats=TurnStats(),
+    )
+    assert judge.calls == 0
+    assert [item.event_title for item in scratch.plot_schedule_injections] == [
+        "手动标题"
+    ]
+
+    ooc_plan = replace(
+        plan,
+        execution=replace(
+            plan.execution,
+            request=TurnRequest.create("场外继续", mode=TurnMode.OOC),
+            policy=TurnExecutionPolicy.for_mode(TurnMode.OOC),
+        ),
+    )
+    ooc_scratch = _scratch()
+    ooc_scratch.plot_pending_injection = PlotPendingInjectionTurnState(
+        base=pending
+    )
+    await hook.run(
+        plan=ooc_plan,
+        turn_scratch=ooc_scratch,
+        turn_stats=TurnStats(),
+    )
+    assert ooc_scratch.plot_schedule_injections == []
+    assert ooc_scratch.plot_pending_injection.consume_base is False

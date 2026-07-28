@@ -26,6 +26,10 @@ from rpg_core.rp_modules.plot_scheduler.management import (
     PlotScheduleManagementDataPort,
     PlotScheduleManagementService,
 )
+from rpg_core.rp_modules.plot_scheduler.manual_injection import (
+    PlotPendingInjectionCommitService,
+    PlotPendingInjectionTurnState,
+)
 from rpg_core.rp_modules.plot_scheduler.models import (
     PlotScheduleCandidate,
     PlotScheduleInjection,
@@ -57,6 +61,8 @@ __all__ = [
     "PLOT_STORY_LINE_POOL",
     "PlotDefinitionInUseError",
     "PlotPatchUnset",
+    "PlotPendingInjectionCommitService",
+    "PlotPendingInjectionTurnState",
     "PlotScheduleCandidate",
     "PlotScheduleConflictError",
     "PlotScheduleDerivationCopyPolicy",

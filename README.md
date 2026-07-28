@@ -463,6 +463,7 @@ RP Modules 采用上下文分层策略：
 - 每个事件归属一个池，池按显式 priority 仲裁，池内使用 `random`（默认）或 `sequential`。无首次时间的事件立即可候选；有时间时只有达到或超过该时间才首次候选。
 - 大纲触发状态与池触发状态相互独立。大纲节点永不重复；池事件可选择重复，重复时必须配置正数世界内分钟冷却；同一个事件不会在同一 turn 被两个 lane 重复注入。池 lane 以稳定 `event_id` 记录已触发、延期与冷却；后续把事件移到其它池不会重置这些状态。
 - Session 可以分别禁用池事件或大纲节点。事件禁用只影响池调度，节点禁用只影响该大纲位置，不修改 Story 定义。
+- Plot Scheduler 有效时，OOC 与 GM 主 Agent 可用 `plot_sandbox_read` 读取当前沙盘，用 `plot_event_mark_next(event_id, title?, directive?)` 标记下一次世界推进 turn；`event_id=null` 直接清空。临时 title/directive 只冻结到一次性快照，不修改原事件；省略时冻结原内容。快照不随来源事件编辑或删除改变，显式手动注入忽略启用、时间窗、重复与冷却等自动候选规则，且 OOC 本轮本身不会消费或推进世界。
 
 Scene 时间统一使用 `第 Y 年 M 月 D 日 H 时 [M 分]`，与当前 `status_kind="scene"` 状态表的“时间”字段严格对应。内部采用固定 12 月 × 31 日虚拟历法换算世界内分钟；缺失或格式错误时，本轮调度记录 warning 并安全跳过，不使用系统时钟或默认时间。
 
@@ -479,9 +480,9 @@ Context gate
   → post-commit hooks
 ```
 
-强制候选达到时间后直接暂存为 `triggered` 并进入本轮 `RP_MODULES / 本轮剧情调度`。软候选使用独立 `agent.plot_scheduler` LLM 业务路由判断当前是否适合开始；输入包含完整 fixed layer（Story Prompt、世界书、角色卡等）、当前 Scene、全部普通状态表、最近默认 5 个完整原始可推进世界 turn 和当前玩家输入，不读取 Summary、Story Memory、Persistent Memory 或 Recall 投影。Judge 理由有硬长度上限；主 Context 门禁按当前定义中最长两条 directive、事件/容器名称和有界元数据保守预留。适合时注入，不适合记录 `deferred`，Provider/结构化响应失败记录 `error`；后二者都不会中断主 turn，并至少跳过一个完整已提交可推进世界 turn 后才重试。同轮若大纲已接受，池事件判断会同时看到该指令并检查兼容性。
+强制候选达到时间后直接暂存为 `triggered` 并进入当前 user message 的最终运行时 Plot suffix。软候选使用独立 `agent.plot_scheduler` LLM 业务路由判断当前是否适合开始；输入包含完整 fixed layer（Story Prompt、世界书、角色卡等）、当前 Scene、全部普通状态表、最近默认 5 个完整原始可推进世界 turn 和当前玩家输入，不读取 Summary、Story Memory、Persistent Memory 或 Recall 投影。Judge 理由有硬长度上限；主 Context 门禁按当前定义中最长两条 directive、事件/容器名称和有界元数据保守预留。适合时注入，不适合记录 `deferred`，Provider/结构化响应失败记录 `error`；后二者都不会中断主 turn，并至少跳过一个完整已提交可推进世界 turn 后才重试。同轮若大纲已接受，池事件判断会同时看到该指令并检查兼容性。
 
-每个 turn 最多原子记录一条 `outline` 和一条 `pool` 决策。主 runner 取消、Provider 失败、流缺失 DONE 或 commit 失败时，判断与注入随 scratch 一起丢弃；主历史编辑、删除、截断和重试会同步删除对应决策。`/clear` 清空判断/触发账本但保留 Session 禁用覆盖；Session 派生复制分支点以前的 `triggered` 记录和全部禁用覆盖，不复制 `deferred / error`。
+每个 turn 最多原子记录一条 `outline` 和一条 `pool` 决策。手动快照在下一次 neutral/IC/GM 回合优先占用 pool lane，即使 SceneTime 缺失也强制注入；只有目标回合成功提交才消费，账本以 `selectionOrigin=manual` 区分且允许 SceneTime 为空。主 runner 取消、Provider 失败、流缺失 DONE 或 commit 失败时，判断、注入与沙盘 mark/clear 都随 scratch 一起丢弃；主历史编辑、删除、截断和重试会同步删除对应决策，并在标记请求 turn 受影响时清除待注入快照。`/clear` 清空判断/触发账本和待注入快照但保留 Session 禁用覆盖；Session 派生复制分支点以前的 `triggered` 记录和全部禁用覆盖，不复制 `deferred / error` 或待注入快照。
 
 Play WebUI 左侧“剧情调度”页面提供三类大面板：大纲时间线、事件池定义、会话运行态。运行态只读取 Scene 时间、禁用覆盖和已提交决策，不触发 LLM、不轮询，也不向 SessionRoom 增加 HUD。决策历史以 `id DESC` + `beforeId` 稳定分页，单页最多 200 条；同一 turn 的 outline/pool 两条记录不会因分页丢失。管理接口集中在：
 
