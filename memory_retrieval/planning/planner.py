@@ -10,6 +10,8 @@ from functools import lru_cache
 from loguru import logger
 
 from commons.types import JsonObject, JsonValue
+from llm_client.client import LLMProviderContractError
+from llm_client.contracts import require_llm_response
 from llm_client.types import LLMProvider
 from memory_retrieval.bigram_tokenizer import tokenize_bigram
 from memory_retrieval.keyword_tokenizer import is_keyword_stopword
@@ -100,11 +102,14 @@ class LlamaQueryPlanner(BaseQueryPlanner):
         if not normalized:
             return make_empty_plan(query, planner_source="llama")
         prompt = _build_prompt(normalized)
-        response = await self._provider.chat(
-            [
-                {"role": "system", "content": "You are a memory query planner."},
-                {"role": "user", "content": prompt},
-            ],
+        response = require_llm_response(
+            await self._provider.chat(
+                [
+                    {"role": "system", "content": "You are a memory query planner."},
+                    {"role": "user", "content": prompt},
+                ],
+            ),
+            "memory_retrieval.query_planner",
         )
         data = _parse_json_object(response.content)
         return _plan_from_mapping(
@@ -131,6 +136,8 @@ class FallbackQueryPlanner(BaseQueryPlanner):
     async def plan(self, query: str) -> QueryPlan:
         try:
             return await self._primary.plan(query)
+        except LLMProviderContractError:
+            raise
         except Exception as exc:
             logger.warning("[QueryPlanner] primary planner failed, fallback: {}", exc)
             return await self._fallback.plan(query)
@@ -138,6 +145,8 @@ class FallbackQueryPlanner(BaseQueryPlanner):
     async def plan_context(self, context: RetrievalQuery) -> QueryPlan:
         try:
             return await self._primary.plan_context(context)
+        except LLMProviderContractError:
+            raise
         except Exception as exc:
             logger.warning("[QueryPlanner] primary contextual planner failed, fallback: {}", exc)
             return await self._fallback.plan_context(context)

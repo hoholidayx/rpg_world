@@ -6,6 +6,7 @@ import base64
 from typing import Protocol
 
 from llm_client.client import LLMServiceClientError, LLMServiceRemoteError
+from llm_client.contracts import require_llm_response
 from llm_client.keys import MEDIA_IMAGE_METADATA_BIZ_KEY
 from llm_client.manager import LLMClientManager
 from llm_client.types import LLMProvider
@@ -29,25 +30,28 @@ class LLMImageMetadataAnalyzer:
         try:
             provider = self._provider or await self._resolve_provider()
             encoded = base64.b64encode(image.data).decode("ascii")
-            result = await provider.chat(
-                [
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "识别这张图片并输出可编辑的媒体库元数据。",
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{image.mime_type};base64,{encoded}",
+            result = require_llm_response(
+                await provider.chat(
+                    [
+                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "识别这张图片并输出可编辑的媒体库元数据。",
                                 },
-                            },
-                        ],
-                    },
-                ]
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{image.mime_type};base64,{encoded}",
+                                    },
+                                },
+                            ],
+                        },
+                    ]
+                ),
+                "rpg_media.image_metadata",
             )
             payload = parse_json_object(result.content, label="image metadata response")
             return MediaImageMetadata.from_mapping(payload)

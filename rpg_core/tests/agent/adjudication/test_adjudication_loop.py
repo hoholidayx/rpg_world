@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import rpg_core.agent.adjudication.loop as loop_module
+from llm_client.client import LLMProviderContractError
 from llm_client.types import LLMResponse
 from rpg_core.agent.adjudication import run_adjudication_tool_loop
 from rpg_core.agent.telemetry import TurnStats
@@ -13,6 +14,7 @@ from rpg_core.agent.tools.history import HistoryToolSet
 from rpg_core.agent.tools.lookup import LookupToolSet
 from rpg_core.agent.tools.summary import SummaryToolSet
 from rpg_core.context.models import Message, Role
+from tests.support.scripted_llm import InvalidChatResponseProvider
 
 
 _TERMINAL_SCHEMA = {
@@ -113,6 +115,23 @@ class _Provider:
     @staticmethod
     def get_default_model() -> str:
         return "adjudication-test"
+
+
+@pytest.mark.asyncio
+async def test_adjudication_loop_rejects_invalid_provider_response_type() -> None:
+    with pytest.raises(LLMProviderContractError) as raised:
+        await run_adjudication_tool_loop(
+            provider=InvalidChatResponseProvider(
+                SimpleNamespace(content="secret response must not leak")
+            ),
+            messages=[Message(Role.USER, "decide")],
+            terminal_schemas=[_TERMINAL_SCHEMA],
+            source="status_router",
+        )
+
+    assert "rpg_core.adjudication:status_router" in str(raised.value)
+    assert "types.SimpleNamespace" in str(raised.value)
+    assert "secret response must not leak" not in str(raised.value)
 
 
 @pytest.fixture(autouse=True)

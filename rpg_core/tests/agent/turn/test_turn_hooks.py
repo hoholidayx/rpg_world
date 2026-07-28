@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from llm_client.client import LLMProviderContractError
 from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.sub_agents import (
@@ -160,6 +161,28 @@ async def test_memory_recall_hook_warns_and_continues_on_failure() -> None:
         lambda: resources,
         SessionManager(history_enabled=False),
     ).run("hello")
+
+
+async def test_memory_recall_hook_propagates_provider_contract_error() -> None:
+    class _Memory:
+        @staticmethod
+        async def recall(_input: str) -> None:
+            raise LLMProviderContractError("contract failure")
+
+    resources = AgentContextResources(
+        builder=SimpleNamespace(),
+        character_manager=None,
+        lorebook_manager=None,
+        status_manager=None,
+        scene_tracker=None,
+        memory_manager=_Memory(),
+    )
+
+    with pytest.raises(LLMProviderContractError):
+        await MemoryRecallHook(
+            lambda: resources,
+            SessionManager(history_enabled=False),
+        ).run("hello")
 
 
 @pytest.mark.asyncio

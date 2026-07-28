@@ -7,6 +7,7 @@ import time
 
 from loguru import logger
 
+from llm_client.client import LLMProviderContractError
 from llm_client.types import DocumentScoreProvider
 from memory_retrieval.candidate import MemoryCandidate
 from memory_retrieval.rerank.base import MemoryReranker
@@ -78,6 +79,8 @@ class PointwiseMemoryReranker(MemoryReranker):
             provider_started_at = time.monotonic()
             try:
                 score_results = await self._score_provider.score(query, pending)
+            except LLMProviderContractError:
+                raise
             except Exception as exc:
                 preview = getattr(exc, "preview", "")
                 logger.warning(

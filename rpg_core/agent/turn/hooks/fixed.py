@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from llm_client.client import LLMProviderContractError
 from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.sub_agents.status.models import (
     OutcomeDecision,
@@ -197,6 +198,8 @@ class MemoryRecallHook:
                     scene_location=str(scene.get("location", "")),
                 )
             )
+        except LLMProviderContractError:
+            raise
         except Exception as exc:
             logger.opt(exception=exc).warning(_TAG + " memory recall failed")
 

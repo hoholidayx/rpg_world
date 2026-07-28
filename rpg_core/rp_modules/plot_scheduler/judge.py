@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import TypeAlias
 
 from llm_client.keys import AGENT_PLOT_SCHEDULER_BIZ_KEY
-from llm_client.types import LLMProvider, LLMResponse
+from llm_client.types import LLMProvider
 from rpg_core.agent.adjudication import run_adjudication_tool_loop
 from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.tools.lookup import LookupToolSet
@@ -84,16 +84,7 @@ class PlotScheduleJudge:
             max_lookup_tool_rounds=self._max_lookup_tool_rounds,
             turn_stats=turn_stats,
         )
-        result = loop_result.response
-        if isinstance(result, LLMResponse):
-            tool_calls: object = result.tool_calls
-        elif isinstance(result, dict):
-            tool_calls = result.get("tool_calls")
-        else:
-            raise PlotScheduleJudgeResponseError(
-                "plot scheduler provider returned an unsupported response"
-            )
-        return self._parse_decision(tool_calls)
+        return self._parse_decision(loop_result.response.tool_calls)
 
     async def _provider(self) -> LLMProvider:
         if self._provider_factory is not None:

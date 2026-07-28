@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import rpg_core.agent.sub_agents.status.agent as status_module
+from llm_client.client import LLMProviderContractError
 from llm_client.types import LLMResponse, LLMUsage
 from rpg_data.model.status import (
     STATUS_KIND_NORMAL,
@@ -28,6 +29,7 @@ from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SceneTracker
 from rpg_core.status.tools import StatusTableSetValuesTool, StatusTableToolProvider, StatusWritePolicy
+from tests.support.scripted_llm import InvalidChatResponseProvider, response
 
 
 async def _async_value(value):  # noqa: ANN001, ANN201
@@ -388,15 +390,14 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
             if names == {NARRATIVE_OUTCOME_TOOL_NAME}:
                 self.stages.append("outcome")
                 assert "COMBINED_TABLE_SENTINEL" in user_content
-                return {"tool_calls": []}
+                return response()
             if names == {"select_status_targets"}:
                 self.stages.append("route")
                 assert "COMBINED_TABLE_SENTINEL" in user_content
                 assert "表 description 中的共同规则始终适用" in str(
                     messages[0]["content"]
                 )
-                return {
-                    "tool_calls": [{
+                return response(tool_calls=[{
                         "function": {
                             "name": "select_status_targets",
                             "arguments": json.dumps({
@@ -408,22 +409,21 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
                                 }],
                             }, ensure_ascii=False),
                         },
-                    }],
-                }
+                    }])
             if names == {"scene_attr"}:
                 self.stages.append("scene")
                 self._record_update_request(messages)
                 assert "SCENE_SENTINEL" in user_content
                 assert "COMBINED_TABLE_SENTINEL" not in user_content
                 assert "SLOW_SENTINEL" not in user_content
-                return {"tool_calls": []}
+                return response()
             if names == {"status_table_set_values"}:
                 self.stages.append("table")
                 self._record_update_request(messages)
                 assert "RT_SENTINEL" in user_content
                 assert "SLOW_SENTINEL" not in user_content
                 assert "SCENE_SENTINEL" not in user_content
-                return {"tool_calls": []}
+                return response()
             raise AssertionError(f"unexpected schemas: {names}")
 
         def _record_update_request(self, messages) -> None:  # noqa: ANN001
@@ -554,8 +554,7 @@ async def test_each_status_stage_gets_an_independent_history_lookup_budget() -> 
                 assert len(terminal_names) == 1
                 self.initial_terminal_names.append(terminal_names)
                 terminal_name = next(iter(terminal_names))
-                return {
-                    "tool_calls": [{
+                return response(tool_calls=[{
                         "id": f"history_{terminal_name}",
                         "type": "function",
                         "function": {
@@ -564,14 +563,11 @@ async def test_each_status_stage_gets_an_independent_history_lookup_budget() -> 
                                 f'{{"terms":["{terminal_name}"],"limit":1}}'
                             ),
                         },
-                    }],
-                    "finish_reason": "tool_calls",
-                }
+                    }])
 
             self.terminal_only_names.append(names)
             if names == {"select_status_targets"}:
-                return {
-                    "tool_calls": [{
+                return response(tool_calls=[{
                         "id": "route_terminal",
                         "type": "function",
                         "function": {
@@ -588,10 +584,8 @@ async def test_each_status_stage_gets_an_independent_history_lookup_budget() -> 
                                 ensure_ascii=False,
                             ),
                         },
-                    }],
-                    "finish_reason": "tool_calls",
-                }
-            return {"tool_calls": [], "finish_reason": "stop"}
+                    }])
+            return response()
 
         @staticmethod
         def get_default_model() -> str:
@@ -661,8 +655,7 @@ async def test_fixed_preflight_keeps_other_targets_when_provider_fails() -> None
             names = {schema["function"]["name"] for schema in tools}
             if names == {"select_status_targets"}:
                 self.stages.append("route")
-                return {
-                    "tool_calls": [{
+                return response(tool_calls=[{
                         "function": {
                             "name": "select_status_targets",
                             "arguments": json.dumps({
@@ -681,8 +674,7 @@ async def test_fixed_preflight_keeps_other_targets_when_provider_fails() -> None
                                 ],
                             }, ensure_ascii=False),
                         },
-                    }],
-                }
+                    }])
 
             selected = str(messages[-1]["content"])
             if "生命" in selected:
@@ -694,8 +686,7 @@ async def test_fixed_preflight_keeps_other_targets_when_provider_fails() -> None
             else:
                 self.stages.append("table:4")
                 table_id, key, value = 4, "线索", "1"
-            return {
-                "tool_calls": [{
+            return response(tool_calls=[{
                     "function": {
                         "name": "status_table_set_values",
                         "arguments": json.dumps({
@@ -703,8 +694,7 @@ async def test_fixed_preflight_keeps_other_targets_when_provider_fails() -> None
                             "updates": [{"key": key, "value": value}],
                         }, ensure_ascii=False),
                     },
-                }],
-            }
+                }])
 
     provider = Provider()
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
@@ -748,8 +738,7 @@ async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
         async def chat(self, messages, *, tools):  # noqa: ANN001
             names = {schema["function"]["name"] for schema in tools}
             if names == {"select_status_targets"}:
-                return {
-                    "tool_calls": [{
+                return response(tool_calls=[{
                         "function": {
                             "name": "select_status_targets",
                             "arguments": json.dumps({
@@ -768,8 +757,7 @@ async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
                                 ],
                             }, ensure_ascii=False),
                         },
-                    }],
-                }
+                    }])
 
             selected = str(messages[-1]["content"])
             if "生命" in selected:
@@ -778,8 +766,7 @@ async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
                 calls = [(3, "法力", "4"), (3, "不存在", "x")]
             else:
                 calls = [(4, "线索", "1")]
-            return {
-                "tool_calls": [
+            return response(tool_calls=[
                     {
                         "function": {
                             "name": "status_table_set_values",
@@ -790,8 +777,7 @@ async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
                         },
                     }
                     for table_id, key, value in calls
-                ],
-            }
+                ])
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
@@ -839,8 +825,7 @@ async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> N
         async def chat(self, messages, *, tools):  # noqa: ANN001
             names = {schema["function"]["name"] for schema in tools}
             if names == {"select_status_targets"}:
-                return {
-                    "tool_calls": [{
+                return response(tool_calls=[{
                         "function": {
                             "name": "select_status_targets",
                             "arguments": json.dumps({
@@ -852,11 +837,9 @@ async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> N
                                 }],
                             }, ensure_ascii=False),
                         },
-                    }],
-                }
+                    }])
             if "scene_time" in names:
-                return {
-                    "tool_calls": [
+                return response(tool_calls=[
                         {
                             "function": {
                                 "name": "scene_time",
@@ -872,10 +855,8 @@ async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> N
                                 }, ensure_ascii=False),
                             },
                         },
-                    ],
-                }
-            return {
-                "tool_calls": [{
+                    ])
+            return response(tool_calls=[{
                     "function": {
                         "name": "status_table_set_values",
                         "arguments": json.dumps({
@@ -883,8 +864,7 @@ async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> N
                             "updates": [{"key": "生命", "value": "8"}],
                         }, ensure_ascii=False),
                     },
-                }],
-            }
+                }])
 
     def create_checkpoint() -> object:
         return scratch.create_checkpoint(), scene_tracker.get_time_state()
@@ -977,14 +957,12 @@ async def test_fixed_preflight_stops_after_staging_outcome() -> None:
             assert [schema["function"]["name"] for schema in tools] == [
                 NARRATIVE_OUTCOME_TOOL_NAME
             ]
-            return {
-                "tool_calls": [{
+            return response(tool_calls=[{
                     "function": {
                         "name": NARRATIVE_OUTCOME_TOOL_NAME,
                         "arguments": json.dumps({"reason": "能否脱离伏击"}),
                     },
-                }],
-            }
+                }])
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
@@ -1214,14 +1192,12 @@ async def test_status_route_cannot_select_scene_without_scene_tools() -> None:
             ]
             scene_schema = tools[0]["function"]["parameters"]["properties"]["scene"]
             assert scene_schema["const"] is False
-            return {
-                "tool_calls": [{
+            return response(tool_calls=[{
                     "function": {
                         "name": "select_status_targets",
                         "arguments": json.dumps({"scene": True, "tables": []}),
                     },
-                }],
-            }
+                }])
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
@@ -1243,6 +1219,40 @@ async def test_status_route_cannot_select_scene_without_scene_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_status_preflight_rejects_invalid_provider_response_type() -> None:
+    manager = FakeRuntimeStatusManager()
+    scratch, runtime = _scratch_runtime(manager)
+    baseline = manager.documents[1]
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([StatusTableSetValuesTool(runtime)])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent.set_mutation_boundary(
+        scratch.create_checkpoint,
+        scratch.restore_checkpoint,
+    )
+    provider = InvalidChatResponseProvider(
+        {"tool_calls": [], "secret": "must-not-leak"}
+    )
+    sub_agent._get_provider = lambda: _async_value(provider)  # type: ignore[method-assign]
+
+    with pytest.raises(LLMProviderContractError) as raised:
+        await sub_agent.run_preflight(
+            history=[],
+            state_context="status",
+            scene_context="",
+            context_tables=runtime.list_context_tables(),
+            user_input="检查状态",
+        )
+
+    assert "rpg_core.adjudication:status_router" in str(raised.value)
+    assert "must-not-leak" not in str(raised.value)
+    assert scratch.staged_changes == []
+    assert manager.documents[1] == baseline
+    assert sub_agent._busy is False
+
+
+@pytest.mark.asyncio
 async def test_status_sub_agent_checkpoint_creation_failure_remains_fatal() -> None:
     manager = FakeRuntimeStatusManager()
     scratch, runtime = _scratch_runtime(manager)
@@ -1252,8 +1262,7 @@ async def test_status_sub_agent_checkpoint_creation_failure_remains_fatal() -> N
             assert [schema["function"]["name"] for schema in tools] == [
                 "select_status_targets"
             ]
-            return {
-                "tool_calls": [{
+            return response(tool_calls=[{
                     "function": {
                         "name": "select_status_targets",
                         "arguments": json.dumps({
@@ -1265,8 +1274,7 @@ async def test_status_sub_agent_checkpoint_creation_failure_remains_fatal() -> N
                             }],
                         }, ensure_ascii=False),
                     },
-                }],
-            }
+                }])
 
     def fail_create() -> object:
         raise RuntimeError("checkpoint unavailable")
@@ -1301,8 +1309,7 @@ async def test_status_sub_agent_checkpoint_restore_failure_remains_fatal() -> No
         async def chat(self, _messages, *, tools):  # noqa: ANN001
             names = [schema["function"]["name"] for schema in tools]
             if names == ["select_status_targets"]:
-                return {
-                    "tool_calls": [{
+                return response(tool_calls=[{
                         "function": {
                             "name": "select_status_targets",
                             "arguments": json.dumps({
@@ -1314,11 +1321,9 @@ async def test_status_sub_agent_checkpoint_restore_failure_remains_fatal() -> No
                                 }],
                             }, ensure_ascii=False),
                         },
-                    }],
-                }
+                    }])
             assert names == ["status_table_set_values"]
-            return {
-                "tool_calls": [
+            return response(tool_calls=[
                     {
                         "function": {
                             "name": "status_table_set_values",
@@ -1337,8 +1342,7 @@ async def test_status_sub_agent_checkpoint_restore_failure_remains_fatal() -> No
                             }),
                         },
                     },
-                ],
-            }
+                ])
 
     def fail_restore(_checkpoint: object) -> None:
         raise RuntimeError("restore unavailable")

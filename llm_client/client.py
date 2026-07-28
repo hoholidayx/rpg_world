@@ -23,6 +23,30 @@ class LLMServiceClientError(Exception):
     """Base error raised by the LLM service client."""
 
 
+LLM_PROVIDER_CONTRACT_ERROR = "LLM_PROVIDER_CONTRACT_ERROR"
+
+
+class LLMProviderContractError(LLMServiceClientError):
+    """A provider returned a value outside the typed ``LLMResponse`` contract."""
+
+    error_code = LLM_PROVIDER_CONTRACT_ERROR
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        source: str | None = None,
+        actual_type: str | None = None,
+        status_code: int = 502,
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.source = source
+        self.actual_type = actual_type
+        self.status_code = status_code
+        self.request_id = request_id
+
+
 class LLMServiceUnavailable(LLMServiceClientError):
     """The LLM service could not be reached."""
 
@@ -349,6 +373,12 @@ class LLMServiceClient:
         request_id = str(payload.get("requestId")) if payload.get("requestId") is not None else None
         if response.status_code == 401:
             raise LLMServiceAuthError(message)
+        if error_code == LLM_PROVIDER_CONTRACT_ERROR:
+            raise LLMProviderContractError(
+                message,
+                status_code=response.status_code,
+                request_id=request_id,
+            )
         raise LLMServiceRemoteError(
             message,
             error_code=error_code,
@@ -380,11 +410,23 @@ async def _iter_sse(response: httpx.Response) -> AsyncIterator[tuple[str, object
         yield event, json.loads("\n".join(data_lines))
 
 
-def _remote_error_from_payload(payload: object) -> LLMServiceRemoteError:
+def _remote_error_from_payload(payload: object) -> LLMServiceClientError:
     if not isinstance(payload, Mapping):
         return LLMServiceRemoteError("LLM stream failed")
+    message = str(payload.get("message") or "LLM stream failed")
+    error_code = str(payload.get("errorCode") or "LLM_STREAM_ERROR")
+    request_id = (
+        str(payload.get("requestId"))
+        if payload.get("requestId") is not None
+        else None
+    )
+    if error_code == LLM_PROVIDER_CONTRACT_ERROR:
+        return LLMProviderContractError(
+            message,
+            request_id=request_id,
+        )
     return LLMServiceRemoteError(
-        str(payload.get("message") or "LLM stream failed"),
-        error_code=str(payload.get("errorCode") or "LLM_STREAM_ERROR"),
-        request_id=str(payload.get("requestId")) if payload.get("requestId") is not None else None,
+        message,
+        error_code=error_code,
+        request_id=request_id,
     )

@@ -11,7 +11,8 @@ from collections.abc import AsyncIterator
 
 from loguru import logger
 
-from llm_client.types import LLMProvider, LLMResponse, LLMUsage
+from llm_client.contracts import require_llm_response
+from llm_client.types import LLMProvider, LLMUsage
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.telemetry import CallRecord, TurnStats
 from rpg_core.agent.tools.lookup import SENSITIVE_LOOKUP_TOOL_NAMES
@@ -152,61 +153,11 @@ async def run_chat_loop(
         # ── LLM call with timing (convert Message → dict at provider boundary) ──
         t0 = time.monotonic()
         msgs_dict = [m.to_dict() for m in messages]
-        result = await provider.chat(msgs_dict, tools=schemas)
+        result = require_llm_response(
+            await provider.chat(msgs_dict, tools=schemas),
+            "rpg_core.main_chat_loop",
+        )
         duration_ms = (time.monotonic() - t0) * 1000
-
-        # Ensure result is an LLMResponse
-        if not isinstance(result, LLMResponse):
-            # Handle legacy dict responses gracefully
-            content = result.get("content", "")
-            tool_calls = result.get("tool_calls")
-            finish_reason = result.get("finish_reason")
-            raw_reasoning_content = result.get("reasoning_content")
-            reasoning_content = (
-                raw_reasoning_content
-                if isinstance(raw_reasoning_content, str)
-                else None
-            )
-            if settings.verbose_logging:
-                tool_names = [tc.get("function", {}).get("name", "") for tc in tool_calls or []]
-                logger.info(
-                    _TAG + " LLM round {} completed: finish_reason={}, tool_calls={}",
-                    tool_call_count + 1,
-                    finish_reason,
-                    tool_names,
-                )
-            if finish_reason == "tool_calls" and not tool_calls:
-                raise RuntimeError(
-                    "LLM reported finish_reason=tool_calls but returned no tool-call payload"
-                )
-            if not tool_calls:
-                return content, records
-            tool_call_count += 1
-            asst_msg_obj = Message(
-                role=Role.ASSISTANT,
-                content=content,
-                tool_calls=tool_calls,
-                reasoning_content=reasoning_content,
-            )
-            asst_msg = asst_msg_obj.to_dict()
-            messages.append(asst_msg_obj)
-            tool_results: list[dict[str, object]] = []
-            for tc in tool_calls:
-                name = tc["function"]["name"]
-                args = tc["function"]["arguments"]
-                tool_result = await _execute_tool_call(tool_registry, name, args)
-                tool_msg_obj = Message(role=Role.TOOL, content=str(tool_result), tool_call_id=tc["id"])
-                tool_msg = tool_msg_obj.to_dict()
-                messages.append(tool_msg_obj)
-                tool_results.append(tool_msg)
-            records.append(
-                ToolCallRecord(
-                    asst_msg,
-                    tool_results,
-                    reasoning_content=reasoning_content,
-                )
-            )
-            continue
 
         # ── Record call in turn_stats ──────────────────────────────
         if turn_stats is not None:

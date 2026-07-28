@@ -15,7 +15,9 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 
+from llm_client.client import LLMProviderContractError
 from llm_client.codec import chunk_to_wire, response_to_wire
+from llm_client.contracts import require_llm_response
 from llm_client.types import DocumentScoreProvider, LLMProvider
 from llm_service.config import (
     get_biz_config,
@@ -136,7 +138,10 @@ async def catalog(biz_key: str, request: Request) -> LLMCatalogResponse:
 async def chat(body: LLMChatRequest, request: Request) -> LLMChatResponse:
     try:
         provider = _chat_provider(body.biz_key, body.provider_key, body.messages)
-        result = await provider.chat(body.messages, tools=body.tools)
+        result = require_llm_response(
+            await provider.chat(body.messages, tools=body.tools),
+            f"llm_service.chat:{body.biz_key}",
+        )
     except Exception as exc:
         raise _http_error(request, exc) from exc
     return LLMChatResponse.model_validate(response_to_wire(result))
@@ -398,6 +403,8 @@ def _http_error(
 
 
 def _error_code(exc: Exception) -> str:
+    if isinstance(exc, LLMProviderContractError):
+        return LLMProviderContractError.error_code
     if isinstance(exc, LLMInputModalityUnsupportedError):
         return "LLM_INPUT_MODALITY_UNSUPPORTED"
     if isinstance(exc, (ValueError, NotImplementedError)):

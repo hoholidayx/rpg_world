@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from llm_client.client import LLMProviderContractError
 from rpg_data import models as data_models
 from rpg_core.session.modes import (
     DEFAULT_TURN_MODE,
@@ -210,6 +211,8 @@ class PlotSchedulingPreflightHook:
                 adjudication_context=plan.adjudication_context,
             )
             judgment = await self._judge.judge(messages, turn_stats=turn_stats)
+        except LLMProviderContractError:
+            raise
         except Exception as exc:
             logger.opt(exception=exc).warning(
                 _TAG + " soft judgment failed: source={} source_id={}",

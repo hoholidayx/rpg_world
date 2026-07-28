@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from llm_client.client import LLMProviderContractError
 from llm_client.types import LLMResponse, ProviderChunk
 import rpg_core.agent.turn.runner as runner_module
 from rpg_core.agent.protocol import StreamEventKind
@@ -15,6 +16,7 @@ from rpg_core.rp_modules.dice.tools import DiceCheckDCTool, DiceRoller
 from rpg_core.settings import DiceModuleSettings
 from rpg_core.tooling.base import BaseTool
 from rpg_core.tooling.registry import ToolRegistry
+from tests.support.scripted_llm import InvalidChatResponseProvider
 
 
 class _MissingToolPayloadProvider:
@@ -253,6 +255,27 @@ async def test_non_stream_loop_rejects_missing_tool_payload():
             messages=[Message(Role.USER, "碰碰运气")],
             schemas=[],
         )
+
+
+@pytest.mark.asyncio
+async def test_non_stream_loop_rejects_invalid_provider_response_type() -> None:
+    messages = [Message(Role.USER, "不得提交")]
+    original_messages = list(messages)
+
+    with pytest.raises(LLMProviderContractError) as raised:
+        await run_chat_loop(
+            provider=InvalidChatResponseProvider(
+                {"content": "secret response must not leak"}
+            ),
+            tool_registry=None,
+            messages=messages,
+            schemas=None,
+        )
+
+    assert "rpg_core.main_chat_loop" in str(raised.value)
+    assert "builtins.dict" in str(raised.value)
+    assert "secret response must not leak" not in str(raised.value)
+    assert messages == original_messages
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from llm_client.client import LLMServiceClient
+from llm_client.contracts import require_llm_response
 from llm_client.types import (
     DocumentScore,
     DocumentScoreProvider,
@@ -40,11 +41,14 @@ class RemoteLLMProvider(LLMProvider, DocumentScoreProvider):
         messages: list[dict],
         tools: list[dict] | None = None,
     ) -> LLMResponse:
-        return await self._client.chat(
-            biz_key=self.biz_key,
-            provider_key=self.provider_key,
-            messages=messages,
-            tools=tools,
+        return require_llm_response(
+            await self._client.chat(
+                biz_key=self.biz_key,
+                provider_key=self.provider_key,
+                messages=messages,
+                tools=tools,
+            ),
+            f"llm_client.remote_provider:{self.biz_key}",
         )
 
     async def chat_stream(

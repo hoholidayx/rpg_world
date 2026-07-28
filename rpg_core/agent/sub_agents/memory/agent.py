@@ -29,7 +29,9 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from llm_client.types import LLMResponse, LLMUsage
+from llm_client.client import LLMProviderContractError
+from llm_client.contracts import require_llm_response
+from llm_client.types import LLMUsage
 from rpg_core.agent.telemetry import CallRecord
 from rpg_core.agent.command.models import CommandDef
 from rpg_core.agent.sub_agents.base import BaseSubAgent
@@ -1170,7 +1172,12 @@ class MemorySubAgent(BaseSubAgent):
         provider = await self._get_provider()
 
         try:
-            result = await provider.chat(messages, tools=[schema])
+            result = require_llm_response(
+                await provider.chat(messages, tools=[schema]),
+                f"rpg_core.memory_sub_agent:{source}",
+            )
+        except LLMProviderContractError:
+            raise
         except Exception as exc:
             logger.warning(_TAG + " LLM call failed: {}", exc)
             if raise_on_failure:
@@ -1178,23 +1185,18 @@ class MemorySubAgent(BaseSubAgent):
             return {}, None
 
         duration_ms = (time.monotonic() - t0) * 1000
-        self._log_cache_usage(
-            source,
-            result.usage if isinstance(result, LLMResponse) else None,
-        )
+        self._log_cache_usage(source, result.usage)
 
         # 捕获 CallRecord
-        call_record: CallRecord | None = None
-        if isinstance(result, LLMResponse):
-            call_record = CallRecord(
-                source=source,
-                model=result.model or provider.get_default_model(),
-                usage=result.usage,
-                duration_ms=duration_ms,
-                reasoning_content=result.reasoning_content,
-            )
+        call_record = CallRecord(
+            source=source,
+            model=result.model or provider.get_default_model(),
+            usage=result.usage,
+            duration_ms=duration_ms,
+            reasoning_content=result.reasoning_content,
+        )
 
-        tool_calls = result.get("tool_calls") if isinstance(result, dict) else result.tool_calls
+        tool_calls = result.tool_calls
         if not tool_calls:
             logger.warning(_TAG + " LLM returned no tool calls")
             if raise_on_failure:

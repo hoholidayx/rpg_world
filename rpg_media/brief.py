@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from llm_client.client import LLMServiceClientError
+from llm_client.contracts import require_llm_response
 from llm_client.keys import MEDIA_VISUAL_BRIEF_BIZ_KEY
 from llm_client.manager import LLMClientManager
 from llm_client.types import LLMProvider
@@ -28,11 +29,14 @@ class LLMVisualBriefPlanner:
             provider = self._provider or await LLMClientManager.get().get_provider(
                 MEDIA_VISUAL_BRIEF_BIZ_KEY
             )
-            result = await provider.chat(
-                [
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": source.snapshot_json},
-                ]
+            result = require_llm_response(
+                await provider.chat(
+                    [
+                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "user", "content": source.snapshot_json},
+                    ]
+                ),
+                "rpg_media.visual_brief",
             )
             payload = parse_json_object(result.content, label="visual brief response")
             planned = VisualBrief.from_mapping(payload)

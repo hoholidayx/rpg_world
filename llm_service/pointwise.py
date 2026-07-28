@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 
+from llm_client.contracts import require_llm_response
 from llm_client.types import DocumentScore, LLMProvider
 
 _SYSTEM_PROMPT = "你是记忆检索重排器。只输出评分行。"
@@ -46,14 +47,17 @@ async def _score_one(
     content = document
     if max_document_chars > 0 and len(content) > max_document_chars:
         content = f"{content[:max_document_chars]}\n...[候选记忆已截断，仅用于重排]"
-    response = await provider.chat(
-        [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"{_INSTRUCTIONS}\n\n查询：{query}\n候选：{content}\n评分：",
-            },
-        ]
+    response = require_llm_response(
+        await provider.chat(
+            [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"{_INSTRUCTIONS}\n\n查询：{query}\n候选：{content}\n评分：",
+                },
+            ]
+        ),
+        "llm_service.pointwise",
     )
     score, reason = _parse(response.content)
     return DocumentScore(

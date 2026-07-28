@@ -6,6 +6,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
+from llm_client.client import LLMProviderContractError
 from memory_retrieval.candidate import MemoryCandidate
 from memory_retrieval.planning.plan import QueryPlan
 from memory_retrieval.planning.planner import BaseQueryPlanner, RuleBasedQueryPlanner
@@ -76,6 +77,8 @@ class HybridRetriever(BaseRetriever):
         try:
             plan = await self._plan_query(query)
             return await self.retrieve_plan(plan, top_k=top_k)
+        except LLMProviderContractError:
+            raise
         except Exception as exc:
             self._log_stage_error("retrieve", exc)
             return []
@@ -93,6 +96,8 @@ class HybridRetriever(BaseRetriever):
     ) -> list[tuple[str, float, dict]]:
         try:
             return self._format(await self._search_plan_candidates(plan, top_k))
+        except LLMProviderContractError:
+            raise
         except Exception as exc:
             self._log_stage_error("retrieve_plan", exc)
             return []
@@ -100,6 +105,8 @@ class HybridRetriever(BaseRetriever):
     async def hybrid_search(self, query: str | QueryPlan, top_k: int = 20) -> list[MemoryCandidate]:
         try:
             plan = query if isinstance(query, QueryPlan) else await self._plan_query(query)
+        except LLMProviderContractError:
+            raise
         except Exception as exc:
             self._log_stage_error("plan", exc)
             return []
@@ -348,6 +355,8 @@ class HybridRetriever(BaseRetriever):
             )
             try:
                 candidates = await self._reranker.rerank(rerank_query, candidates)
+            except LLMProviderContractError:
+                raise
             except Exception as exc:
                 self._log_stage_error("rerank", exc)
             else:

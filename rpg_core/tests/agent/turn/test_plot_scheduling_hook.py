@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from commons.scene_time import SceneTime
+from llm_client.client import LLMProviderContractError
 from rpg_data import models
 from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.turn.hooks.plot_scheduling import PlotSchedulingPreflightHook
@@ -183,6 +184,30 @@ async def test_soft_plot_judge_error_is_staged_without_raising() -> None:
     assert scratch.plot_schedule_injections == []
     assert scratch.plot_schedule_decisions[0].decision_status == "error"
     assert scratch.plot_schedule_decisions[0].error_code == "RuntimeError"
+    assert scratch.plot_scene_opportunity.consume_base is True
+
+
+@pytest.mark.asyncio
+async def test_soft_plot_contract_error_is_not_staged_as_a_soft_failure() -> None:
+    hook = PlotSchedulingPreflightHook(
+        context_service=_Context(),
+        session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
+        judge=_Judge(LLMProviderContractError("contract failure")),
+    )
+    scratch = _scratch()
+
+    with pytest.raises(LLMProviderContractError):
+        await hook.run(
+            plan=_plan(),
+            turn_scratch=scratch,
+            turn_stats=TurnStats(),
+            rp_module_runtime=None,
+        )
+
+    assert scratch.plot_schedule_injections == []
+    assert scratch.plot_schedule_decisions == []
+    # Opportunity consumption is staged before adjudication, but the
+    # orchestrator discards this entire scratch when the contract error escapes.
     assert scratch.plot_scene_opportunity.consume_base is True
 
 

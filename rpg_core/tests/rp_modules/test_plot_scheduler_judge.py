@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from llm_client.client import LLMProviderContractError
 from llm_client.types import LLMResponse
 from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.tools.history import HistoryToolSet
@@ -15,6 +16,7 @@ from rpg_core.rp_modules.plot_scheduler.judge import (
 from rpg_core.rp_modules.plot_scheduler.models import (
     PLOT_SUITABILITY_REASON_MAX_CHARS,
 )
+from tests.support.scripted_llm import InvalidChatResponseProvider
 
 
 class _Provider:
@@ -67,6 +69,19 @@ async def test_plot_judge_rejects_content_only_response() -> None:
         await PlotScheduleJudge(
             provider_factory=lambda: _provider_result(provider)
         ).judge([Message(Role.USER, "行动")], turn_stats=TurnStats())
+
+
+@pytest.mark.asyncio
+async def test_plot_judge_rejects_invalid_provider_response_type() -> None:
+    provider = InvalidChatResponseProvider(None)
+
+    with pytest.raises(LLMProviderContractError) as raised:
+        await PlotScheduleJudge(
+            provider_factory=lambda: _provider_result(provider)
+        ).judge([Message(Role.USER, "行动")], turn_stats=TurnStats())
+
+    assert "rpg_core.adjudication:plot_scheduler" in str(raised.value)
+    assert "builtins.NoneType" in str(raised.value)
 
 
 @pytest.mark.asyncio

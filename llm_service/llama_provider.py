@@ -11,6 +11,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from llm_client.contracts import require_llm_response
 from llm_client.types import (
     DocumentScore,
     DocumentScoreProvider,
@@ -99,7 +100,10 @@ class LlamaCompletionProvider(LLMProvider):
     ) -> AsyncIterator[ProviderChunk]:
         _reject_image_input(messages)
         if tools:
-            response = await self.chat(messages, tools=tools)
+            response = require_llm_response(
+                await self.chat(messages, tools=tools),
+                "llm_service.llama_provider.chat_stream",
+            )
             yield ProviderChunk(
                 content=response.content,
                 tool_calls=response.tool_calls,

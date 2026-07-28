@@ -13,6 +13,7 @@ from rpg_core.agent.sub_agents import (
 )
 from rpg_core.context.models import Message, Role
 from rpg_core.scene import SceneTracker
+from tests.support.scripted_llm import response
 
 
 def _document() -> models.StatusTableDocument:
@@ -140,8 +141,7 @@ async def test_bootstrap_updates_all_fields_and_commits_once() -> None:
             assert "题外回复" not in prompt
             assert "人工备注" in prompt
             assert "长期信任事实明确变化时更新" in prompt
-            return {
-                "tool_calls": [{
+            return response(tool_calls=[{
                     "function": {
                         "name": "status_table_set_values",
                         "arguments": json.dumps({
@@ -153,8 +153,7 @@ async def test_bootstrap_updates_all_fields_and_commits_once() -> None:
                             ],
                         }),
                     }
-                }]
-            }
+                }])
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
@@ -191,7 +190,7 @@ async def test_bootstrap_prompt_keeps_long_message_tail() -> None:
                 "status_table_set_values"
             }
             assert tail_marker in str(messages[-1]["content"])
-            return {"tool_calls": []}
+            return response()
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
@@ -388,16 +387,14 @@ async def test_bootstrap_scene_uses_scratch_and_publishes_with_other_documents()
         async def chat(self, _messages, *, tools):  # noqa: ANN001
             names = {tool["function"]["name"] for tool in tools}
             if names == {"scene_attr"}:
-                return {
-                    "tool_calls": [{
+                return response(tool_calls=[{
                         "function": {
                             "name": "scene_attr",
                             "arguments": json.dumps({"key": "位置", "value": "城堡"}),
                         }
-                    }]
-                }
+                    }])
             assert names == {"status_table_set_values"}
-            return {"tool_calls": []}
+            return response()
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
@@ -443,8 +440,7 @@ async def test_bootstrap_target_failure_restores_all_scratch_and_skips_publish()
             prompt = str(messages[-1]["content"])
             table_id = 1 if '"table_id": 1' in prompt else 3
             key = "生命" if table_id == 1 else "不存在"
-            return {
-                "tool_calls": [{
+            return response(tool_calls=[{
                     "function": {
                         "name": "status_table_set_values",
                         "arguments": json.dumps({
@@ -452,8 +448,7 @@ async def test_bootstrap_target_failure_restores_all_scratch_and_skips_publish()
                             "updates": [{"key": key, "value": "changed"}],
                         }),
                     }
-                }]
-            }
+                }])
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())

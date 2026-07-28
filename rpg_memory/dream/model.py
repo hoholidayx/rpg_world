@@ -6,6 +6,7 @@ import json
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from typing import Protocol, cast
 
+from llm_client.contracts import require_llm_response
 from llm_client.manager import LLMClientManager
 from llm_client.types import LLMProvider, LLMResponse
 
@@ -167,19 +168,22 @@ class LLMDreamModel:
         tool: dict[str, object],
     ) -> LLMResponse:
         provider = await self._provider_resolver(depth)
-        return await provider.chat(
-            [
-                {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        payload,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ),
-                },
-            ],
-            tools=[tool],
+        return require_llm_response(
+            await provider.chat(
+                [
+                    {"role": "system", "content": system},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            payload,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                    },
+                ],
+                tools=[tool],
+            ),
+            f"rpg_memory.dream:{depth.value}",
         )
 
 

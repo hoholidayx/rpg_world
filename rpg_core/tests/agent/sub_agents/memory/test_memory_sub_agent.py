@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import rpg_core.agent.sub_agents.memory.agent as memory_module
+from llm_client.client import LLMProviderContractError
 from llm_client.types import LLMResponse, LLMUsage
 from rpg_core.agent.sub_agents.memory.agent import (
     MEMORY_LLM_SOURCE_STORY,
@@ -17,6 +18,7 @@ from rpg_core.agent.sub_agents.memory.agent import (
 )
 from rpg_core.context.models import Message, Role
 from rpg_core.session.manager import SessionManager
+from tests.support.scripted_llm import InvalidChatResponseProvider, response
 
 
 async def _async_value(value):  # noqa: ANN001, ANN201
@@ -309,14 +311,12 @@ async def test_strict_story_memory_rejects_malformed_tool_response_without_progr
     class Provider:
         async def chat(self, _messages, *, tools):  # noqa: ANN001
             assert tools == [STORY_DETAIL_SCHEMA]
-            return {
-                "tool_calls": [{
+            return response(tool_calls=[{
                     "function": {
                         "name": tool_name,
                         "arguments": arguments,
                     }
-                }]
-            }
+                }])
 
     async def get_provider():
         return Provider()
@@ -347,14 +347,12 @@ async def test_strict_story_memory_accepts_explicit_empty_details_and_advances()
     class Provider:
         async def chat(self, _messages, *, tools):  # noqa: ANN001
             assert tools == [STORY_DETAIL_SCHEMA]
-            return {
-                "tool_calls": [{
+            return response(tool_calls=[{
                     "function": {
                         "name": "extract_story_details",
                         "arguments": '{"story_details": []}',
                     }
-                }]
-            }
+                }])
 
     async def get_provider():
         return Provider()
@@ -367,6 +365,28 @@ async def test_strict_story_memory_accepts_explicit_empty_details_and_advances()
     assert result.story_details_added == 0
     assert store.persist_calls == 1
     assert session.count_new_turns_since_story() == 0
+
+
+@pytest.mark.asyncio
+async def test_memory_sub_agent_rejects_invalid_provider_response_type() -> None:
+    sub_agent = MemorySubAgent(
+        story_store=CapturingStoryStore(),  # type: ignore[arg-type]
+        provider_biz_key="agent.memory_sub_agent",
+    )
+    provider = InvalidChatResponseProvider(
+        {"tool_calls": [], "secret": "must-not-leak"}
+    )
+    sub_agent._get_provider = lambda: _async_value(provider)  # type: ignore[method-assign]
+
+    with pytest.raises(LLMProviderContractError) as raised:
+        await sub_agent._call_llm(
+            [],
+            STORY_DETAIL_SCHEMA,
+            source=MEMORY_LLM_SOURCE_STORY,
+        )
+
+    assert "rpg_core.memory_sub_agent:memory_story" in str(raised.value)
+    assert "must-not-leak" not in str(raised.value)
 
 
 @pytest.mark.asyncio

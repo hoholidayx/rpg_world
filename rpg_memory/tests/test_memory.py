@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from llm_client.client import LLMProviderContractError
 from llm_client.keys import MEMORY_EMBED_BIZ_KEY, MEMORY_QUERY_PLANNER_BIZ_KEY
 from llm_client.manager import LLMClientManager
 from llm_service.manager import LLMManager as ServerLLMManager
@@ -47,7 +48,10 @@ from memory_retrieval.rerank import (
 )
 from memory_retrieval.rerank.common import build_pointwise_prompt, blend_pointwise_scores, parse_pointwise_output
 from memory_retrieval.rerank import service as rerank_service_module
-from memory_retrieval.planning.planner import RuleBasedQueryPlanner
+from memory_retrieval.planning.planner import (
+    FallbackQueryPlanner,
+    RuleBasedQueryPlanner,
+)
 from memory_retrieval.storage.text_index import _keyword_relevance
 from memory_retrieval.vector_index_manager import VectorIndexManager, WatchSource
 from rpg_memory.recall.policy import (
@@ -63,6 +67,7 @@ from rpg_memory.tests.conftest import (
     FakeStore,
 )
 from rpg_core.settings import MemorySettings
+from tests.support.scripted_llm import InvalidChatResponseProvider, response
 
 
 def test_explicit_zero_rerank_score_does_not_fall_back_to_hybrid():
@@ -457,8 +462,8 @@ async def test_memory_manager_lazily_resolves_query_planner(
 
         async def chat(self, messages, tools=None):  # noqa: ANN001
             self.chat_calls += 1
-            return SimpleNamespace(
-                content='{"keyword_queries":["查找线索"],"expanded_queries":[],"raw_md_terms":["线索"],"query_type":"general"}',
+            return response(
+                '{"keyword_queries":["查找线索"],"expanded_queries":[],"raw_md_terms":["线索"],"query_type":"general"}',
             )
 
         def get_default_model(self):  # noqa: ANN001
@@ -1531,7 +1536,7 @@ async def test_pointwise_reranker_logs_failed_preview(monkeypatch):
 
     class FakeProvider:
         async def chat(self, messages, tools=None):  # noqa: ANN001
-            return SimpleNamespace(content='plain text output')
+            return response("plain text output")
 
     reranker = PointwiseMemoryReranker(FakeProvider(), provider_label='llama')
     result = await reranker.rerank('怪兽', [MemoryCandidate(memory_id=1, content='a')])
@@ -1546,7 +1551,7 @@ async def test_pointwise_reranker_accepts_pointwise_output(monkeypatch):
 
     class FakeProvider:
         async def chat(self, messages, tools=None):  # noqa: ANN001
-            return SimpleNamespace(content=next(outputs))
+            return response(next(outputs))
 
     reranker = PointwiseMemoryReranker(FakeProvider(), provider_label='llama')
     result = await reranker.rerank(
@@ -1590,7 +1595,7 @@ async def test_pointwise_reranker_uses_llm_for_raw_md_terms_only():
     class FakeProvider:
         async def chat(self, messages, tools=None):  # noqa: ANN001
             calls.append(messages)
-            return SimpleNamespace(content='30\tterms are broad')
+            return response("30\tterms are broad")
 
     reranker = PointwiseMemoryReranker(FakeProvider(), provider_label='llama')
     result = await reranker.rerank(
@@ -1742,3 +1747,92 @@ async def test_hybrid_retriever_planner_failure_returns_empty(monkeypatch):
     )
 
     assert await retriever.hybrid_search("查找线索") == []
+
+
+async def test_query_planner_contract_error_bypasses_rule_fallback() -> None:
+    class NeverFallback(RuleBasedQueryPlanner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.called = False
+
+        async def plan(self, query: str) -> QueryPlan:
+            self.called = True
+            return await super().plan(query)
+
+    fallback = NeverFallback()
+    planner = FallbackQueryPlanner(
+        OpenAIQueryPlanner(
+            InvalidChatResponseProvider(
+                SimpleNamespace(content="secret planner response")
+            )
+        ),
+        fallback=fallback,
+    )
+
+    with pytest.raises(LLMProviderContractError) as raised:
+        await planner.plan("查找线索")
+
+    assert fallback.called is False
+    assert "rpg_memory.query_planner" in str(raised.value)
+    assert "secret planner response" not in str(raised.value)
+
+
+async def test_pointwise_contract_error_bypasses_rerank_fallback() -> None:
+    reranker = PointwiseMemoryReranker(
+        InvalidChatResponseProvider({"content": "secret rerank response"}),
+        provider_label="llama",
+    )
+
+    with pytest.raises(LLMProviderContractError) as raised:
+        await reranker.rerank(
+            "怪兽",
+            [MemoryCandidate(memory_id=1, content="酒馆")],
+        )
+
+    assert "memory_retrieval.pointwise_reranker" in str(raised.value)
+    assert "secret rerank response" not in str(raised.value)
+
+
+async def test_hybrid_rerank_contract_error_is_not_soft_failed() -> None:
+    class ContractReranker(MemoryReranker):
+        async def rerank(
+            self,
+            _query: str,
+            _candidates: list[MemoryCandidate],
+        ) -> list[MemoryCandidate]:
+            raise LLMProviderContractError("contract failure")
+
+    retriever = HybridRetriever(reranker=ContractReranker())
+    plan = QueryPlan(
+        original_query="怪兽",
+        normalized_query="怪兽",
+        keyword_queries=("怪兽",),
+        expanded_queries=(),
+        raw_md_terms=("怪兽",),
+    )
+
+    with pytest.raises(LLMProviderContractError):
+        await retriever._finalize(
+            plan,
+            [MemoryCandidate(memory_id=1, content="酒馆")],
+            top_k=1,
+        )
+
+
+async def test_memory_recall_manager_does_not_swallow_contract_errors(
+    fake_recalled_store,
+) -> None:
+    class ContractPlanner:
+        async def plan_context(self, _context):  # noqa: ANN001, ANN201
+            raise LLMProviderContractError("contract failure")
+
+    manager = MemoryRecallManager(
+        recalled_store=fake_recalled_store,
+        retriever=FakeRetriever([]),
+        query_planner=ContractPlanner(),
+    )
+
+    with pytest.raises(LLMProviderContractError):
+        await manager.recall("查找线索")
+
+    assert fake_recalled_store.get_items() == []

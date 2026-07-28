@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import TypeAlias
 
 from loguru import logger
 
-from llm_client.types import LLMProvider, LLMResponse, LLMUsage
+from llm_client.contracts import require_llm_response
+from llm_client.types import LLMProvider, LLMResponse
 from rpg_core.agent.telemetry import CallRecord, TurnStats
 from rpg_core.agent.tools.lookup import LookupToolSet
 from rpg_core.context.fingerprint import (
@@ -20,7 +20,6 @@ from rpg_core.context.models import Message, Role
 from rpg_core.settings import settings
 
 _TAG = "[AdjudicationToolLoop]"
-_LLMChatResult: TypeAlias = LLMResponse | dict[str, object]
 
 _MIXED_TERMINAL_FEEDBACK = json.dumps(
     {
@@ -45,7 +44,7 @@ _TERMINAL_ONLY_NOTICE = (
 class AdjudicationLoopResult:
     """Final stage response plus all provider calls made to reach it."""
 
-    response: _LLMChatResult
+    response: LLMResponse
     call_records: tuple[CallRecord, ...]
     lookup_rounds: int
 
@@ -122,8 +121,10 @@ async def run_adjudication_tool_loop(
         if turn_stats is not None:
             turn_stats.add_call(record)
 
-        raw_tool_calls = _response_tool_calls(response)
-        finish_reason = _response_finish_reason(response)
+        raw_tool_calls = response.tool_calls or []
+        if not isinstance(raw_tool_calls, list):
+            raise TypeError("LLM tool_calls must be an array or null")
+        finish_reason = response.finish_reason
         if finish_reason == "tool_calls" and not raw_tool_calls:
             raise RuntimeError(
                 "LLM reported finish_reason=tool_calls but returned no tool-call payload"
@@ -155,9 +156,9 @@ async def run_adjudication_tool_loop(
         working_messages.append(
             Message(
                 role=Role.ASSISTANT,
-                content=_response_content(response),
+                content=response.content,
                 tool_calls=[call.raw for call in calls],
-                reasoning_content=_response_reasoning_content(response),
+                reasoning_content=response.reasoning_content,
             )
         )
         has_non_lookup_call = len(lookup_calls) != len(calls)
@@ -197,7 +198,7 @@ async def _provider_call(
     messages: list[Message],
     schemas: list[dict[str, object]],
     source: str,
-) -> tuple[_LLMChatResult, CallRecord]:
+) -> tuple[LLMResponse, CallRecord]:
     if settings.verbose_logging:
         fingerprint = build_request_fingerprint(messages, schemas)
         logger.info(
@@ -209,30 +210,23 @@ async def _provider_call(
         )
 
     started_at = time.monotonic()
-    response = await provider.chat(
-        [message.to_provider_dict() for message in messages],
-        tools=schemas,
+    response = require_llm_response(
+        await provider.chat(
+            [message.to_provider_dict() for message in messages],
+            tools=schemas,
+        ),
+        f"rpg_core.adjudication:{source}",
     )
     duration_ms = (time.monotonic() - started_at) * 1000
-    if not isinstance(response, (LLMResponse, dict)):
-        raise TypeError(
-            "LLM provider chat() must return LLMResponse or a mapping test double"
-        )
 
-    usage = _response_usage(response)
-    get_default_model = getattr(provider, "get_default_model", None)
-    default_model = (
-        str(get_default_model())
-        if callable(get_default_model)
-        else "unknown"
-    )
-    model = _response_model(response) or default_model
+    usage = response.usage
+    model = response.model or provider.get_default_model()
     record = CallRecord(
         source=source,
         model=model,
         usage=usage,
         duration_ms=duration_ms,
-        reasoning_content=_response_reasoning_content(response),
+        reasoning_content=response.reasoning_content,
     )
     if settings.verbose_logging:
         logger.info(
@@ -242,11 +236,11 @@ async def _provider_call(
             source,
             duration_ms,
             model,
-            _response_finish_reason(response) or "-",
+            response.finish_reason or "-",
             [
                 call.name
                 for call in _normalize_tool_calls(
-                    _response_tool_calls(response),
+                    response.tool_calls or [],
                     provider_call_index=0,
                 )
             ],
@@ -308,66 +302,6 @@ def _normalize_tool_calls(
             )
         )
     return result
-
-
-def _response_tool_calls(response: _LLMChatResult) -> list[object]:
-    raw = (
-        response.tool_calls
-        if isinstance(response, LLMResponse)
-        else response.get("tool_calls")
-    )
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise TypeError("LLM tool_calls must be an array or null")
-    return list(raw)
-
-
-def _response_content(response: _LLMChatResult) -> str:
-    value = (
-        response.content
-        if isinstance(response, LLMResponse)
-        else response.get("content")
-    )
-    return str(value or "")
-
-
-def _response_reasoning_content(response: _LLMChatResult) -> str | None:
-    value = (
-        response.reasoning_content
-        if isinstance(response, LLMResponse)
-        else response.get("reasoning_content")
-    )
-    return value if isinstance(value, str) and value.strip() else None
-
-
-def _response_finish_reason(response: _LLMChatResult) -> str | None:
-    value = (
-        response.finish_reason
-        if isinstance(response, LLMResponse)
-        else response.get("finish_reason")
-    )
-    return str(value) if value not in (None, "") else None
-
-
-def _response_model(response: _LLMChatResult) -> str:
-    value = (
-        response.model
-        if isinstance(response, LLMResponse)
-        else response.get("model")
-    )
-    return str(value or "")
-
-
-def _response_usage(response: _LLMChatResult) -> LLMUsage | None:
-    value = (
-        response.usage
-        if isinstance(response, LLMResponse)
-        else response.get("usage")
-    )
-    return value if isinstance(value, LLMUsage) else None
-
-
 def _log_sensitive_lookup_execution(
     *,
     source: str,

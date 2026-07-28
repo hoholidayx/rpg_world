@@ -17,10 +17,12 @@ import json
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Iterator, TypeAlias
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from loguru import logger
 
+from llm_client.client import LLMProviderContractError
+from llm_client.contracts import require_llm_response
 from llm_client.types import LLMResponse, LLMUsage
 from rpg_data.model.status import (
     STATUS_ROW_UPDATE_RULE_KEY,
@@ -75,7 +77,6 @@ if TYPE_CHECKING:
 # ── constants ──────────────────────────────────────────────────────────
 
 _TAG = "[StatusSubAgent]"
-_LLMChatResult: TypeAlias = LLMResponse | dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -320,6 +321,9 @@ class StatusSubAgent(BaseSubAgent):
                 _TAG + " preflight aborted: reason=mutation_boundary_failed"
             )
             raise
+        except LLMProviderContractError:
+            result.failed = True
+            raise
         except Exception as exc:
             result.failed = True
             logger.warning(_TAG + " fixed preflight failed: {}", exc)
@@ -489,6 +493,8 @@ class StatusSubAgent(BaseSubAgent):
             result.updated = any(record.changed for record in result.records)
             return result
         except _StatusPrewriteRollbackError:
+            raise
+        except LLMProviderContractError:
             raise
         except Exception as exc:
             result.failed = True
@@ -922,6 +928,8 @@ class StatusSubAgent(BaseSubAgent):
                     )
             except _StatusPrewriteRollbackError:
                 raise
+            except LLMProviderContractError:
+                raise
             except Exception as exc:
                 result.failed = True
                 self._restore_failed_update_target(
@@ -1093,7 +1101,7 @@ class StatusSubAgent(BaseSubAgent):
         lookup_tools: LookupToolSet | None,
         max_lookup_tool_rounds: int,
         turn_stats: TurnStats | None,
-    ) -> tuple[_LLMChatResult, tuple[CallRecord, ...]]:
+    ) -> tuple[LLMResponse, tuple[CallRecord, ...]]:
         schema_names = [
             str(schema.get("function", {}).get("name", ""))
             for schema in schemas
@@ -1132,7 +1140,7 @@ class StatusSubAgent(BaseSubAgent):
         schemas: list[dict[str, object]],
         *,
         source: str,
-    ) -> tuple[_LLMChatResult, CallRecord | None]:
+    ) -> tuple[LLMResponse, CallRecord]:
         import time
 
         schema_names = [
@@ -1161,7 +1169,10 @@ class StatusSubAgent(BaseSubAgent):
         t0 = time.monotonic()
         try:
             provider = await self._get_provider()
-            llm_result = await provider.chat(messages, tools=schemas)
+            llm_result = require_llm_response(
+                await provider.chat(messages, tools=schemas),
+                f"rpg_core.status:{source}",
+            )
         except Exception as exc:
             duration_ms = (time.monotonic() - t0) * 1000
             logger.opt(exception=exc).warning(
@@ -1171,27 +1182,6 @@ class StatusSubAgent(BaseSubAgent):
             )
             raise
         duration_ms = (time.monotonic() - t0) * 1000
-        if isinstance(llm_result, dict):
-            self._log_verbose(
-                "LLM call completed: source={} duration_ms={:.1f} model={} "
-                "finish_reason={} tool_calls={} usage={}",
-                source,
-                duration_ms,
-                str(llm_result.get("model") or "-"),
-                str(llm_result.get("finish_reason") or "-"),
-                self._tool_names_for_log(llm_result),
-                "(unavailable)",
-            )
-            return llm_result, None
-        if not isinstance(llm_result, LLMResponse):
-            logger.warning(
-                _TAG + " LLM call returned invalid response: source={} type={}",
-                source,
-                type(llm_result).__name__,
-            )
-            raise TypeError(
-                "LLM provider chat() must return LLMResponse or a mapping test double"
-        )
         model = llm_result.model or provider.get_default_model()
         self._log_cache_usage(source, llm_result.usage)
         self._log_verbose(
@@ -1241,20 +1231,15 @@ class StatusSubAgent(BaseSubAgent):
     def _append_call_record(
         records: list[CallRecord],
         turn_stats: TurnStats | None,
-        record: CallRecord | None,
+        record: CallRecord,
     ) -> None:
-        if record is None:
-            return
         records.append(record)
         if turn_stats is not None:
             turn_stats.add_call(record)
 
     @staticmethod
-    def _tool_calls(llm_result: _LLMChatResult) -> list[object]:
-        if isinstance(llm_result, LLMResponse):
-            raw = llm_result.tool_calls
-        else:
-            raw = llm_result.get("tool_calls")
+    def _tool_calls(llm_result: LLMResponse) -> list[object]:
+        raw = llm_result.tool_calls
         if raw is None:
             return []
         if not isinstance(raw, list):
@@ -1262,12 +1247,8 @@ class StatusSubAgent(BaseSubAgent):
         return list(raw)
 
     @staticmethod
-    def _tool_names_for_log(llm_result: _LLMChatResult) -> list[str]:
-        raw = (
-            llm_result.tool_calls
-            if isinstance(llm_result, LLMResponse)
-            else llm_result.get("tool_calls")
-        )
+    def _tool_names_for_log(llm_result: LLMResponse) -> list[str]:
+        raw = llm_result.tool_calls
         if raw is None:
             return []
         if not isinstance(raw, list):

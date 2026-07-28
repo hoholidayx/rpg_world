@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import TypeAlias, cast
 
 from llm_client.keys import (
     AGENT_MAIN_BIZ_KEY,
@@ -57,6 +57,13 @@ ChatAction: TypeAlias = LLMResponse | BaseException | ChatCallback
 StreamAction: TypeAlias = StreamResult | BaseException | StreamCallback
 
 
+class _Unset:
+    pass
+
+
+_UNSET = _Unset()
+
+
 def scripted_usage() -> LLMUsage:
     return LLMUsage(
         prompt_tokens=11,
@@ -67,18 +74,29 @@ def scripted_usage() -> LLMUsage:
 
 
 def response(
-    content: str,
+    content: str = "",
     *,
     model: str = "scripted-model",
     tool_calls: list[dict[str, object]] | None = None,
-    finish_reason: str = "stop",
+    finish_reason: str | None | _Unset = _UNSET,
+    usage: LLMUsage | None | _Unset = _UNSET,
+    reasoning_content: str | None = None,
 ) -> LLMResponse:
+    resolved_finish_reason = (
+        "tool_calls" if tool_calls else "stop"
+    ) if isinstance(finish_reason, _Unset) else finish_reason
+    resolved_usage = (
+        scripted_usage()
+        if isinstance(usage, _Unset)
+        else usage
+    )
     return LLMResponse(
         content=content,
         tool_calls=tool_calls,
-        finish_reason=finish_reason,
-        usage=scripted_usage(),
+        finish_reason=resolved_finish_reason,
+        usage=resolved_usage,
         model=model,
+        reasoning_content=reasoning_content,
     )
 
 
@@ -158,6 +176,35 @@ class ScriptedChatProvider(LLMProvider):
             action = result
         for chunk in action:
             yield chunk
+
+    def get_default_model(self) -> str:
+        return self.model
+
+
+class InvalidChatResponseProvider(LLMProvider):
+    """Dedicated negative-test provider that deliberately violates ``chat``."""
+
+    def __init__(self, value: object, *, model: str = "invalid-response-model") -> None:
+        self.value = value
+        self.model = model
+        self.calls: list[ProviderCall] = []
+
+    async def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        self.calls.append(ProviderCall(deepcopy(messages), deepcopy(tools), False))
+        return cast(LLMResponse, self.value)
+
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ):
+        del messages, tools
+        raise AssertionError("invalid chat-response provider must not stream")
+        yield
 
     def get_default_model(self) -> str:
         return self.model

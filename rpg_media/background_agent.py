@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from typing import Protocol
 
+from llm_client.contracts import require_llm_response
 from llm_client.keys import MEDIA_SCENE_BACKGROUND_MATCH_BIZ_KEY
 from llm_client.manager import LLMClientManager
 from llm_client.types import LLMProvider
@@ -73,7 +74,10 @@ class LLMMediaBackgroundAgent:
         ]
         candidate_asset_ids: set[str] = set()
         for _ in range(self._max_rounds):
-            result = await provider.chat(messages, tools=_TOOL_SCHEMAS)
+            result = require_llm_response(
+                await provider.chat(messages, tools=_TOOL_SCHEMAS),
+                "rpg_media.background_agent",
+            )
             calls = result.tool_calls or []
             if not calls:
                 raise ValueError("media background agent returned no tool decision")

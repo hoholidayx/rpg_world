@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from llm_client.contracts import require_llm_response
 from memory_retrieval.planning.planner import (
     BaseQueryPlanner,
     _build_prompt,
@@ -45,11 +46,14 @@ class OpenAIQueryPlanner(BaseQueryPlanner):
                 fallback_planner=self._fallback_planner,
             )
         prompt = _build_prompt(normalized)
-        response = await self._provider.chat(
-            [
-                {"role": "system", "content": "You are a memory query planner."},
-                {"role": "user", "content": prompt},
-            ]
+        response = require_llm_response(
+            await self._provider.chat(
+                [
+                    {"role": "system", "content": "You are a memory query planner."},
+                    {"role": "user", "content": prompt},
+                ]
+            ),
+            "rpg_memory.query_planner",
         )
         data = _parse_json_object(response.content)
         return _plan_from_mapping(
@@ -63,11 +67,14 @@ class OpenAIQueryPlanner(BaseQueryPlanner):
     async def plan_context(self, context: RetrievalQuery):
         if not context.text.strip():
             return await self.plan("")
-        response = await self._provider.chat(
-            [
-                {"role": "system", "content": "You are an RP memory query planner."},
-                {"role": "user", "content": _build_rp_context_prompt(context)},
-            ]
+        response = require_llm_response(
+            await self._provider.chat(
+                [
+                    {"role": "system", "content": "You are an RP memory query planner."},
+                    {"role": "user", "content": _build_rp_context_prompt(context)},
+                ]
+            ),
+            "rpg_memory.contextual_query_planner",
         )
         data = _parse_json_object(response.content)
         return plan_from_context_mapping(

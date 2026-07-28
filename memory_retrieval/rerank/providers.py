@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 
 from commons.types import DebugInfo
 
-from llm_client.types import DocumentScoreProvider, LLMProvider, LLMResponse
+from llm_client.contracts import require_llm_response
+from llm_client.types import DocumentScoreProvider, LLMProvider
 from memory_retrieval.candidate import MemoryCandidate
 from memory_retrieval.rerank.common import (
     MEMORY_RERANK_SYSTEM_PROMPT,
@@ -63,13 +64,16 @@ class ChatPointwiseScoreProvider(MemoryScoreProvider):
 
     async def _score_one(self, query: str, candidate: MemoryCandidate) -> MemoryScore:
         prompt = self._prompt_builder(query, candidate, self._max_candidate_chars)
-        response = await self._provider.chat(
-            [
-                {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": prompt},
-            ]
+        response = require_llm_response(
+            await self._provider.chat(
+                [
+                    {"role": "system", "content": self._system_prompt},
+                    {"role": "user", "content": prompt},
+                ]
+            ),
+            "memory_retrieval.pointwise_reranker",
         )
-        raw_text = _extract_response_text(response)
+        raw_text = response.content
         raw_preview = short_preview(raw_text, limit=160)
         try:
             score, reason = parse_pointwise_output(raw_text)
@@ -115,11 +119,3 @@ class _RerankParseError(Exception):
     def __init__(self, message: str, preview: str = "") -> None:
         super().__init__(message)
         self.preview = preview
-
-
-def _extract_response_text(response: LLMResponse) -> str:
-    if hasattr(response, "content"):
-        return str(getattr(response, "content") or "")
-    if isinstance(response, dict):
-        return str(response.get("content") or response.get("text") or "")
-    return str(response)

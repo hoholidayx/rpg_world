@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from commons.scene_time import SceneTime
+from llm_client.client import LLMProviderContractError
 from llm_client.types import ProviderChunk
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind, TurnCancelStatus
 from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentScratch
@@ -19,7 +20,12 @@ from rpg_core.rp_modules.plot_scheduler.judge import (
 from rpg_core.scene import SceneTracker
 from rpg_core.scene.status import SceneStatusService
 from rpg_data import models
-from tests.support.scripted_llm import response, tool_call
+from tests.support.scripted_llm import (
+    CONFIG_PROVIDER_KEY,
+    InvalidChatResponseProvider,
+    response,
+    tool_call,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -48,6 +54,102 @@ async def test_non_stream_provider_failure_discards_everything_and_reuses_turn_i
 
 
 @pytest.mark.asyncio
+async def test_contract_error_discards_all_staged_turn_state(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+) -> None:
+    session = integration_data_gateway.sessions.get_session("integration_status")
+    assert session is not None
+    status_manager = integration_status_agent._lifecycle.resources.status_manager
+    table = status_manager.list_context_tables()[0]
+    table_id = int(table["id"])
+    scene_before = SceneStatusService(
+        integration_data_gateway.status
+    ).get_attrs(session.id)
+    status_before = integration_data_gateway.status.get_table_for_session(
+        session.id,
+        table_id,
+    ).document
+
+    management = PlotScheduleManagementService(
+        integration_data_gateway.plot_scheduling
+    )
+    pool = management.create_pool(
+        CreatePlotPoolCommand(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            name="契约回滚测试池",
+            selection_mode=models.PLOT_POOL_SEQUENTIAL,
+            priority=100,
+        )
+    )
+    event = management.create_event(
+        CreatePlotEventCommand(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            pool_id=pool.id,
+            title="不得提交的信使",
+            directive="让信使递交一封不得落库的信。",
+            dispatch_mode=models.PLOT_DISPATCH_FORCED,
+            scheduled_time=SceneTime(1, 1, 1, 0),
+        )
+    )
+    opportunity = integration_data_gateway.plot_scheduling.replace_scene_opportunity(
+        session.id,
+        expected_version=None,
+        source_turn_id=9,
+    )
+    scripted_llm_manager.status.queue_chat(
+        response(
+            model="status-model",
+            tool_calls=[
+                tool_call(
+                    "rp_story_outcome",
+                    '{"reason":"能否接住突然飞来的信件"}',
+                )
+            ],
+        )
+    )
+    invalid_main = InvalidChatResponseProvider(
+        {"content": "secret response must not leak"},
+        model="config-model",
+    )
+    scripted_llm_manager.main[CONFIG_PROVIDER_KEY] = invalid_main
+
+    with pytest.raises(LLMProviderContractError) as raised:
+        await integration_status_agent.send("我尝试接住飞来的信件")
+
+    assert "rpg_core.main_chat_loop" in str(raised.value)
+    assert "secret response must not leak" not in str(raised.value)
+    assert len(invalid_main.calls) == 1
+    assert integration_status_agent.history == []
+    assert integration_data_gateway.messages.count(session.id) == 0
+    assert integration_data_gateway.backup.messages.count(session.id) == 0
+    assert integration_data_gateway.narrative_outcomes.get_for_turn(
+        session.id,
+        1,
+    ) is None
+    assert integration_data_gateway.plot_scheduling.list_session_decisions(
+        session.id
+    ) == []
+    assert (
+        integration_data_gateway.plot_scheduling.get_scene_opportunity(session.id)
+        == opportunity
+    )
+    assert SceneStatusService(integration_data_gateway.status).get_attrs(
+        session.id
+    ) == scene_before
+    status_after = integration_data_gateway.status.get_table_for_session(
+        session.id,
+        table_id,
+    ).document
+    assert status_after == status_before
+    assert integration_status_agent.session_manager.count_new_turns_since_story() == 0
+    assert event.id > 0
+
+
+@pytest.mark.asyncio
 async def test_stream_provider_failure_emits_error_without_committing_partial_turn(
     integration_agent,
     integration_data_gateway,
@@ -68,6 +170,36 @@ async def test_stream_provider_failure_emits_error_without_committing_partial_tu
 
     await integration_agent.send("retry after stream failure")
     assert [row.turn_id for row in integration_data_gateway.messages.list("integration_smoke")] == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_stream_contract_error_emits_only_error_and_never_done(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+) -> None:
+    scripted_llm_manager.status = InvalidChatResponseProvider(
+        {"tool_calls": [], "secret": "stream secret must not leak"},
+        model="status-model",
+    )
+
+    events = [
+        event
+        async for event in integration_status_agent.send_stream(
+            "契约错误不得提交",
+            request_id="contract_stream",
+        )
+    ]
+
+    assert [event.kind for event in events] == [StreamEventKind.ERROR]
+    assert all(event.kind is not StreamEventKind.DONE for event in events)
+    assert all(event.committed_turn_id is None for event in events)
+    assert "LLM provider contract violation" in events[0].content
+    assert "stream secret must not leak" not in events[0].content
+    assert integration_status_agent.history == []
+    assert integration_data_gateway.messages.count("integration_status") == 0
+    assert integration_data_gateway.backup.messages.count("integration_status") == 0
+    assert scripted_llm_manager.main_provider().calls == []
 
 
 @pytest.mark.asyncio

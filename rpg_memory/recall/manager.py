@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from commons.types import Metadata
+from llm_client.client import LLMProviderContractError
 from loguru import logger
 from rpg_memory.recall.query import RecallQueryContext
 
@@ -202,6 +203,8 @@ class MemoryRecallManager:
                 plan = await self._query_planner.plan_context(
                     context.to_retrieval_query()
                 )
+            except LLMProviderContractError:
+                raise
             except Exception as exc:
                 logger.warning("[MemoryRecallManager] recall planner failed: {}", exc)
                 self._recalled_store.set_items([])
@@ -216,6 +219,8 @@ class MemoryRecallManager:
                         plan.normalized_query or context.current_input,
                         self._top_k,
                     )
+            except LLMProviderContractError:
+                raise
             except Exception as exc:
                 logger.warning("[MemoryRecallManager] recall retriever failed: {}", exc)
                 self._recalled_store.set_items([])
@@ -253,6 +258,8 @@ class MemoryRecallManager:
                         )
                     return self._items(raw)
                 candidates = await search(plan, top_k)
+            except LLMProviderContractError:
+                raise
             except Exception as exc:
                 logger.warning("[MemoryRecallManager] hybrid_search failed: {}", exc)
                 return []
