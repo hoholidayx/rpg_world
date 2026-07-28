@@ -63,6 +63,7 @@ class TurnExecutionPolicy:
     run_status_preflight: bool
     expose_state_tools: bool
     expose_rp_modules: bool
+    expose_plot_sandbox_tools: bool
 
     @classmethod
     def for_mode(cls, mode: TurnMode) -> "TurnExecutionPolicy":
@@ -71,11 +72,13 @@ class TurnExecutionPolicy:
                 run_status_preflight=False,
                 expose_state_tools=False,
                 expose_rp_modules=False,
+                expose_plot_sandbox_tools=True,
             )
         return cls(
             run_status_preflight=True,
             expose_state_tools=True,
             expose_rp_modules=True,
+            expose_plot_sandbox_tools=(mode is TurnMode.GM),
         )
 
 

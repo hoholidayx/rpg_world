@@ -14,6 +14,7 @@ from play_api.delete_tokens import reset_delete_confirmation_tokens
 from play_api.routers.sessions import _agent_call, _turns_from_history
 from play_api.sse_protocol import AgentEventKind, PLAY_SSE_SCHEMA_VERSION, PlaySSEType
 from rpg_core.agent.protocol import TurnCancelStatus
+from rpg_core.session.catalog import SessionCatalogService
 from rpg_core.session.derivation import SessionDerivationService
 from rpg_core.session.role import SessionRoleService
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
@@ -118,6 +119,9 @@ class _FakeAgentClient:
         self.story_main_llm_provider_key: str | None = None
         self.session_main_llm_provider_key: str | None = None
 
+    async def aclose(self) -> None:
+        return None
+
     @staticmethod
     def _main_llm_option(provider_key: str) -> dict[str, object]:
         return {
@@ -154,6 +158,43 @@ class _FakeAgentClient:
                 self._main_llm_option("config_chat"),
                 self._main_llm_option("alternate_chat"),
             ],
+        }
+
+    async def create_session(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        title: str = "",
+        description: str = "",
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "create-session",
+                workspace_id,
+                str(story_id),
+                title,
+                description,
+            )
+        )
+        gateway = get_data_service_gateway()
+        session = SessionCatalogService(gateway.sessions).create_session(
+            workspace_id,
+            story_id,
+            title=title,
+            description=description,
+        )
+        if session is None:
+            raise AgentClientError(
+                "story not found in workspace",
+                status_code=404,
+            )
+        return {
+            "status": "created",
+            "workspace": workspace_id,
+            "story_id": story_id,
+            "session_id": session.id,
+            "title": session.title,
         }
 
     async def get_story_main_llm(
@@ -387,12 +428,16 @@ class _StreamingAgentClient(_FakeAgentClient):
         )
 
 
-def test_history_endpoint_rejects_invalid_turn_metadata(tmp_path, monkeypatch) -> None:
+def test_history_endpoint_rejects_invalid_turn_metadata(
+    tmp_path,
+    monkeypatch,
+    start_play_client,
+) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     monkeypatch.setattr(agent_client, "_client", _InvalidHistoryAgentClient())
     reset_delete_confirmation_tokens()
-    client = TestClient(app)
+    client = start_play_client()
 
     response = client.get("/play-api/v1/sessions/s_forest001/history")
 
@@ -747,7 +792,11 @@ def test_main_llm_endpoint_preserves_agent_validation_status(tmp_path, monkeypat
     assert response.json()["detail"] == "provider is not selectable"
 
 
-def test_history_page_endpoint_returns_turn_window(tmp_path, monkeypatch) -> None:
+def test_history_page_endpoint_returns_turn_window(
+    tmp_path,
+    monkeypatch,
+    start_play_client,
+) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     reset_data_service_gateways()
@@ -759,7 +808,7 @@ def test_history_page_endpoint_returns_turn_window(tmp_path, monkeypatch) -> Non
         gateway.messages.append(session_id, "user", f"u{turn_id}", turn_id=turn_id, seq_in_turn=1)
         gateway.messages.append(session_id, "assistant", f"a{turn_id}", turn_id=turn_id, seq_in_turn=2)
 
-    client = TestClient(app)
+    client = start_play_client()
 
     latest = client.get(f"/play-api/v1/sessions/{session_id}/history-page", params={"limit": 2})
     before = client.get(
@@ -801,7 +850,11 @@ def test_history_page_endpoint_returns_turn_window(tmp_path, monkeypatch) -> Non
     assert missing.json()["detail"] == "turn not found"
 
 
-def test_history_page_endpoint_validates_query_and_rejects_dirty_writes(tmp_path, monkeypatch) -> None:
+def test_history_page_endpoint_validates_query_and_rejects_dirty_writes(
+    tmp_path,
+    monkeypatch,
+    start_play_client,
+) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     reset_data_service_gateways()
@@ -812,7 +865,7 @@ def test_history_page_endpoint_validates_query_and_rejects_dirty_writes(tmp_path
     first = gateway.messages.append(session_id, "user", "u1", turn_id=1, seq_in_turn=1)
     gateway.messages.append(session_id, "assistant", "a1", turn_id=1, seq_in_turn=2)
 
-    client = TestClient(app)
+    client = start_play_client()
 
     both = client.get(
         f"/play-api/v1/sessions/{session_id}/history-page",
@@ -1188,13 +1241,17 @@ def test_provisioning_session_is_hidden_from_play_session_and_status_routes(
     assert gateway.catalog.get_session(target.id) is not None
 
 
-def test_play_api_contracts(tmp_path, monkeypatch) -> None:
+def test_play_api_contracts(
+    tmp_path,
+    monkeypatch,
+    start_play_client,
+) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     fake_agent = _FakeAgentClient()
     monkeypatch.setattr(agent_client, "_client", fake_agent)
     reset_delete_confirmation_tokens()
-    client = TestClient(app)
+    client = start_play_client()
     demo_session_id = "s_forest001"
 
     workspaces = client.get("/play-api/v1/workspaces")
@@ -1313,13 +1370,19 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
 
     created = client.post(
         "/play-api/v1/sessions",
-        json={"workspaceId": "demo_workspace", "storyId": 1, "title": "新会话"},
+        json={
+            "workspaceId": "demo_workspace",
+            "storyId": 1,
+            "title": "新会话",
+            "description": "经 Agent 创建",
+        },
     )
     assert created.status_code == 200
     assert created.json()["id"].startswith("s_")
     assert len(created.json()["id"]) == 12
     assert created.json()["id"][2:].isalnum()
     assert created.json()["title"] == "新会话"
+    assert created.json()["description"] == "经 Agent 创建"
     assert created.json()["playerCharacterStatus"] == "invalid"
     assert created.json()["playerCharacter"] is None
 
@@ -1328,7 +1391,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     )
     assert scene.status_code == 200
     assert scene.json()["location"] == "北境森林·石林·祭坛下层回廊"
-    assert scene.json()["time"] == "第 1 年 1 月 1 日 9 时 20 分"
+    assert scene.json()["time"] == "1 年 1 月 1 日 9 时 20 分"
     assert scene.json()["presentCharacters"] == ["Bob", "Alice", "灰烬守门人"]
 
     commands = client.get(
@@ -1389,6 +1452,13 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert ("send", demo_session_id) in fake_agent.calls
     assert ("truncate-turn", demo_session_id, "2") in fake_agent.calls
     assert ("delete-message", demo_session_id, "1") in fake_agent.calls
+    assert (
+        "create-session",
+        "demo_workspace",
+        "1",
+        "新会话",
+        "经 Agent 创建",
+    ) in fake_agent.calls
 
     character_base = "/play-api/v1/workspaces/demo_workspace/stories/1/characters"
     characters = client.get(character_base)

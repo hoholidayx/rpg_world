@@ -19,6 +19,7 @@ from rpg_core.agent.tools.summary import SummaryToolSet
 from rpg_core.agent.tools.summary_query import SummaryQueryService
 from rpg_core.agent.turn import TurnExecutionPolicy, TurnExecutionSnapshot, TurnMode
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
+from rpg_core.rp_modules.plot_scheduler.tools import PlotSandboxToolProvider
 from rpg_core.scene import SCENE_TOOL_NAMES
 from rpg_core.settings import settings
 from rpg_core.status.tools import (
@@ -29,6 +30,8 @@ from rpg_core.tooling.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
+    from rpg_core.agent.turn.transaction import TurnScratch
+    from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshot
     from rpg_core.scene import SceneTracker
     from rpg_core.status.manager import StatusManager
 
@@ -46,6 +49,7 @@ class AgentToolService:
         summary_query: SummaryQueryService,
         extra_tools: list[BaseTool] | None = None,
         lookup_tools_enabled: bool | None = None,
+        plot_sandbox_tools: PlotSandboxToolProvider | None = None,
     ) -> None:
         self._resources = resources
         if lookup_tools_enabled is None:
@@ -60,6 +64,7 @@ class AgentToolService:
             self._summary_tools,
         )
         self._extra_tools = list(extra_tools or [])
+        self._plot_sandbox_tools = plot_sandbox_tools or PlotSandboxToolProvider()
         self._base_registry: ToolRegistry | None = None
 
     @property
@@ -106,6 +111,8 @@ class AgentToolService:
         *,
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
+        turn_scratch: "TurnScratch | None" = None,
+        plot_schedule_snapshot: "PlotScheduleSnapshot | None" = None,
     ) -> ToolRegistry | None:
         registry = ToolRegistry()
         policy = (
@@ -125,6 +132,18 @@ class AgentToolService:
                 registry.register(tool)
         if rp_module_runtime is not None and policy.expose_rp_modules:
             registry.register_all(rp_module_runtime.get_main_agent_tools())
+        if (
+            policy.expose_plot_sandbox_tools
+            and turn_scratch is not None
+            and plot_schedule_snapshot is not None
+            and plot_schedule_snapshot.enabled
+        ):
+            registry.register_all(
+                self._plot_sandbox_tools.get_tools(
+                    plot_schedule_snapshot,
+                    turn_scratch,
+                )
+            )
         if policy.expose_state_tools:
             registry.register_all(
                 list(self.state_tools(scene_tracker, status_manager).tools)

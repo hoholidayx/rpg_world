@@ -23,6 +23,7 @@ from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleDataService
+from rpg_data.services.runtime_maintenance import RuntimeMaintenanceDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.session_reference import SessionReferenceDataService
@@ -63,6 +64,7 @@ class DataServiceGateway:
         self._narrative_outcomes: NarrativeOutcomeDataService | None = None
         self._plot_scheduling: PlotSchedulingDataService | None = None
         self._rp_modules: RPModuleDataService | None = None
+        self._runtime_maintenance: RuntimeMaintenanceDataService | None = None
         self._sessions: SessionDataService | None = None
         self._session_composer: SessionComposerDataService | None = None
         self._session_reference: SessionReferenceDataService | None = None
@@ -205,6 +207,18 @@ class DataServiceGateway:
         return self._rp_modules
 
     @property
+    def runtime_maintenance(self) -> RuntimeMaintenanceDataService:
+        database = self.database
+        if self._runtime_maintenance is None:
+            logger.debug(
+                "creating runtime maintenance data service db_path=%s",
+                self._database_path,
+            )
+            self._runtime_maintenance = RuntimeMaintenanceDataService(database)
+        self._ensure_bound()
+        return self._runtime_maintenance
+
+    @property
     def sessions(self) -> SessionDataService:
         database = self.database
         if self._sessions is None:
@@ -315,6 +329,7 @@ class DataServiceGateway:
         self._narrative_outcomes = None
         self._plot_scheduling = None
         self._rp_modules = None
+        self._runtime_maintenance = None
         self._sessions = None
         self._session_composer = None
         self._session_reference = None

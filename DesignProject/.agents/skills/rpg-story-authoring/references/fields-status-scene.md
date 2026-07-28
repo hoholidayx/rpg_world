@@ -1,6 +1,6 @@
 # 状态表与 Scene 字段
 
-> authoringRulesVersion=1.1 · catalogDigest=b3c6a15dd767c9c44e90fd9371f900df9be17582c0f2f46175e460447d8d4b1c
+> authoringRulesVersion=1.1 · catalogDigest=1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a
 
 本文由 RPG World 字段语义单一真源生成；不要手工修改。
 
@@ -35,4 +35,4 @@
 | Rule ID | 级别 | 触发含义 | 修正建议 |
 | --- | --- | --- | --- |
 | `status.update-rule-scheduling` | warning | updateRule 疑似包含频率、延迟、定时或读写权限语义。 | 改写为当前 turn 的事实判定条件；删除每 N 回合、延迟、manual/read-only 等内容。 |
-| `status.scene-placeholder-year` | warning | Scene 时间使用了疑似占位年份。 | 若故事已锚定现实年代，使用第 2019 年、第 2020 年等虚拟年份。 |
+| `status.scene-placeholder-year` | warning | Scene 时间使用了疑似占位年份。 | 若故事已锚定现实年代，使用 2019 年、2020 年等虚拟年份。 |

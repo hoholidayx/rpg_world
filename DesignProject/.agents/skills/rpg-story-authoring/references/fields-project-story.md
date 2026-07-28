@@ -1,6 +1,6 @@
 # 项目、Story 与 Opening 字段
 
-> authoringRulesVersion=1.1 · catalogDigest=b3c6a15dd767c9c44e90fd9371f900df9be17582c0f2f46175e460447d8d4b1c
+> authoringRulesVersion=1.1 · catalogDigest=1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a
 
 本文由 RPG World 字段语义单一真源生成；不要手工修改。
 
@@ -69,7 +69,7 @@ Character、Lorebook 与 Status 都直接归 Story 所有；不得设计 Workspa
 | `StoryCore` | `/story/storyPrompt` | 每个可推进世界 turn 使用的固定 Story 规则与叙事约束。 | 不要写易变 Scene、当前状态值或 message_mode 提示。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
 | `StoryCore` | `/story/summary` | Story 的短管理摘要，说明体验与前提，不写执行指令。 | 不要写固定 Prompt、逐场景正文或当前 Session 状态。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
 | `StoryCore` | `/story/themes` | 需要持续回响的主题关键词或短语。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
-| `StoryCore` | `/story/timeSetting` | 故事虚拟年代、历法与时间锚点的文字说明。 | 不要用“第 1 年”代替已确定的 2019、2020 等虚拟年份。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
+| `StoryCore` | `/story/timeSetting` | 故事虚拟年代、历法与时间锚点的文字说明。 | 不要用“1 年”代替已确定的 2019、2020 等虚拟年份。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
 | `StoryCore` | `/story/title` | 面向作者、玩家或管理界面的短标题。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 进入 Story 固定层或 Story 管理数据，并影响后续 Session。 |
 
 ## 自动诊断

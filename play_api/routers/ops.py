@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from play_api.backends import get_data_manager_backend
+from play_api.backends import (
+    PlayRuntimeMaintenanceBackend,
+    PlayStoryAssetBackend,
+)
+from play_api.dependencies import (
+    get_runtime_maintenance_backend,
+    get_story_asset_backend,
+)
 from play_api.delete_tokens import (
     DELETE_CONFIRMATION_HEADER,
     consume_delete_confirmation_token,
@@ -116,8 +123,13 @@ def _request_unindexed_items(request: UnindexedRuntimeDeleteRequest) -> list[Uni
 
 
 @router.get("/unindexed-runtime", response_model=UnindexedRuntimeScanResponse)
-async def scan_unindexed_runtime(workspace_id: str) -> UnindexedRuntimeScanResponse:
-    scan = await get_data_manager_backend().scan_unindexed_runtime(workspace_id)
+async def scan_unindexed_runtime(
+    workspace_id: str,
+    maintenance: PlayRuntimeMaintenanceBackend = Depends(
+        get_runtime_maintenance_backend
+    ),
+) -> UnindexedRuntimeScanResponse:
+    scan = await maintenance.scan_unindexed_runtime(workspace_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     return UnindexedRuntimeScanResponse(
@@ -128,9 +140,14 @@ async def scan_unindexed_runtime(workspace_id: str) -> UnindexedRuntimeScanRespo
 @router.post("/unindexed-runtime/delete-token", response_model=PlayDeleteConfirmationToken)
 async def create_unindexed_runtime_delete_token(
     request: UnindexedRuntimeDeleteRequest,
+    maintenance: PlayRuntimeMaintenanceBackend = Depends(
+        get_runtime_maintenance_backend
+    ),
 ) -> PlayDeleteConfirmationToken:
     request_items = _request_unindexed_items(request)
-    scan = await get_data_manager_backend().scan_unindexed_runtime(request_items[0].workspace_id)
+    scan = await maintenance.scan_unindexed_runtime(
+        request_items[0].workspace_id
+    )
     if scan is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     targets = _dedupe_unindexed_item_dicts([_unindexed_item_dict(item) for item in request_items])
@@ -145,11 +162,14 @@ async def delete_unindexed_runtime(
     request: UnindexedRuntimeDeleteRequest,
     x_delete_confirm_token: str | None = Header(default=None, alias=DELETE_CONFIRMATION_HEADER),
     confirm_token: str | None = Query(default=None),
+    maintenance: PlayRuntimeMaintenanceBackend = Depends(
+        get_runtime_maintenance_backend
+    ),
 ) -> None:
     request_items = _request_unindexed_items(request)
     _require_delete_token(x_delete_confirm_token or confirm_token, _unindexed_delete_purpose(request_items))
     targets = _dedupe_unindexed_item_dicts([_unindexed_item_dict(item) for item in request_items])
-    deleted = await get_data_manager_backend().delete_unindexed_runtime_items(targets)
+    deleted = await maintenance.delete_unindexed_runtime_items(targets)
     if deleted is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     if not deleted:
@@ -164,8 +184,9 @@ async def create_lorebook_entry_delete_token(
     workspace_id: str,
     story_id: int,
     entry_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlayDeleteConfirmationToken:
-    entry = await get_data_manager_backend().get_lorebook_entry(
+    entry = await assets.get_lorebook_entry(
         workspace_id,
         story_id,
         entry_id,
@@ -188,12 +209,13 @@ async def delete_lorebook_entry(
     entry_id: int,
     x_delete_confirm_token: str | None = Header(default=None, alias=DELETE_CONFIRMATION_HEADER),
     confirm_token: str | None = Query(default=None),
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> None:
     _require_delete_token(
         x_delete_confirm_token or confirm_token,
         _entry_delete_purpose(workspace_id, story_id, entry_id),
     )
-    deleted = await get_data_manager_backend().delete_lorebook_entry(
+    deleted = await assets.delete_lorebook_entry(
         workspace_id,
         story_id,
         entry_id,

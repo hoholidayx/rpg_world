@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal, TypeVar
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from commons.scene_time import SceneTime
+from play_api.backends import PlayStoryAssetBackend
+from play_api.dependencies import get_story_asset_backend
 from play_api.routers._locator import resolve_session_or_404
 from rpg_core.rp_modules.plot_scheduler import (
     CreatePlotEventCommand,
@@ -30,9 +32,7 @@ from rpg_core.rp_modules.plot_scheduler import (
     UpdatePlotOutlineCommand,
     UpdatePlotPoolCommand,
 )
-from rpg_core.scene.status import SceneStatusService
 from rpg_data import models
-from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(tags=["play-plot-scheduling"])
 _T = TypeVar("_T")
@@ -260,8 +260,9 @@ class PlotDecisionResponse(BaseModel):
     container_id: int = Field(alias="containerId")
     decision_status: str = Field(alias="decisionStatus")
     dispatch_mode: str = Field(alias="dispatchMode")
-    scene_time: SceneTimePayload = Field(alias="sceneTime")
-    scene_time_ordinal: int = Field(alias="sceneTimeOrdinal")
+    selection_origin: str = Field(alias="selectionOrigin")
+    scene_time: SceneTimePayload | None = Field(alias="sceneTime")
+    scene_time_ordinal: int | None = Field(alias="sceneTimeOrdinal")
     event_snapshot: dict[str, object] = Field(alias="eventSnapshot")
     reason: str
     error_code: str = Field(alias="errorCode")
@@ -351,12 +352,16 @@ def _service_call(call: Callable[[], _T]) -> _T:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _plot_management() -> PlotScheduleManagementService:
-    return PlotScheduleManagementService(get_data_service_gateway().plot_scheduling)
+def _plot_management(
+    assets: PlayStoryAssetBackend,
+) -> PlotScheduleManagementService:
+    return assets.plot_management
 
 
-def _plot_story_projection() -> PlotStoryProjectionService:
-    return PlotStoryProjectionService(get_data_service_gateway().plot_scheduling)
+def _plot_story_projection(
+    assets: PlayStoryAssetBackend,
+) -> PlotStoryProjectionService:
+    return assets.plot_story_projection
 
 
 def _time_response(value: SceneTime | None) -> SceneTimePayload | None:
@@ -461,6 +466,7 @@ def _decision_response(
         containerId=value.container_id,
         decisionStatus=value.decision_status,
         dispatchMode=value.dispatch_mode,
+        selectionOrigin=value.selection_origin,
         sceneTime=_time_response(value.scene_time),
         sceneTimeOrdinal=value.scene_time_ordinal,
         eventSnapshot=dict(value.event_snapshot),
@@ -702,8 +708,9 @@ def _node_update_command(
 async def get_story_plot_schedule(
     workspace_id: str,
     story_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotScheduleResponse:
-    schedule = _plot_management().get_story_schedule(
+    schedule = _plot_management(assets).get_story_schedule(
         workspace_id,
         story_id,
     )
@@ -721,8 +728,9 @@ async def create_plot_pool(
     workspace_id: str,
     story_id: int,
     payload: PlotPoolInput,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotPoolResponse:
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.create_pool(
             CreatePlotPoolCommand(
@@ -748,8 +756,9 @@ async def update_plot_pool(
     story_id: int,
     pool_id: int,
     payload: PlotPoolPatch,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotPoolResponse:
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.update_pool(
             _pool_update_command(workspace_id, story_id, pool_id, payload)
@@ -762,8 +771,13 @@ async def update_plot_pool(
     "/workspaces/{workspace_id}/stories/{story_id}/plot-scheduling/pools/{pool_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_plot_pool(workspace_id: str, story_id: int, pool_id: int) -> Response:
-    service = _plot_management()
+async def delete_plot_pool(
+    workspace_id: str,
+    story_id: int,
+    pool_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
+) -> Response:
+    service = _plot_management(assets)
     _service_call(lambda: service.delete_pool(workspace_id, story_id, pool_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -777,8 +791,9 @@ async def create_plot_event(
     workspace_id: str,
     story_id: int,
     payload: PlotEventInput,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotEventResponse:
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.create_event(
             CreatePlotEventCommand(
@@ -819,8 +834,9 @@ async def update_plot_event(
     story_id: int,
     event_id: int,
     payload: PlotEventPatch,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotEventResponse:
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.update_event(
             _event_update_command(workspace_id, story_id, event_id, payload)
@@ -833,8 +849,13 @@ async def update_plot_event(
     "/workspaces/{workspace_id}/stories/{story_id}/plot-scheduling/events/{event_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_plot_event(workspace_id: str, story_id: int, event_id: int) -> Response:
-    service = _plot_management()
+async def delete_plot_event(
+    workspace_id: str,
+    story_id: int,
+    event_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
+) -> Response:
+    service = _plot_management(assets)
     _service_call(lambda: service.delete_event(workspace_id, story_id, event_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -848,8 +869,9 @@ async def reorder_plot_events(
     story_id: int,
     pool_id: int,
     payload: ReorderPayload,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> list[PlotEventResponse]:
-    service = _plot_management()
+    service = _plot_management(assets)
     values = _service_call(
         lambda: service.reorder_events(
             workspace_id,
@@ -870,8 +892,9 @@ async def create_plot_outline(
     workspace_id: str,
     story_id: int,
     payload: PlotOutlineInput,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotOutlineResponse:
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.create_outline(
             CreatePlotOutlineCommand(
@@ -896,8 +919,9 @@ async def update_plot_outline(
     story_id: int,
     outline_id: int,
     payload: PlotOutlinePatch,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotOutlineResponse:
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.update_outline(
             _outline_update_command(workspace_id, story_id, outline_id, payload)
@@ -914,8 +938,9 @@ async def delete_plot_outline(
     workspace_id: str,
     story_id: int,
     outline_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> Response:
-    service = _plot_management()
+    service = _plot_management(assets)
     _service_call(lambda: service.delete_outline(workspace_id, story_id, outline_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -930,8 +955,9 @@ async def create_plot_node(
     story_id: int,
     outline_id: int,
     payload: PlotNodeInput,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotNodeResponse:
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.create_node(
             CreatePlotNodeCommand(
@@ -959,8 +985,9 @@ async def update_plot_node(
     outline_id: int,
     node_id: int,
     payload: PlotNodePatch,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotNodeResponse:
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.update_node(
             _node_update_command(
@@ -984,8 +1011,9 @@ async def delete_plot_node(
     story_id: int,
     outline_id: int,
     node_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> Response:
-    service = _plot_management()
+    service = _plot_management(assets)
     _service_call(
         lambda: service.delete_node(workspace_id, story_id, outline_id, node_id)
     )
@@ -1001,8 +1029,9 @@ async def reorder_plot_nodes(
     story_id: int,
     outline_id: int,
     payload: ReorderPayload,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> list[PlotNodeResponse]:
-    service = _plot_management()
+    service = _plot_management(assets)
     values = _service_call(
         lambda: service.reorder_nodes(
             workspace_id,
@@ -1021,10 +1050,11 @@ async def reorder_plot_nodes(
 async def get_session_plot_story(
     session_id: str,
     reveal_spoilers: bool = Query(default=False, alias="revealSpoilers"),
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> SessionPlotStoryResponse:
-    await resolve_session_or_404(session_id)
     value = _service_call(
-        lambda: _plot_story_projection().project(
+        lambda: _plot_story_projection(assets).project(
             session_id,
             reveal_spoilers=reveal_spoilers,
         )
@@ -1040,9 +1070,10 @@ async def get_session_plot_schedule(
     session_id: str,
     limit: int = Query(default=50, ge=1, le=models.PLOT_DECISION_PAGE_SIZE_MAX),
     before_id: int | None = Query(default=None, alias="beforeId", gt=0),
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> SessionPlotScheduleResponse:
-    await resolve_session_or_404(session_id)
-    service = _plot_management()
+    service = _plot_management(assets)
     schedule, overrides = _service_call(lambda: service.get_session_schedule(session_id))
     decisions = _service_call(lambda: service.list_session_decisions(
         session_id,
@@ -1051,8 +1082,7 @@ async def get_session_plot_schedule(
     ))
     has_more = len(decisions) > limit
     decisions = decisions[:limit]
-    gateway = get_data_service_gateway()
-    attrs = SceneStatusService(gateway.status).get_attrs(session_id)
+    attrs = assets.get_scene_attrs(session_id)
     scene_time: SceneTime | None = None
     scene_time_error = ""
     raw_time = str((attrs or {}).get("时间", "") or "").strip()
@@ -1082,9 +1112,10 @@ async def set_session_plot_event_override(
     session_id: str,
     event_id: int,
     payload: PlotOverridePayload,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotOverridesResponse:
-    await resolve_session_or_404(session_id)
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.set_session_event_disabled(
             session_id,
@@ -1103,9 +1134,10 @@ async def set_session_plot_node_override(
     session_id: str,
     node_id: int,
     payload: PlotOverridePayload,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlotOverridesResponse:
-    await resolve_session_or_404(session_id)
-    service = _plot_management()
+    service = _plot_management(assets)
     value = _service_call(
         lambda: service.set_session_node_disabled(
             session_id,

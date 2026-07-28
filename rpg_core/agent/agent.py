@@ -38,6 +38,12 @@ from rpg_core.agent.turn.service import AgentTurnService
 from rpg_core.agent.runtime.main_llm import MainLLMSelectionService
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshotResolver
 from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
+from rpg_core.rp_modules.plot_scheduler.manual_injection import (
+    PlotPendingInjectionCommitService,
+)
+from rpg_core.rp_modules.plot_scheduler.scene_opportunity import (
+    PlotSceneOpportunityCommitService,
+)
 from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
 from rpg_core.rp_modules.application import RPModuleApplicationService
 from rpg_core.rp_modules.registry import RPModuleRegistry
@@ -183,6 +189,12 @@ class RPGGameAgent:
                     gateway.narrative_outcomes
                 ),
                 plot_schedule_ledger=PlotScheduleLedgerService(
+                    gateway.plot_scheduling
+                ),
+                plot_pending_injection_commit=PlotPendingInjectionCommitService(
+                    gateway.plot_scheduling
+                ),
+                plot_scene_opportunity_commit=PlotSceneOpportunityCommitService(
                     gateway.plot_scheduling
                 ),
             ),

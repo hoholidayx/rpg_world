@@ -40,7 +40,12 @@ def _job_payload(
     }
 
 
-class _DerivationAgentClient:
+class _ClosableAgentClient:
+    async def aclose(self) -> None:
+        return None
+
+
+class _DerivationAgentClient(_ClosableAgentClient):
     def __init__(self) -> None:
         self.create_calls: list[tuple[str, int, str]] = []
         self.get_calls: list[str] = []
@@ -60,7 +65,7 @@ class _DerivationAgentClient:
         return _job_payload(status="ready", stage="ready")
 
 
-class _RejectingDerivationAgentClient:
+class _RejectingDerivationAgentClient(_ClosableAgentClient):
     async def create_session_derivation(
         self,
         source_session_id: str,
@@ -76,13 +81,13 @@ class _RejectingDerivationAgentClient:
         )
 
 
-class _MissingDerivationAgentClient:
+class _MissingDerivationAgentClient(_ClosableAgentClient):
     async def get_session_derivation(self, job_id: str) -> dict[str, object]:
         del job_id
         raise AgentClientError("derivation job not found", status_code=404)
 
 
-class _UnavailableDerivationAgentClient:
+class _UnavailableDerivationAgentClient(_ClosableAgentClient):
     async def get_session_derivation(self, job_id: str) -> dict[str, object]:
         del job_id
         raise AgentServiceUnavailable("Agent service unavailable: connection refused")

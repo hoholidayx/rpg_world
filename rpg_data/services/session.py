@@ -456,6 +456,66 @@ class SessionDataService:
     ) -> int:
         return self._plot.retain_decision_turns(str(session_id), turn_ids)
 
+    def delete_pending_plot_injection_requested_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._plot.delete_pending_injection_requested_for_turn(
+            str(session_id),
+            int(turn_id),
+        )
+
+    def delete_pending_plot_injection_requested_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._plot.delete_pending_injection_requested_from_turn(
+            str(session_id),
+            int(turn_id),
+        )
+
+    def retain_pending_plot_injection_requested_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int:
+        return self._plot.retain_pending_injection_requested_turns(
+            str(session_id),
+            turn_ids,
+        )
+
+    def delete_plot_scene_opportunity_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._plot.delete_scene_opportunity_for_turn(
+            str(session_id),
+            int(turn_id),
+        )
+
+    def delete_plot_scene_opportunity_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._plot.delete_scene_opportunity_from_turn(
+            str(session_id),
+            int(turn_id),
+        )
+
+    def retain_plot_scene_opportunity_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int:
+        return self._plot.retain_scene_opportunity_turns(
+            str(session_id),
+            turn_ids,
+        )
+
     def update_player_character(
         self,
         session_id: str,
@@ -538,6 +598,12 @@ class SessionDataService:
 
     def clear_plot_decisions(self, session_id: str) -> int:
         return self._plot.clear_decisions(str(session_id))
+
+    def clear_pending_plot_injection(self, session_id: str) -> int:
+        return self._plot.clear_pending_injection(str(session_id))
+
+    def clear_plot_scene_opportunity(self, session_id: str) -> int:
+        return self._plot.clear_scene_opportunity(str(session_id))
 
     def clear_story_memories(self, session_id: str) -> int:
         return self._story_memory.clear(str(session_id))

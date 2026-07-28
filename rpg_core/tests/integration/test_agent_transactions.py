@@ -4,11 +4,21 @@ import asyncio
 
 import pytest
 
+from commons.scene_time import SceneTime
 from llm_client.types import ProviderChunk
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind, TurnCancelStatus
 from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentScratch
+from rpg_core.rp_modules.plot_scheduler import (
+    CreatePlotEventCommand,
+    CreatePlotPoolCommand,
+    PlotScheduleManagementService,
+)
+from rpg_core.rp_modules.plot_scheduler.judge import (
+    PLOT_SUITABILITY_TOOL_NAME,
+)
 from rpg_core.scene import SceneTracker
 from rpg_core.scene.status import SceneStatusService
+from rpg_data import models
 from tests.support.scripted_llm import response, tool_call
 
 pytestmark = pytest.mark.integration
@@ -312,6 +322,13 @@ async def test_status_commit_failure_rolls_back_messages_backup_and_document(
     monkeypatch,
 ):
     status_manager = integration_status_agent._lifecycle.resources.status_manager
+    opportunity = (
+        integration_data_gateway.plot_scheduling.replace_scene_opportunity(
+            "integration_status",
+            expected_version=None,
+            source_turn_id=9,
+        )
+    )
     table = status_manager.list_context_tables()[0]
     table_id = int(table["id"])
     scripted_llm_manager.status.queue_chat(response("", model="status-model"))
@@ -354,6 +371,232 @@ async def test_status_commit_failure_rolls_back_messages_backup_and_document(
     assert integration_status_agent.history == []
     assert integration_data_gateway.messages.count("integration_status") == 0
     assert integration_data_gateway.backup.messages.count("integration_status") == 0
+    assert (
+        integration_data_gateway.plot_scheduling.get_scene_opportunity(
+            "integration_status"
+        )
+        == opportunity
+    )
+
+
+@pytest.mark.asyncio
+async def test_plot_scheduler_consumes_only_prior_committed_scene_change(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    session = integration_data_gateway.sessions.get_session("integration_status")
+    assert session is not None
+    management = PlotScheduleManagementService(
+        integration_data_gateway.plot_scheduling
+    )
+    pool = management.create_pool(
+        CreatePlotPoolCommand(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            name="Scene 机会测试池",
+            selection_mode=models.PLOT_POOL_SEQUENTIAL,
+            priority=100,
+        )
+    )
+    event = management.create_event(
+        CreatePlotEventCommand(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            pool_id=pool.id,
+            title="Scene 变化后的信使",
+            directive="让信使进入大厅并递交密封信。",
+            suitability_hint="信使可以进入当前大厅。",
+            dispatch_mode=models.PLOT_DISPATCH_SOFT,
+            scheduled_time=SceneTime(2, 3, 4, 5),
+        )
+    )
+    status = scripted_llm_manager.status
+    status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                '{"scene":true,"tables":[]}',
+            )],
+        ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "scene_attr",
+                '{"key":"位置","value":"集成测试大厅北侧"}',
+            )],
+        ),
+    )
+
+    first = await integration_status_agent.send("我走到大厅北侧观察门口。")
+
+    assert first.committed_turn_id == 1
+    assert (
+        integration_data_gateway.plot_scheduling.list_session_decisions(
+            session.id
+        )
+        == []
+    )
+    first_opportunity = (
+        integration_data_gateway.plot_scheduling.get_scene_opportunity(
+            session.id
+        )
+    )
+    assert first_opportunity is not None
+    assert first_opportunity.source_turn_id == 1
+    assert scripted_llm_manager.plot_scheduler.calls == []
+    first_main_input = str(
+        [
+            message
+            for message in scripted_llm_manager.main_provider().calls[-1].messages
+            if message.get("role") == "user"
+        ][-1]["content"]
+    )
+    assert "[engine_plot_directive]" not in first_main_input
+
+    status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                '{"scene":false,"tables":[]}',
+            )],
+        ),
+    )
+    scripted_llm_manager.plot_scheduler.queue_chat(
+        response(
+            "",
+            model="plot-scheduler-model",
+            tool_calls=[tool_call(
+                PLOT_SUITABILITY_TOOL_NAME,
+                '{"suitable":true,"reason":"信使可以进入当前大厅。"}',
+            )],
+        )
+    )
+    scripted_llm_manager.main_provider().queue_chat(
+        RuntimeError("main failed after Plot selection")
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="main failed after Plot selection",
+    ):
+        await integration_status_agent.send("我继续等候门外的动静。")
+
+    assert (
+        integration_data_gateway.plot_scheduling.get_scene_opportunity(
+            session.id
+        )
+        == first_opportunity
+    )
+    assert (
+        integration_data_gateway.plot_scheduling.list_session_decisions(
+            session.id
+        )
+        == []
+    )
+
+    status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                '{"scene":true,"tables":[]}',
+            )],
+        ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "scene_attr",
+                '{"key":"在场人物","value":"测试者、信使"}',
+            )],
+        ),
+    )
+    scripted_llm_manager.plot_scheduler.queue_chat(
+        response(
+            "",
+            model="plot-scheduler-model",
+            tool_calls=[tool_call(
+                PLOT_SUITABILITY_TOOL_NAME,
+                '{"suitable":true,"reason":"信使已经抵达大厅门口。"}',
+            )],
+        )
+    )
+    scripted_llm_manager.main_provider().queue_chat(
+        response("信使进入大厅并递来密封信。", model="config-model")
+    )
+
+    second = await integration_status_agent.send("我继续等候门外的动静。")
+
+    assert second.committed_turn_id == 2
+    assert second.text == "信使进入大厅并递来密封信。"
+    decisions = (
+        integration_data_gateway.plot_scheduling.list_session_decisions(
+            session.id
+        )
+    )
+    assert len(decisions) == 1
+    assert decisions[0].event_id == event.id
+    assert decisions[0].turn_id == 2
+    assert decisions[0].decision_status == models.PLOT_DECISION_TRIGGERED
+    second_opportunity = (
+        integration_data_gateway.plot_scheduling.get_scene_opportunity(
+            session.id
+        )
+    )
+    assert second_opportunity is not None
+    assert second_opportunity.source_turn_id == 2
+    assert second_opportunity.version == first_opportunity.version + 1
+    second_main_input = str(
+        [
+            message
+            for message in scripted_llm_manager.main_provider().calls[-1].messages
+            if message.get("role") == "user"
+        ][-1]["content"]
+    )
+    assert "[engine_plot_directive]" in second_main_input
+    assert event.directive in second_main_input
+    persisted_second_user = next(
+        row.content
+        for row in integration_data_gateway.messages.list(session.id)
+        if row.turn_id == 2 and row.role == models.MESSAGE_ROLE_USER
+    )
+    assert "[engine_plot_directive]" not in persisted_second_user
+
+    status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                '{"scene":false,"tables":[]}',
+            )],
+        ),
+    )
+    third = await integration_status_agent.send("我查看信封的外观。")
+
+    assert third.committed_turn_id == 3
+    assert (
+        integration_data_gateway.plot_scheduling.get_scene_opportunity(
+            session.id
+        )
+        is None
+    )
+    assert len(
+        integration_data_gateway.plot_scheduling.list_session_decisions(
+            session.id
+        )
+    ) == 1
 
 
 @pytest.mark.asyncio

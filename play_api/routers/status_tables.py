@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from commons.types import JsonObject
-from play_api.backends import get_data_manager_backend
+from play_api.backends import PlayStoryAssetBackend
+from play_api.dependencies import get_story_asset_backend
 from rpg_data.model import status as models
 
 router = APIRouter(tags=["play-status-tables"])
@@ -243,8 +244,9 @@ async def list_story_status_tables(
     workspace_id: str,
     story_id: int,
     statusKind: str | None = None,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> list[StatusTableResponse]:
-    items = await get_data_manager_backend().list_story_status_tables(
+    items = await assets.list_story_status_tables(
         workspace_id,
         story_id,
         status_kind=statusKind,
@@ -262,9 +264,10 @@ async def create_story_status_table(
     workspace_id: str,
     story_id: int,
     payload: StoryStatusTablePayload,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> StatusTableResponse:
     try:
-        item = await get_data_manager_backend().create_story_status_table(
+        item = await assets.create_story_status_table(
             workspace_id,
             story_id,
             name=payload.name,
@@ -291,8 +294,9 @@ async def update_story_status_table(
     story_id: int,
     table_id: int,
     payload: StoryStatusTablePatch,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> StatusTableResponse:
-    current_items = await get_data_manager_backend().list_story_status_tables(
+    current_items = await assets.list_story_status_tables(
         workspace_id,
         story_id,
     )
@@ -302,7 +306,7 @@ async def update_story_status_table(
     if current is None:
         raise HTTPException(status_code=404, detail="status table not found")
     try:
-        item = await get_data_manager_backend().update_story_status_table(
+        item = await assets.update_story_status_table(
             workspace_id,
             story_id,
             table_id,
@@ -331,8 +335,9 @@ async def delete_story_status_table(
     workspace_id: str,
     story_id: int,
     table_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> None:
-    deleted = await get_data_manager_backend().delete_story_status_table(
+    deleted = await assets.delete_story_status_table(
         workspace_id,
         story_id,
         table_id,
@@ -345,8 +350,9 @@ async def delete_story_status_table(
 async def list_session_status_tables(
     session_id: str,
     statusKind: str | None = None,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> list[StatusTableResponse]:
-    items = await get_data_manager_backend().list_session_status_tables(
+    items = await assets.list_session_status_tables(
         session_id,
         status_kind=statusKind,
     )
@@ -359,9 +365,10 @@ async def list_session_status_tables(
 async def create_session_status_table(
     session_id: str,
     payload: SessionStatusTablePayload,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> StatusTableResponse:
     try:
-        item = await get_data_manager_backend().create_session_status_table(
+        item = await assets.create_session_status_table(
             session_id,
             name=payload.name,
             status_kind=payload.status_kind,
@@ -385,15 +392,16 @@ async def update_session_status_table(
     session_id: str,
     table_id: int,
     payload: SessionStatusTablePatch,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> StatusTableResponse:
-    current_items = await get_data_manager_backend().list_session_status_tables(session_id)
+    current_items = await assets.list_session_status_tables(session_id)
     if current_items is None:
         raise HTTPException(status_code=404, detail="session not found")
     current = next((item for item in current_items if int(item["id"]) == table_id), None)
     if current is None:
         raise HTTPException(status_code=404, detail="status table not found")
     try:
-        item = await get_data_manager_backend().update_session_status_table(
+        item = await assets.update_session_status_table(
             session_id,
             table_id,
             name=payload.name,
@@ -409,8 +417,12 @@ async def update_session_status_table(
 
 
 @router.delete("/sessions/{session_id}/status-tables/{table_id}", status_code=204)
-async def delete_session_status_table(session_id: str, table_id: int) -> None:
-    deleted = await get_data_manager_backend().delete_session_status_table(
+async def delete_session_status_table(
+    session_id: str,
+    table_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
+) -> None:
+    deleted = await assets.delete_session_status_table(
         session_id,
         table_id,
     )

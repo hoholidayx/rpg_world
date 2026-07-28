@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from play_api.backends import get_data_manager_backend
+from play_api.backends import PlayCatalogBackend
+from play_api.dependencies import get_catalog_backend
 from rpg_core.story.template import validate_story_text_template
 from rpg_data import models
 
@@ -142,25 +143,33 @@ def _story_response(item: dict[str, object]) -> PlayStory:
 
 
 @router.get("", response_model=list[PlayWorkspace])
-async def list_workspaces() -> list[PlayWorkspace]:
-    """Return workspaces from the configured data manager backend."""
-    return [PlayWorkspace(**item) for item in await get_data_manager_backend().list_workspaces()]
+async def list_workspaces(
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> list[PlayWorkspace]:
+    return [PlayWorkspace(**item) for item in await catalog.list_workspaces()]
 
 
 @router.get("/{workspace_id}/stories", response_model=list[PlayStory])
-async def list_stories(workspace_id: str) -> list[PlayStory]:
+async def list_stories(
+    workspace_id: str,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> list[PlayStory]:
     """Return stories in one workspace."""
-    stories = await get_data_manager_backend().list_stories(workspace_id)
+    stories = await catalog.list_stories(workspace_id)
     if stories is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     return [_story_response(item) for item in stories]
 
 
 @router.post("/{workspace_id}/stories", response_model=PlayStory)
-async def create_story(workspace_id: str, payload: PlayStoryPayload) -> PlayStory:
+async def create_story(
+    workspace_id: str,
+    payload: PlayStoryPayload,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> PlayStory:
     """Create story metadata in one workspace."""
     try:
-        story = await get_data_manager_backend().create_story(
+        story = await catalog.create_story(
             workspace_id,
             title=payload.title,
             summary=payload.summary,
@@ -179,10 +188,11 @@ async def update_story(
     workspace_id: str,
     story_id: int,
     payload: PlayStoryPatch,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlayStory:
     """Update story metadata in one workspace."""
     try:
-        story = await get_data_manager_backend().update_story(
+        story = await catalog.update_story(
             workspace_id,
             story_id,
             title=payload.title,

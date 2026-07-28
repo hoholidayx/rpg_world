@@ -419,3 +419,58 @@ def test_session_plot_story_masks_spoilers_and_projects_triggered_sources(
         )
 
     reset_data_service_gateways()
+
+
+def test_manual_plot_decision_contract_allows_missing_scene_time(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "RPG_WORLD_DB_PATH",
+        str(tmp_path / "plot-manual-decision-api.sqlite3"),
+    )
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    gateway = get_data_service_gateway()
+    schedule, _overrides = gateway.plot_scheduling.get_session_schedule(
+        "s_forest001"
+    )
+    event = schedule.events[0]
+    gateway.plot_scheduling.append_decisions(
+        "s_forest001",
+        99,
+        (
+            models.StagedPlotScheduleDecision(
+                source_kind=models.PLOT_SOURCE_POOL,
+                source_id=event.id,
+                event_id=event.id,
+                container_id=event.pool_id,
+                decision_status=models.PLOT_DECISION_TRIGGERED,
+                dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                selection_origin=models.PLOT_SELECTION_ORIGIN_MANUAL,
+                scene_time=None,
+                event_snapshot={
+                    "eventTitle": "手动冻结标题",
+                    "directive": "手动冻结指令。",
+                },
+                reason="OOC/GM 手动标记",
+            ),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/play-api/v1/sessions/s_forest001/plot-scheduling"
+        )
+
+    assert response.status_code == 200
+    manual = next(
+        item
+        for item in response.json()["decisions"]
+        if item["turnId"] == 99
+    )
+    assert manual["selectionOrigin"] == "manual"
+    assert manual["sceneTime"] is None
+    assert manual["sceneTimeOrdinal"] is None
+    assert manual["eventSnapshot"]["eventTitle"] == "手动冻结标题"
+    reset_data_service_gateways()

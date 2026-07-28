@@ -21,11 +21,15 @@ def test_play_chat_request_normalizes_optional_mode() -> None:
         PlayChatRequest.model_validate({"text": "hello", "mode": "chat"})
 
 
-def test_play_session_composer_management_contract(tmp_path, monkeypatch) -> None:
+def test_play_session_composer_management_contract(
+    tmp_path,
+    monkeypatch,
+    start_play_client,
+) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "composer.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     reset_data_service_gateways()
-    client = TestClient(app)
+    client = start_play_client()
 
     assert (
         client.get("/play-api/v1/workspaces/demo_workspace/turn-modes").status_code

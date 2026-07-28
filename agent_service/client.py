@@ -231,9 +231,15 @@ class AgentClient:
         story_id: int,
         *,
         title: str = "",
+        description: str = "",
         player_character_id: int | None = None,
     ) -> AgentSessionCreatePayload:
-        payload: dict[str, object] = {"workspace_id": workspace_id, "story_id": story_id, "title": title}
+        payload: dict[str, object] = {
+            "workspace_id": workspace_id,
+            "story_id": story_id,
+            "title": title,
+            "description": description,
+        }
         if player_character_id is not None:
             payload["player_character_id"] = player_character_id
         result = await self._post(

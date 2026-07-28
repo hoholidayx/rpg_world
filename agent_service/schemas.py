@@ -83,6 +83,7 @@ class AgentSessionCreateRequest(_BaseSchema):
     workspace_id: str
     story_id: int
     title: str = ""
+    description: str = ""
     player_character_id: int | None = None
 
 

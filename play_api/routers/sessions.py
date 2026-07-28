@@ -7,13 +7,21 @@ from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import Literal, TypeVar
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agent_service.client import AgentClientError, AgentServiceUnavailable
-from play_api.backends import get_agent_backend, get_data_manager_backend
+from play_api.backends import (
+    PlayCatalogBackend,
+    PlaySessionReadBackend,
+    get_agent_backend,
+)
+from play_api.dependencies import (
+    get_catalog_backend,
+    get_session_read_backend,
+)
 from play_api.routers._locator import resolve_session_or_404
 from play_api.sse_protocol import (
     AgentEventKind,
@@ -32,14 +40,12 @@ from rpg_core.session.turn_metadata import (
     has_trustworthy_turn_metadata,
     validate_turn_metadata,
 )
-from rpg_core.scene.status import SceneStatusService
 from rpg_data.plot_models import (
     PLOT_DECISION_TRIGGERED,
     PLOT_SOURCE_OUTLINE,
     PLOT_SOURCE_POOL,
     SessionPlotScheduleDecision,
 )
-from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
 derivation_router = APIRouter(
@@ -528,15 +534,15 @@ def _turns_from_history(
 def _attach_turn_annotations(
     session_id: str,
     turns: list[PlayTurn],
+    session_read: PlaySessionReadBackend,
 ) -> list[PlayTurn]:
     if not turns:
         return turns
     turn_ids = tuple(turn.turn_id for turn in turns)
-    gateway = get_data_service_gateway()
     definitions = {
         definition.code: definition for definition in NARRATIVE_OUTCOME_DEFINITIONS
     }
-    records = gateway.narrative_outcomes.list_for_turns(
+    records = session_read.list_outcomes_for_turns(
         session_id,
         turn_ids,
     )
@@ -554,7 +560,7 @@ def _attach_turn_annotations(
             actor=record.actor or None,
         )
 
-    plot_records = gateway.plot_scheduling.list_session_decisions_for_turns(
+    plot_records = session_read.list_plot_decisions_for_turns(
         session_id,
         turn_ids,
     )
@@ -663,35 +669,51 @@ def _split_scene_list(value: str | None) -> list[str]:
 async def list_sessions(
     workspace: str = Query(...),
     story_id: int = Query(...),
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> list[PlaySessionSummary]:
-    sessions = await get_data_manager_backend().list_sessions(workspace, story_id)
+    sessions = await catalog.list_sessions(workspace, story_id)
     if sessions is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return [_session_summary(session) for session in sessions]
 
 
 @router.post("", response_model=PlaySessionSummary)
-async def create_session(payload: PlaySessionCreateRequest) -> PlaySessionSummary:
+async def create_session(
+    payload: PlaySessionCreateRequest,
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> PlaySessionSummary:
     # 创建是 session 绑定 workspace/story 的唯一入口；会话内接口之后只收 session_id。
-    session = await get_data_manager_backend().create_session(
-        payload.workspace_id,
-        payload.story_id,
-        title=payload.title,
-        description=payload.description,
+    created = await _agent_call(
+        get_agent_backend().create_session(
+            payload.workspace_id,
+            payload.story_id,
+            title=payload.title,
+            description=payload.description,
+        )
     )
+    session_id = str(created.get("session_id") or "")
+    session = await catalog.get_session(session_id) if session_id else None
     if session is None:
-        raise HTTPException(status_code=404, detail="story not found in workspace")
+        raise HTTPException(
+            status_code=500,
+            detail="created session is not available in the catalog",
+        )
     return _session_summary(session)
 
 
 @router.get("/{session_id}", response_model=PlaySessionSummary)
-async def get_session(session_id: str) -> PlaySessionSummary:
-    return _session_summary(await resolve_session_or_404(session_id))
+async def get_session(
+    session_id: str,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+) -> PlaySessionSummary:
+    return _session_summary(session)
 
 
 @router.delete("/{session_id}", response_model=PlaySessionDeleteResult)
-async def delete_session(session_id: str) -> PlaySessionDeleteResult:
-    session = await resolve_session_or_404(session_id)
+async def delete_session(
+    session_id: str,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+) -> PlaySessionDeleteResult:
     workspace, story_id, agent_session_id = _session_context(session)
     result = await _agent_call(
         get_agent_backend().delete_session(
@@ -714,8 +736,8 @@ async def delete_session(session_id: str) -> PlaySessionDeleteResult:
 async def create_session_derivation(
     session_id: str,
     payload: PlaySessionDerivationCreateRequest,
+    session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> PlaySessionDerivationJob:
-    session = await resolve_session_or_404(session_id)
     _workspace, _story_id, source_session_id = _session_context(session)
     result = await _agent_call(
         get_agent_backend().create_session_derivation(
@@ -739,8 +761,12 @@ async def get_session_derivation(job_id: str) -> PlaySessionDerivationJob:
 
 
 @router.patch("/{session_id}/player-character", response_model=PlaySessionSummary)
-async def bind_player_character(session_id: str, payload: PlayPlayerCharacterBindRequest) -> PlaySessionSummary:
-    session = await resolve_session_or_404(session_id)
+async def bind_player_character(
+    session_id: str,
+    payload: PlayPlayerCharacterBindRequest,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
+) -> PlaySessionSummary:
     workspace, story_id, agent_session_id = _session_context(session)
     logger.info(
         "[PlayAPI] player character bind requested: session_id={}, workspace={}, story_id={}, character_id={}, story_opening_id={}",
@@ -759,7 +785,7 @@ async def bind_player_character(session_id: str, payload: PlayPlayerCharacterBin
             story_opening_id=payload.story_opening_id,
         )
     )
-    updated = await get_data_manager_backend().get_session(agent_session_id)
+    updated = await catalog.get_session(agent_session_id)
     if updated is None:
         raise HTTPException(status_code=404, detail="session not found")
     logger.info(
@@ -778,11 +804,12 @@ async def bind_player_character(session_id: str, payload: PlayPlayerCharacterBin
 async def list_session_opening_options(
     session_id: str,
     player_character_id: int = Query(alias="playerCharacterId", gt=0),
+    session: dict[str, object] = Depends(resolve_session_or_404),
+    catalog: PlayCatalogBackend = Depends(get_catalog_backend),
 ) -> PlaySessionOpeningOptions:
-    session = await resolve_session_or_404(session_id)
     _workspace, _story_id, agent_session_id = _session_context(session)
     try:
-        result = await get_data_manager_backend().list_session_opening_options(
+        result = await catalog.list_session_opening_options(
             agent_session_id,
             player_character_id,
         )
@@ -803,8 +830,10 @@ async def list_session_opening_options(
 @router.get("/{session_id}/history", response_model=list[PlayTurn])
 async def get_session_history(
     session_id: str,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+    session_read: PlaySessionReadBackend = Depends(get_session_read_backend),
 ) -> list[PlayTurn]:
-    workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+    workspace, story_id, agent_session_id = _session_context(session)
     history = await _agent_call(
         get_agent_backend().get_history(workspace, story_id, agent_session_id)
     )
@@ -812,6 +841,7 @@ async def get_session_history(
         return _attach_turn_annotations(
             agent_session_id,
             _turns_from_history(history, source="api"),
+            session_read,
         )
     except InvalidTurnMetadataError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -823,14 +853,15 @@ async def get_session_history_page(
     limit: int = Query(default=50, ge=1, le=200),
     before_turn_id: int | None = Query(default=None, alias="beforeTurnId", gt=0),
     after_turn_id: int | None = Query(default=None, alias="afterTurnId", gt=0),
+    session: dict[str, object] = Depends(resolve_session_or_404),
+    session_read: PlaySessionReadBackend = Depends(get_session_read_backend),
 ) -> PlayHistoryPage:
     if before_turn_id is not None and after_turn_id is not None:
         raise HTTPException(status_code=400, detail="beforeTurnId and afterTurnId are mutually exclusive")
 
-    _, _, agent_session_id = _session_context(await resolve_session_or_404(session_id))
-    messages = get_data_service_gateway().messages
+    _, _, agent_session_id = _session_context(session)
 
-    rows = messages.list_turn_window(
+    rows = session_read.list_turn_window(
         agent_session_id,
         limit=limit,
         before_turn_id=before_turn_id,
@@ -841,20 +872,27 @@ async def get_session_history_page(
         turns = _attach_turn_annotations(
             agent_session_id,
             _turns_from_history(raw_history, source="api"),
+            session_read,
         )
     except InvalidTurnMetadataError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     start_turn_id = turns[0].turn_id if turns else None
     end_turn_id = turns[-1].turn_id if turns else None
-    latest_turn_id = messages.latest_turn_id(agent_session_id)
+    latest_turn_id = session_read.latest_turn_id(agent_session_id)
     return PlayHistoryPage(
         turns=turns,
         startTurnId=start_turn_id,
         endTurnId=end_turn_id,
         latestTurnId=latest_turn_id,
-        hasBefore=bool(start_turn_id and messages.has_turn_before(agent_session_id, start_turn_id)),
-        hasAfter=bool(end_turn_id and messages.has_turn_after(agent_session_id, end_turn_id)),
+        hasBefore=bool(
+            start_turn_id
+            and session_read.has_turn_before(agent_session_id, start_turn_id)
+        ),
+        hasAfter=bool(
+            end_turn_id
+            and session_read.has_turn_after(agent_session_id, end_turn_id)
+        ),
         limit=limit,
     )
 
@@ -863,9 +901,11 @@ async def get_session_history_page(
 async def get_session_turn(
     session_id: str,
     turn_id: int = Path(gt=0),
+    session: dict[str, object] = Depends(resolve_session_or_404),
+    session_read: PlaySessionReadBackend = Depends(get_session_read_backend),
 ) -> PlayTurn:
-    _, _, agent_session_id = _session_context(await resolve_session_or_404(session_id))
-    rows = get_data_service_gateway().messages.list_turn(agent_session_id, turn_id)
+    _, _, agent_session_id = _session_context(session)
+    rows = session_read.list_turn(agent_session_id, turn_id)
     if not rows:
         raise HTTPException(status_code=404, detail="turn not found")
 
@@ -874,6 +914,7 @@ async def get_session_turn(
         turns = _attach_turn_annotations(
             agent_session_id,
             _turns_from_history(raw_history, source="api"),
+            session_read,
         )
     except InvalidTurnMetadataError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -883,17 +924,23 @@ async def get_session_turn(
 
 
 @router.get("/{session_id}/scene", response_model=PlayScene)
-async def get_current_scene(session_id: str) -> PlayScene:
-    _, _, agent_session_id = _session_context(await resolve_session_or_404(session_id))
-    gateway = get_data_service_gateway()
-    attrs = SceneStatusService(gateway.status).get_attrs(agent_session_id)
+async def get_current_scene(
+    session_id: str,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+    session_read: PlaySessionReadBackend = Depends(get_session_read_backend),
+) -> PlayScene:
+    _, _, agent_session_id = _session_context(session)
+    attrs = session_read.get_scene_attrs(agent_session_id)
     return _scene_from_attrs(attrs)
 
 
 @router.get("/{session_id}/summaries", response_model=PlaySummaryIndex)
-async def list_session_summaries(session_id: str) -> PlaySummaryIndex:
-    await resolve_session_or_404(session_id)
-    payload = await get_data_manager_backend().list_session_summaries(session_id)
+async def list_session_summaries(
+    session_id: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    session_read: PlaySessionReadBackend = Depends(get_session_read_backend),
+) -> PlaySummaryIndex:
+    payload = await session_read.list_session_summaries(session_id)
     if payload is None:
         raise HTTPException(status_code=404, detail="session not found")
     return PlaySummaryIndex.model_validate(payload)
@@ -906,9 +953,10 @@ async def list_session_story_memories(
     page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
     memory_kind: StoryMemoryKind | None = Query(default=None, alias="memoryKind"),
     dream_processed: bool | None = Query(default=None, alias="dreamProcessed"),
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    session_read: PlaySessionReadBackend = Depends(get_session_read_backend),
 ) -> PlayStoryMemoryPage:
-    await resolve_session_or_404(session_id)
-    payload = await get_data_manager_backend().list_session_story_memories(
+    payload = await session_read.list_session_story_memories(
         session_id,
         page=page,
         page_size=page_size,
@@ -927,14 +975,15 @@ async def list_session_story_memories(
 async def get_session_summary(
     session_id: str,
     summary_key: str,
+    _session: dict[str, object] = Depends(resolve_session_or_404),
+    session_read: PlaySessionReadBackend = Depends(get_session_read_backend),
 ) -> PlaySummaryDetail:
-    await resolve_session_or_404(session_id)
     if summary_key != "overall" and not summary_key.isdecimal():
         raise HTTPException(status_code=404, detail="summary not found")
     normalized_key: str | int = (
         "overall" if summary_key == "overall" else int(summary_key)
     )
-    payload = await get_data_manager_backend().get_session_summary(
+    payload = await session_read.get_session_summary(
         session_id,
         normalized_key,
     )
@@ -944,8 +993,11 @@ async def get_session_summary(
 
 
 @router.get("/{session_id}/commands", response_model=list[PlayCommand])
-async def list_commands(session_id: str) -> list[PlayCommand]:
-    workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+async def list_commands(
+    session_id: str,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+) -> list[PlayCommand]:
+    workspace, story_id, agent_session_id = _session_context(session)
     commands = await _agent_call(
         get_agent_backend().list_commands(workspace, story_id, agent_session_id)
     )
@@ -965,8 +1017,9 @@ async def get_context_preview(
     session_id: str,
     mode: str | None = Query(default=None),
     narrative_style_id: int | None = Query(default=None, alias="narrativeStyleId", gt=0),
+    session: dict[str, object] = Depends(resolve_session_or_404),
 ) -> ContextPreviewPayload:
-    workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+    workspace, story_id, agent_session_id = _session_context(session)
     try:
         normalized_mode = normalize_turn_mode(mode).value
     except ValueError as exc:
@@ -985,8 +1038,11 @@ async def get_context_preview(
 
 
 @router.post("/{session_id}/turn")
-async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, object]:
-    session = await resolve_session_or_404(session_id)
+async def create_turn(
+    session_id: str,
+    payload: PlayChatRequest,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+) -> dict[str, object]:
     workspace, story_id, agent_session_id = _session_context(session)
     result = await _agent_call(
         get_agent_backend().send(
@@ -1020,8 +1076,11 @@ async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, ob
 
 
 @router.post("/{session_id}/turns/{turn_id}/truncate")
-async def truncate_turn(session_id: str, turn_id: int) -> dict[str, object]:
-    session = await resolve_session_or_404(session_id)
+async def truncate_turn(
+    session_id: str,
+    turn_id: int,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+) -> dict[str, object]:
     workspace, story_id, agent_session_id = _session_context(session)
     result = await _agent_call(
         get_agent_backend().truncate_turn(workspace, story_id, agent_session_id, turn_id)
@@ -1045,8 +1104,11 @@ async def truncate_turn(session_id: str, turn_id: int) -> dict[str, object]:
 
 
 @router.delete("/{session_id}/messages/{message_id}")
-async def delete_message(session_id: str, message_id: int) -> dict[str, object]:
-    session = await resolve_session_or_404(session_id)
+async def delete_message(
+    session_id: str,
+    message_id: int,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+) -> dict[str, object]:
     workspace, story_id, agent_session_id = _session_context(session)
     result = await _agent_call(
         get_agent_backend().delete_message(workspace, story_id, agent_session_id, message_id)
@@ -1062,8 +1124,12 @@ async def delete_message(session_id: str, message_id: int) -> dict[str, object]:
 
 
 @router.post("/{session_id}/stream")
-async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingResponse:
-    workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+async def stream_turn(
+    session_id: str,
+    payload: PlayChatRequest,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+) -> StreamingResponse:
+    workspace, story_id, agent_session_id = _session_context(session)
     stream = PlaySSEStream(agent_session_id)
 
     async def event_generator():
@@ -1105,8 +1171,11 @@ async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingRes
 
 
 @router.post("/{session_id}/stop")
-async def stop_turn(session_id: str, payload: PlayStopRequest | None = None) -> dict[str, object]:
-    session = await resolve_session_or_404(session_id)
+async def stop_turn(
+    session_id: str,
+    payload: PlayStopRequest | None = None,
+    session: dict[str, object] = Depends(resolve_session_or_404),
+) -> dict[str, object]:
     workspace, story_id, agent_session_id = _session_context(session)
     result = await _agent_call(
         get_agent_backend().stop(

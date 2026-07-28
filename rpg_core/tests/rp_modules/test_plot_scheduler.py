@@ -177,7 +177,7 @@ def test_plot_runtime_section_is_concise_ordered_user_suffix() -> None:
         "第一章",
         "城镇事件池",
         "forced",
-        "第 1 年",
+        "1 年",
         "内部适宜性理由",
     ):
         assert internal_value not in section.content
@@ -239,6 +239,10 @@ def test_context_gate_reserve_covers_two_concise_plot_suffix_items() -> None:
         ),
         overrides=models.SessionPlotOverrides("s1"),
         decisions=(),
+        scene_opportunity=models.SessionPlotSceneOpportunity(
+            session_id="s1",
+            source_turn_id=1,
+        ),
     )
     module = PlotSchedulerModule(session_id="s1")
     module.bind_turn(
@@ -387,6 +391,55 @@ def test_repeat_event_uses_scene_time_cooldown_and_random_is_stable() -> None:
         completed_world_turn_ids=(1, 2, 3, 4),
     )
     assert after_a == after_b
+
+
+def test_manual_trigger_without_scene_time_overrides_prior_cooldown() -> None:
+    event = _event(1, 10, repeat=True, cooldown=60)
+    anchored = _decision(
+        1,
+        2,
+        models.PLOT_SOURCE_POOL,
+        event.id,
+        event.id,
+        10,
+        models.PLOT_DECISION_TRIGGERED,
+        scene_time=SceneTime(1, 1, 1, 8),
+    )
+    manual = models.SessionPlotScheduleDecision(
+        id=2,
+        session_id="s1",
+        turn_id=3,
+        source_kind=models.PLOT_SOURCE_POOL,
+        source_id=event.id,
+        event_id=event.id,
+        container_id=10,
+        decision_status=models.PLOT_DECISION_TRIGGERED,
+        dispatch_mode=models.PLOT_DISPATCH_FORCED,
+        selection_origin=models.PLOT_SELECTION_ORIGIN_MANUAL,
+        scene_time=None,
+        scene_time_ordinal=None,
+    )
+    snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(models.StoryPlotEventPool(10, 1, "冷却池"),),
+            events=(event,),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(anchored, manual),
+    )
+
+    selected = PlotScheduleSelector().select(
+        snapshot,
+        scene_time=SceneTime(1, 1, 1, 8, 10),
+        current_turn_id=4,
+        completed_world_turn_ids=(1, 2, 3),
+    )
+
+    assert selected[0].event.id == event.id
 
 
 def test_non_repeat_event_keeps_pool_lane_trigger_after_moving_pools() -> None:

@@ -29,6 +29,13 @@ PLOT_DECISION_STATUSES = frozenset({
 })
 PLOT_DECISION_PAGE_SIZE_MAX = 200
 
+PLOT_SELECTION_ORIGIN_SCHEDULER = "scheduler"
+PLOT_SELECTION_ORIGIN_MANUAL = "manual"
+PLOT_SELECTION_ORIGINS = frozenset({
+    PLOT_SELECTION_ORIGIN_SCHEDULER,
+    PLOT_SELECTION_ORIGIN_MANUAL,
+})
+
 
 @dataclass(frozen=True)
 class StoryPlotEventPool:
@@ -110,6 +117,51 @@ class SessionPlotOverrides:
 
 
 @dataclass(frozen=True)
+class SessionPlotPendingInjection:
+    """One Session-scoped, one-shot manual Plot injection snapshot."""
+
+    session_id: str
+    story_id: int
+    source_event_id: int
+    source_event_version: int
+    source_pool_id: int
+    source_pool_name: str
+    event_title: str
+    directive: str
+    event_snapshot: Mapping[str, object] = field(default_factory=dict)
+    requested_turn_id: int = 0
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class PendingPlotInjectionWrite:
+    """Caller-prepared values for replacing one pending injection."""
+
+    story_id: int
+    source_event_id: int
+    source_event_version: int
+    source_pool_id: int
+    source_pool_name: str
+    event_title: str
+    directive: str
+    event_snapshot: Mapping[str, object]
+    requested_turn_id: int
+
+
+@dataclass(frozen=True)
+class SessionPlotSceneOpportunity:
+    """One committed Scene change awaiting automatic Plot scheduling."""
+
+    session_id: str
+    source_turn_id: int
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
 class SessionPlotScheduleDecision:
     id: int
     session_id: str
@@ -120,8 +172,9 @@ class SessionPlotScheduleDecision:
     container_id: int
     decision_status: str
     dispatch_mode: str
-    scene_time: SceneTime
-    scene_time_ordinal: int
+    selection_origin: str = PLOT_SELECTION_ORIGIN_SCHEDULER
+    scene_time: SceneTime | None = None
+    scene_time_ordinal: int | None = None
     event_snapshot: Mapping[str, object] = field(default_factory=dict)
     reason: str = ""
     error_code: str = ""
@@ -160,8 +213,9 @@ class StagedPlotScheduleDecision:
     container_id: int
     decision_status: str
     dispatch_mode: str
-    scene_time: SceneTime
+    scene_time: SceneTime | None
     event_snapshot: Mapping[str, object]
+    selection_origin: str = PLOT_SELECTION_ORIGIN_SCHEDULER
     reason: str = ""
     error_code: str = ""
     error_message: str = ""

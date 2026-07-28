@@ -7,52 +7,22 @@ from fastapi.responses import FileResponse
 from llm_client.manager import LLMClientManager
 
 from rpg_data.model import tts as models
-from rpg_data.services import get_data_service_gateway
-from rpg_data.services.gateway import DataServiceGateway
-from rpg_tts.service import TTSApplicationService
 from tts_service.schemas import (
     TTSAudioPartResponse,
     TTSHealthResponse,
     TTSJobResponse,
     TTSReconcileResponse,
 )
+from tts_service.runtime import TTSRuntime
 from tts_service.settings import settings
-from tts_service.worker import TTSJobWorker
-
-
-class TTSRuntime:
-    def __init__(
-        self,
-        *,
-        gateway: DataServiceGateway,
-        service: TTSApplicationService,
-        worker: TTSJobWorker,
-    ) -> None:
-        self.gateway = gateway
-        self.service = service
-        self.worker = worker
-
-    @classmethod
-    def create(cls) -> "TTSRuntime":
-        gateway = get_data_service_gateway()
-        service = TTSApplicationService(data=gateway.tts)
-        return cls(
-            gateway=gateway,
-            service=service,
-            worker=TTSJobWorker(
-                service=service,
-                concurrency=settings.worker.concurrency,
-            ),
-        )
 
 
 _runtime: TTSRuntime | None = None
 
 
 def get_runtime() -> TTSRuntime:
-    global _runtime
     if _runtime is None:
-        _runtime = TTSRuntime.create()
+        raise RuntimeError("TTSRuntime is not available outside app lifespan")
     return _runtime
 
 
@@ -68,27 +38,28 @@ def _prefix() -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _runtime
-    del app
-    llm = settings.llm_client
-    await LLMClientManager.aconfigure(
-        base_url=llm.base_url,
-        token=llm.token,
-        request_timeout_ms=llm.request_timeout_ms,
-        stream_timeout_ms=llm.stream_timeout_ms,
-    )
-    runtime: TTSRuntime | None = None
+    runtime = _runtime
+    if runtime is None:
+        runtime = await TTSRuntime.create(
+            settings=settings,
+            llm_manager=LLMClientManager,
+        )
+    _runtime = runtime
+    app.state.tts_runtime = runtime
     try:
-        runtime = get_runtime()
-        await runtime.worker.start()
+        await runtime.start(
+            settings=settings,
+            llm_manager=LLMClientManager,
+        )
         yield
     finally:
         try:
-            if runtime is not None:
-                await runtime.worker.stop()
+            await runtime.close()
         finally:
             if _runtime is runtime:
                 _runtime = None
-            await LLMClientManager.areset()
+            if hasattr(app.state, "tts_runtime"):
+                del app.state.tts_runtime
 
 
 app = FastAPI(title="RPG World TTS Service", lifespan=lifespan)

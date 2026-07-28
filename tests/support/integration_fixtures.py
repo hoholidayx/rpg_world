@@ -13,6 +13,14 @@ from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.manager import AgentManager
 from rpg_core.utils.watcher import get_watcher
 from tests.support.backend import create_integration_session, shutdown_agent
+from tests.support.live_agent import (
+    DEMO_PLAYER_CHARACTER_NAME,
+    DEMO_SESSION_ID,
+    DEMO_STORY_TITLE,
+    DEMO_WORKSPACE_ID,
+    LiveDemoHarness,
+    install_live_call_recorder,
+)
 from tests.support.scripted_llm import ScriptedLLMManager
 
 
@@ -63,6 +71,52 @@ def scripted_llm_manager(monkeypatch) -> ScriptedLLMManager:
     manager = ScriptedLLMManager()
     monkeypatch.setattr(LLMClientManager, "get", classmethod(lambda cls: manager))
     return manager
+
+
+@pytest.fixture
+def live_call_recorder(monkeypatch):
+    """Capture exact real-Provider requests for opt-in acceptance assertions."""
+
+    return install_live_call_recorder(monkeypatch)
+
+
+@pytest_asyncio.fixture
+async def live_demo_harness(
+    integration_settings,  # noqa: ARG001
+    integration_data_gateway,
+    live_call_recorder,
+):
+    """Run an Agent against the canonical migration-0002 academy Session."""
+
+    try:
+        await LLMClientManager.get().client.health()
+    except Exception:
+        pytest.skip("standalone LLM service is not available")
+
+    session = integration_data_gateway.sessions.get_session(DEMO_SESSION_ID)
+    assert session is not None
+    assert session.workspace_id == DEMO_WORKSPACE_ID
+    story = integration_data_gateway.sessions.get_story(
+        session.workspace_id,
+        session.story_id,
+    )
+    assert story is not None
+    assert story.title == DEMO_STORY_TITLE
+
+    agent = RPGGameAgent(session_id=session.id)
+    await agent.initialize()
+    try:
+        yield LiveDemoHarness(
+            agent=agent,
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            session_id=session.id,
+            player_character_name=DEMO_PLAYER_CHARACTER_NAME,
+            calls=live_call_recorder,
+        )
+    finally:
+        await shutdown_agent(agent)
+        await LLMClientManager.areset()
 
 
 @pytest_asyncio.fixture

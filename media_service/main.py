@@ -7,10 +7,10 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from llm_client.manager import LLMClientManager
 
+from media_service.runtime import MediaRuntime
 from media_service.schemas import (
     MediaAssetDeleteResponse,
     MediaBackgroundResponse,
@@ -47,16 +47,8 @@ from media_service.schemas import (
     VisualBriefSchema,
 )
 from media_service.settings import settings as process_settings
-from media_service.worker import MediaBackgroundWorker, MediaJobWorker
 from rpg_data import models
-from rpg_data.services import get_data_service_gateway
-from rpg_data.services.gateway import DataServiceGateway
-from rpg_core.scene.status import SceneStatusService
-from rpg_media.brief import LLMVisualBriefPlanner
 from rpg_media.errors import MediaError, MediaSourceRangeError
-from rpg_media.providers.catalog import build_provider_catalog
-from rpg_media.service import MediaApplicationService
-from rpg_media.settings import settings as media_settings
 from rpg_media.types import MediaBackgroundView, SessionGalleryAsset, VisualBrief
 
 logger = logging.getLogger("media_service")
@@ -64,55 +56,12 @@ logger = logging.getLogger("media_service")
 _MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 
 
-class MediaRuntime:
-    def __init__(
-        self,
-        *,
-        gateway: DataServiceGateway,
-        service: MediaApplicationService,
-        worker: MediaJobWorker,
-        background_worker: MediaBackgroundWorker | None = None,
-    ) -> None:
-        self.gateway = gateway
-        self.service = service
-        self.worker = worker
-        self.background_worker = background_worker or MediaBackgroundWorker(
-            service=service,
-            concurrency=process_settings.background_worker.concurrency,
-        )
-
-    @classmethod
-    def create(cls) -> "MediaRuntime":
-        gateway = get_data_service_gateway()
-        service = MediaApplicationService(
-            data=gateway.media,
-            catalog=gateway.catalog,
-            planner=LLMVisualBriefPlanner(),
-            providers=build_provider_catalog(media_settings.providers),
-            status=SceneStatusService(gateway.status),
-        )
-        worker_settings = process_settings.worker
-        return cls(
-            gateway=gateway,
-            service=service,
-            worker=MediaJobWorker(
-                service=service,
-                concurrency=worker_settings.concurrency,
-            ),
-            background_worker=MediaBackgroundWorker(
-                service=service,
-                concurrency=process_settings.background_worker.concurrency,
-            ),
-        )
-
-
 _runtime: MediaRuntime | None = None
 
 
 def get_runtime() -> MediaRuntime:
-    global _runtime
     if _runtime is None:
-        _runtime = MediaRuntime.create()
+        raise RuntimeError("MediaRuntime is not available outside app lifespan")
     return _runtime
 
 
@@ -127,34 +76,29 @@ def _prefix() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    llm = process_settings.llm_client
-    await LLMClientManager.aconfigure(
-        base_url=llm.base_url,
-        token=llm.token,
-        request_timeout_ms=llm.request_timeout_ms,
-        stream_timeout_ms=llm.stream_timeout_ms,
-    )
-    runtime: MediaRuntime | None = None
+    global _runtime
+    runtime = _runtime
+    if runtime is None:
+        runtime = await MediaRuntime.create(settings=process_settings)
+    _runtime = runtime
+    app.state.media_runtime = runtime
     try:
-        runtime = get_runtime()
-        await runtime.worker.start()
-        await runtime.background_worker.start()
+        await runtime.start(
+            settings=process_settings,
+            llm_manager=LLMClientManager,
+        )
         yield
     finally:
-        if runtime is not None:
-            await runtime.background_worker.stop()
-            await runtime.worker.stop()
-        await LLMClientManager.areset()
+        try:
+            await runtime.close()
+        finally:
+            if _runtime is runtime:
+                _runtime = None
+            if hasattr(app.state, "media_runtime"):
+                del app.state.media_runtime
 
 
 app = FastAPI(title="RPG World Media Service", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.get(f"{_prefix()}/health", response_model=MediaHealthResponse)
@@ -916,7 +860,7 @@ def _background_evaluation_response(
 
 
 def _require_session(runtime: MediaRuntime, session_id: str) -> models.Session:
-    session = runtime.gateway.catalog.get_session(session_id)
+    session = runtime.catalog.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
     return session

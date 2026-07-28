@@ -313,7 +313,7 @@ def authoring_diagnostics(
                 emit("status.update-rule-scheduling", f"{base}/updateRule")
             if table.get("statusKind") == "scene" and row.get("key") == "时间":
                 year_match = re.search(
-                    r"第\s*(\d+)\s*年",
+                    r"(\d+)\s*年",
                     str(row.get("value", "")),
                 )
                 if year_match and int(year_match.group(1)) < 1000:

@@ -39,6 +39,20 @@ def _deletion(gateway):  # noqa: ANN001, ANN202
     return SessionDeletionService(gateway.sessions)
 
 
+def _pending_write(story_id: int):
+    return models.PendingPlotInjectionWrite(
+        story_id=story_id,
+        source_event_id=801,
+        source_event_version=2,
+        source_pool_id=802,
+        source_pool_name="派生隔离事件池",
+        event_title="只属于源会话的待注入事件",
+        directive="目标派生会话不得继承该快照。",
+        event_snapshot={"eventTitle": "只属于源会话的待注入事件"},
+        requested_turn_id=3,
+    )
+
+
 def test_derivation_seeds_only_history_and_required_session_configuration(
     tmp_path: Path,
 ) -> None:
@@ -91,6 +105,11 @@ def test_derivation_seeds_only_history_and_required_session_configuration(
         config={"reason": "branch test"},
     )
     assert override is not None
+    source_pending = gateway.plot_scheduling.replace_pending_injection(
+        source.id,
+        expected_version=None,
+        values=_pending_write(source.story_id),
+    )
     source_tables = gateway.status.list_tables(source.id)
     source_normal = next(
         table for table in source_tables if table.status_kind == models.STATUS_KIND_NORMAL
@@ -182,6 +201,11 @@ def test_derivation_seeds_only_history_and_required_session_configuration(
     assert SessionNarrativeOutcomeRecord.select().where(
         SessionNarrativeOutcomeRecord.session == target.id
     ).count() == 0
+    assert gateway.plot_scheduling.get_pending_injection(target.id) is None
+    assert (
+        gateway.plot_scheduling.get_pending_injection(source.id)
+        == source_pending
+    )
 
     ready_job = _derivations(gateway).complete_job(job.id)
     ready_target = gateway.catalog.get_session(target.id)

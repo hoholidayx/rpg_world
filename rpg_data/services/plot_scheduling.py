@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Iterator, Sequence
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 
 from peewee import Database, IntegrityError
 
 from commons.scene_time import SceneTime
 from rpg_data import models
-from rpg_data.errors import DataIntegrityError
+from rpg_data.errors import DataConditionalWriteError, DataIntegrityError
 from rpg_data.repositories.plot_scheduling_repo import PlotSchedulingRepository
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_repo import StoryRepository
@@ -476,6 +476,202 @@ class PlotSchedulingDataService:
             ) from exc
         return self._records.list_overrides(session.id)
 
+    def get_pending_injection(
+        self,
+        session_id: str,
+    ) -> models.SessionPlotPendingInjection | None:
+        self._require_session(session_id)
+        return self._records.get_pending_injection(str(session_id))
+
+    def replace_pending_injection(
+        self,
+        session_id: str,
+        *,
+        expected_version: int | None,
+        values: models.PendingPlotInjectionWrite,
+    ) -> models.SessionPlotPendingInjection:
+        session = self._require_session(session_id)
+        normalized = _pending_injection_write(values)
+        if normalized.story_id != session.story_id:
+            raise FileNotFoundError(
+                "pending Plot injection does not belong to the Session Story"
+            )
+        try:
+            with self.transaction():
+                if expected_version is None:
+                    created = self._records.create_pending_injection(
+                        session.id,
+                        normalized,
+                    )
+                    if created is None:
+                        raise DataConditionalWriteError(
+                            "pending Plot injection changed before it could be "
+                            "replaced"
+                        )
+                    return created
+                updated = self._records.update_pending_injection(
+                    session.id,
+                    expected_version=_positive_integer(
+                        expected_version,
+                        "expected_version",
+                    ),
+                    values=normalized,
+                )
+                if updated is None:
+                    raise DataConditionalWriteError(
+                        "pending Plot injection changed before it could be "
+                        "replaced"
+                    )
+                return updated
+        except IntegrityError as exc:
+            raise DataConditionalWriteError(
+                "pending Plot injection changed before it could be replaced"
+            ) from exc
+
+    def clear_pending_injection(
+        self,
+        session_id: str,
+        *,
+        expected_version: int | None = None,
+    ) -> int:
+        self._require_session(session_id)
+        deleted = self._records.delete_pending_injection(
+            str(session_id),
+            expected_version=(
+                _positive_integer(expected_version, "expected_version")
+                if expected_version is not None
+                else None
+            ),
+        )
+        if expected_version is not None and deleted != 1:
+            raise DataConditionalWriteError(
+                "pending Plot injection changed before it could be cleared"
+            )
+        return deleted
+
+    def delete_pending_injection_requested_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._records.delete_pending_injection_requested_for_turn(
+            str(session_id),
+            _positive_integer(turn_id, "turn_id"),
+        )
+
+    def delete_pending_injection_requested_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._records.delete_pending_injection_requested_from_turn(
+            str(session_id),
+            _positive_integer(turn_id, "turn_id"),
+        )
+
+    def retain_pending_injection_requested_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int:
+        return self._records.retain_pending_injection_requested_turns(
+            str(session_id),
+            turn_ids,
+        )
+
+    def get_scene_opportunity(
+        self,
+        session_id: str,
+    ) -> models.SessionPlotSceneOpportunity | None:
+        self._require_session(session_id)
+        return self._records.get_scene_opportunity(str(session_id))
+
+    def replace_scene_opportunity(
+        self,
+        session_id: str,
+        *,
+        expected_version: int | None,
+        source_turn_id: int,
+    ) -> models.SessionPlotSceneOpportunity:
+        session = self._require_session(session_id)
+        source_turn = _positive_integer(source_turn_id, "source_turn_id")
+        try:
+            with self.transaction():
+                if expected_version is None:
+                    return self._records.create_scene_opportunity(
+                        session.id,
+                        source_turn_id=source_turn,
+                    )
+                updated = self._records.update_scene_opportunity(
+                    session.id,
+                    expected_version=_positive_integer(
+                        expected_version,
+                        "expected_version",
+                    ),
+                    source_turn_id=source_turn,
+                )
+                if updated is None:
+                    raise DataConditionalWriteError(
+                        "Plot Scene opportunity changed before it could be "
+                        "replaced"
+                    )
+                return updated
+        except IntegrityError as exc:
+            raise DataConditionalWriteError(
+                "Plot Scene opportunity changed before it could be replaced"
+            ) from exc
+
+    def clear_scene_opportunity(
+        self,
+        session_id: str,
+        *,
+        expected_version: int | None = None,
+    ) -> int:
+        self._require_session(session_id)
+        deleted = self._records.delete_scene_opportunity(
+            str(session_id),
+            expected_version=(
+                _positive_integer(expected_version, "expected_version")
+                if expected_version is not None
+                else None
+            ),
+        )
+        if expected_version is not None and deleted != 1:
+            raise DataConditionalWriteError(
+                "Plot Scene opportunity changed before it could be cleared"
+            )
+        return deleted
+
+    def delete_scene_opportunity_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._records.delete_scene_opportunity_for_turn(
+            str(session_id),
+            _positive_integer(turn_id, "turn_id"),
+        )
+
+    def delete_scene_opportunity_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._records.delete_scene_opportunity_from_turn(
+            str(session_id),
+            _positive_integer(turn_id, "turn_id"),
+        )
+
+    def retain_scene_opportunity_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int:
+        return self._records.retain_scene_opportunity_turns(
+            str(session_id),
+            turn_ids,
+        )
+
     def append_decisions(
         self,
         session_id: str,
@@ -571,3 +767,46 @@ def _positive_integer(value: int, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{label} must be a positive integer")
     return value
+
+
+def _pending_injection_write(
+    value: models.PendingPlotInjectionWrite,
+) -> models.PendingPlotInjectionWrite:
+    if not isinstance(value, models.PendingPlotInjectionWrite):
+        raise TypeError("pending Plot injection must use the typed write contract")
+    story_id = _positive_integer(value.story_id, "story_id")
+    source_event_id = _positive_integer(
+        value.source_event_id,
+        "source_event_id",
+    )
+    source_event_version = _positive_integer(
+        value.source_event_version,
+        "source_event_version",
+    )
+    source_pool_id = _positive_integer(value.source_pool_id, "source_pool_id")
+    requested_turn_id = _positive_integer(
+        value.requested_turn_id,
+        "requested_turn_id",
+    )
+    source_pool_name = str(value.source_pool_name).strip()
+    event_title = str(value.event_title).strip()
+    directive = str(value.directive).strip()
+    if not source_pool_name:
+        raise ValueError("source_pool_name must not be empty")
+    if not event_title:
+        raise ValueError("event_title must not be empty")
+    if not directive:
+        raise ValueError("directive must not be empty")
+    if not isinstance(value.event_snapshot, Mapping):
+        raise TypeError("event_snapshot must be a mapping")
+    return models.PendingPlotInjectionWrite(
+        story_id=story_id,
+        source_event_id=source_event_id,
+        source_event_version=source_event_version,
+        source_pool_id=source_pool_id,
+        source_pool_name=source_pool_name,
+        event_title=event_title,
+        directive=directive,
+        event_snapshot=dict(value.event_snapshot),
+        requested_turn_id=requested_turn_id,
+    )

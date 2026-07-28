@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_service import main as service_main
+from agent_service import runtime as service_runtime
 from commons.errors import (
     LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
     LLM_SERVICE_UNAVAILABLE_STATUS_CODE,
@@ -413,13 +414,20 @@ class FakeCatalog:
         story_id: int,
         *,
         title: str = "",
+        description: str = "",
         session_id: str | None = None,
     ) -> models.Session | None:
         if workspace_id == "missing":
             return None
         cls.created_count += 1
         sid = session_id or f"generated_{cls.created_count}"
-        session = models.Session(sid, workspace_id, story_id, title=title)
+        session = models.Session(
+            sid,
+            workspace_id,
+            story_id,
+            title=title,
+            description=description,
+        )
         cls.sessions[sid] = session
         return session
 
@@ -587,6 +595,14 @@ class FakeGateway:
     messages = FakeMessages
     sessions = FakeSessions
 
+    @staticmethod
+    def initialize() -> None:
+        return None
+
+    @staticmethod
+    def close() -> None:
+        return None
+
 
 class FakeSessionCatalogApplication:
     def __init__(self, _data: object) -> None:
@@ -599,6 +615,7 @@ class FakeSessionCatalogApplication:
         *,
         session_id: str | None = None,
         title: str = "",
+        description: str = "",
         **_kwargs: object,
     ) -> models.Session | None:
         return FakeCatalog.create_session(
@@ -606,34 +623,35 @@ class FakeSessionCatalogApplication:
             story_id,
             session_id=session_id,
             title=title,
+            description=description,
         )
 
 
 @pytest.fixture(autouse=True)
 def _patch_session_application_services(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        service_main,
+        service_runtime,
         "SessionCatalogService",
         FakeSessionCatalogApplication,
     )
     monkeypatch.setattr(
-        service_main,
+        service_runtime,
         "SessionRoleService",
         lambda _data: FakeSessionRoles,
     )
     monkeypatch.setattr(
-        service_main,
+        service_runtime,
         "SessionDeletionService",
         lambda _data: FakeSessionDeletion,
     )
     monkeypatch.setattr(
-        service_main,
+        service_runtime,
         "SessionDerivationService",
         lambda _data: FakeSessionDerivations,
     )
 
 
-class InvalidHistoryGateway:
+class InvalidHistoryGateway(FakeGateway):
     catalog = FakeCatalog
     messages = InvalidTurnMessages
     sessions = FakeSessions
@@ -698,7 +716,7 @@ def test_agent_service_contracts(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        service_main.MainLLMSelectionService,
+        service_runtime.MainLLMSelectionService,
         "get_provider_catalog",
         fake_provider_catalog,
     )
@@ -860,11 +878,20 @@ def test_agent_service_contracts(monkeypatch) -> None:
 
         created = client.post(
             "/agent/v1/chat/sessions",
-            json={"workspace_id": "ws", "story_id": 1, "title": "New"},
+            json={
+                "workspace_id": "ws",
+                "story_id": 1,
+                "title": "New",
+                "description": "Created through Agent",
+            },
         )
         assert created.status_code == 200
         assert created.json()["session_id"] == "generated_1"
         assert created.json()["title"] == "New"
+        assert (
+            FakeCatalog.sessions["generated_1"].description
+            == "Created through Agent"
+        )
 
         ensured_created = client.post(
             "/agent/v1/chat/session/ensure",

@@ -123,6 +123,46 @@ class SessionHistoryDataPort(Protocol):
         turn_ids: Iterable[int],
     ) -> int: ...
 
+    def delete_pending_plot_injection_requested_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int: ...
+
+    def delete_pending_plot_injection_requested_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int: ...
+
+    def retain_pending_plot_injection_requested_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int: ...
+
+    def delete_plot_scene_opportunity_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int: ...
+
+    def delete_plot_scene_opportunity_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int: ...
+
+    def retain_plot_scene_opportunity_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int: ...
+
+    def clear_pending_plot_injection(self, session_id: str) -> int: ...
+
+    def clear_plot_scene_opportunity(self, session_id: str) -> int: ...
+
 
 class SessionHistory:
     """Own ordered messages, turn allocation, and mutable history writes."""
@@ -308,6 +348,8 @@ class SessionHistory:
                 data.clear_messages(self._session_id())
                 data.clear_narrative_outcomes(self._session_id())
                 data.clear_plot_decisions(self._session_id())
+                data.clear_pending_plot_injection(self._session_id())
+                data.clear_plot_scene_opportunity(self._session_id())
         self.replace([], persist=False)
         logger.debug(_TAG + " cleared history for session '{}'", self._session_id())
 
@@ -324,6 +366,8 @@ class SessionHistory:
                     data.clear_messages(self._session_id())
                     data.clear_narrative_outcomes(self._session_id())
                     data.clear_plot_decisions(self._session_id())
+                    data.clear_pending_plot_injection(self._session_id())
+                    data.clear_plot_scene_opportunity(self._session_id())
             self._state.messages = []
             self._rebuild_turn_state()
             return before
@@ -346,6 +390,14 @@ class SessionHistory:
                             turn_id,
                         )
                         data.delete_plot_decisions_for_turn(
+                            self._session_id(),
+                            turn_id,
+                        )
+                        data.delete_pending_plot_injection_requested_for_turn(
+                            self._session_id(),
+                            turn_id,
+                        )
+                        data.delete_plot_scene_opportunity_for_turn(
                             self._session_id(),
                             turn_id,
                         )
@@ -420,6 +472,14 @@ class SessionHistory:
                     self._session_id(),
                     boundary_turn,
                 )
+                data.delete_pending_plot_injection_requested_from_turn(
+                    self._session_id(),
+                    boundary_turn,
+                )
+                data.delete_plot_scene_opportunity_from_turn(
+                    self._session_id(),
+                    boundary_turn,
+                )
             self.load()
             return removed
 
@@ -472,6 +532,14 @@ class SessionHistory:
                 self._session_id(),
                 current.turn_id,
             )
+            data.delete_pending_plot_injection_requested_for_turn(
+                self._session_id(),
+                current.turn_id,
+            )
+            data.delete_plot_scene_opportunity_for_turn(
+                self._session_id(),
+                current.turn_id,
+            )
         self.load()
         return Message.from_dict(updated_row.to_message_dict())
 
@@ -499,6 +567,14 @@ class SessionHistory:
                 current.turn_id,
             )
             data.delete_plot_decisions_for_turn(
+                self._session_id(),
+                current.turn_id,
+            )
+            data.delete_pending_plot_injection_requested_for_turn(
+                self._session_id(),
+                current.turn_id,
+            )
+            data.delete_plot_scene_opportunity_for_turn(
                 self._session_id(),
                 current.turn_id,
             )
@@ -531,6 +607,14 @@ class SessionHistory:
                     (message.turn_id for message in self._state.messages),
                 )
                 data.retain_plot_decision_turns(
+                    self._session_id(),
+                    (message.turn_id for message in self._state.messages),
+                )
+                data.retain_pending_plot_injection_requested_turns(
+                    self._session_id(),
+                    (message.turn_id for message in self._state.messages),
+                )
+                data.retain_plot_scene_opportunity_turns(
                     self._session_id(),
                     (message.turn_id for message in self._state.messages),
                 )

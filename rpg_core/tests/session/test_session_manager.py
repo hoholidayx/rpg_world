@@ -485,6 +485,77 @@ def test_assistant_edit_removes_plot_schedule_decision(
     assert rpg_data_gateway.plot_scheduling.list_session_decisions("s1") == []
 
 
+def test_history_mutations_clear_pending_plot_mark_from_affected_turn(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
+    make_data_session("s1")
+    session = rpg_data_gateway.sessions.get_session("s1")
+    assert session is not None
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
+    mgr.load()
+    for turn_id in (1, 2):
+        mgr.append(Role.USER, f"u{turn_id}", turn_id=turn_id, seq_in_turn=1)
+        mgr.append(
+            Role.ASSISTANT,
+            f"a{turn_id}",
+            turn_id=turn_id,
+            seq_in_turn=2,
+        )
+
+    def seed_pending():
+        return rpg_data_gateway.plot_scheduling.replace_pending_injection(
+            "s1",
+            expected_version=None,
+            values=models.PendingPlotInjectionWrite(
+                story_id=session.story_id,
+                source_event_id=701,
+                source_event_version=1,
+                source_pool_id=702,
+                source_pool_name="历史测试池",
+                event_title="历史测试事件",
+                directive="请求 turn 被修改时应清除此快照。",
+                event_snapshot={"eventTitle": "历史测试事件"},
+                requested_turn_id=2,
+            ),
+        )
+
+    def seed_scene_opportunity():
+        return rpg_data_gateway.plot_scheduling.replace_scene_opportunity(
+            "s1",
+            expected_version=None,
+            source_turn_id=2,
+        )
+
+    seed_pending()
+    seed_scene_opportunity()
+    assistant = next(
+        message for message in mgr.history if message.content == "a2"
+    )
+    mgr.update_message_content(assistant.uid, "a2 edited")
+    assert rpg_data_gateway.plot_scheduling.get_pending_injection("s1") is None
+    assert rpg_data_gateway.plot_scheduling.get_scene_opportunity("s1") is None
+
+    seed_pending()
+    seed_scene_opportunity()
+    user = next(message for message in mgr.history if message.content == "u2")
+    mgr.delete_message(user.uid)
+    assert rpg_data_gateway.plot_scheduling.get_pending_injection("s1") is None
+    assert rpg_data_gateway.plot_scheduling.get_scene_opportunity("s1") is None
+
+    seed_pending()
+    seed_scene_opportunity()
+    mgr.truncate_from_turn(2)
+    assert rpg_data_gateway.plot_scheduling.get_pending_injection("s1") is None
+    assert rpg_data_gateway.plot_scheduling.get_scene_opportunity("s1") is None
+
+
 def test_reload_history_keeps_session_identity(
     make_data_session,
     rpg_data_gateway,

@@ -6,7 +6,7 @@ description: Persist, resume, revise, inspect, validate, and package a portable 
 # RPG Story Authoring
 
 <!-- authoring-rules-version: 1.1 -->
-<!-- authoring-rules-digest: b3c6a15dd767c9c44e90fd9371f900df9be17582c0f2f46175e460447d8d4b1c -->
+<!-- authoring-rules-digest: 1acda22f205196e619d530f3034bbf002d9ced110199a5e35fa5ba089507be2a -->
 
 Persist the Story design as immutable local revisions and use
 `rpg-world-mcp` as the only runtime boundary. Never rely on conversation

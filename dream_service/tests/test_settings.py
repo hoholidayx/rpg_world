@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from dream_service.settings import PlayEventPublisherSettings, _loopback_host, settings
+from commons.network import loopback_host
+from dream_service.settings import PlayEventPublisherSettings, settings
 from play_events.auth import DEFAULT_PLAY_EVENT_TOKEN, DEFAULT_PLAY_EVENT_TOKEN_ENV
 
 
@@ -19,17 +20,29 @@ def test_dream_service_accepts_only_explicit_loopback_hosts(
     configured: str,
     expected: str,
 ) -> None:
-    assert _loopback_host(configured) == expected
+    assert loopback_host(
+        configured,
+        setting_name="dream_service.service.host",
+    ) == expected
 
 
 @pytest.mark.parametrize("configured", ["0.0.0.0", "::", "dream.internal"])
 def test_dream_service_rejects_non_loopback_bind(configured: str) -> None:
     with pytest.raises(ValueError, match="loopback"):
-        _loopback_host(configured)
+        loopback_host(
+            configured,
+            setting_name="dream_service.service.host",
+        )
 
 
 def test_default_dream_service_bind_is_loopback() -> None:
-    assert _loopback_host(settings.service.host) == settings.service.host
+    assert (
+        loopback_host(
+            settings.service.host,
+            setting_name="dream_service.service.host",
+        )
+        == settings.service.host
+    )
 
 
 def test_dream_play_event_token_uses_shared_resolution(monkeypatch) -> None:

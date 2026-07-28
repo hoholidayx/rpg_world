@@ -18,6 +18,7 @@ from rpg_data.services.plot_scheduling import (
     PlotSchedulingDataService,
 )
 from rpg_data.services.rp_modules import RPModuleDataService
+from rpg_data.services.runtime_maintenance import RuntimeMaintenanceDataService
 from rpg_data.services.session import SessionDataConflictError, SessionDataService
 from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.session_reference import SessionReferenceDataService
@@ -41,6 +42,7 @@ __all__ = [
     "PlotScheduleDataIntegrityError",
     "PlotSchedulingDataService",
     "RPModuleDataService",
+    "RuntimeMaintenanceDataService",
     "SessionDataConflictError",
     "SessionDataService",
     "SessionComposerDataService",

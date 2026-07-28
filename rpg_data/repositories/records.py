@@ -36,6 +36,8 @@ __all__ = [
     "RPModuleCatalogRecord",
     "SessionPlotEventOverrideRecord",
     "SessionPlotOutlineNodeOverrideRecord",
+    "SessionPlotPendingInjectionRecord",
+    "SessionPlotSceneOpportunityRecord",
     "SessionPlotScheduleDecisionRecord",
     "SessionBackupMessageRecord",
     "SessionDreamProposalItemEvidenceRecord",
@@ -1217,6 +1219,56 @@ class SessionPlotOutlineNodeOverrideRecord(BaseRecord):
         primary_key = CompositeKey("session", "node")
 
 
+class SessionPlotPendingInjectionRecord(BaseRecord):
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="plot_pending_injection",
+        column_name="session_id",
+        primary_key=True,
+        on_delete="CASCADE",
+    )
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="session_plot_pending_injections",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    # These are immutable audit identifiers, intentionally not foreign keys:
+    # the one-shot snapshot survives later Event/Pool definition deletion.
+    source_event_id = IntegerField()
+    source_event_version = IntegerField()
+    source_pool_id = IntegerField()
+    source_pool_name = TextField()
+    event_title = TextField()
+    directive = TextField()
+    event_snapshot_json = TextField()
+    requested_turn_id = IntegerField()
+    active = BooleanField(default=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_plot_pending_injections"
+
+
+class SessionPlotSceneOpportunityRecord(BaseRecord):
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="plot_scene_opportunity",
+        column_name="session_id",
+        primary_key=True,
+        on_delete="CASCADE",
+    )
+    source_turn_id = IntegerField()
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_plot_scene_opportunities"
+
+
 class SessionPlotScheduleDecisionRecord(BaseRecord):
     id = AutoField()
     session = ForeignKeyField(
@@ -1232,8 +1284,9 @@ class SessionPlotScheduleDecisionRecord(BaseRecord):
     container_id = IntegerField()
     decision_status = TextField()
     dispatch_mode = TextField()
-    scene_time_json = TextField()
-    scene_time_ordinal = IntegerField()
+    selection_origin = TextField(default="scheduler")
+    scene_time_json = TextField(null=True)
+    scene_time_ordinal = IntegerField(null=True)
     event_snapshot_json = TextField()
     reason = TextField(default="")
     error_code = TextField(default="")
@@ -1494,6 +1547,7 @@ RECORD_MODELS = (
     StoryPlotOutlineNodeRecord,
     SessionPlotEventOverrideRecord,
     SessionPlotOutlineNodeOverrideRecord,
+    SessionPlotPendingInjectionRecord,
     SessionPlotScheduleDecisionRecord,
     SessionNarrativeOutcomeRecord,
     MediaBlobRecord,

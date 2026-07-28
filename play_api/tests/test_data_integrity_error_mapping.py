@@ -53,21 +53,15 @@ def test_data_integrity_conflict_logs_root_cause_and_returns_stable_detail() -> 
 
 @pytest.mark.asyncio
 async def test_character_route_does_not_convert_unexpected_errors(
-    monkeypatch,
 ) -> None:
     class _UnexpectedBackend:
         async def create_character(self, *_args, **_kwargs):
             raise RuntimeError("unexpected backend failure")
-
-    monkeypatch.setattr(
-        characters,
-        "get_data_manager_backend",
-        lambda: _UnexpectedBackend(),
-    )
 
     with pytest.raises(RuntimeError, match="unexpected backend failure"):
         await characters.create_character(
             "demo_workspace",
             1,
             characters.PlayCharacterPayload(name="Visible Name"),
+            _UnexpectedBackend(),
         )

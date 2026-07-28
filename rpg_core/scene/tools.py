@@ -29,7 +29,7 @@ class SetTimeTool(BaseTool):
     description = (
         "直接设置当前场景的绝对时间。hour 使用 24h 制（0-23）。"
         " 使用示例：\n"
-        '  - set_time(year=3, month=6, day=15, hour=14)  —— 设置第 3 年 6 月 15 日 14 时\n'
+        '  - set_time(year=3, month=6, day=15, hour=14)  —— 设置 3 年 6 月 15 日 14 时\n'
         '  - set_time(hour=9, minute=30)                 —— 仅调整到上午 9:30，年月日不变\n'
         '  - set_time(day=1, hour=0)                     —— 重置到当月第 1 天 0 时（午夜）\n'
         "  不支持增量推进（如 +1 天），所有参数都是直接设定值。"
@@ -50,7 +50,7 @@ class SetTimeTool(BaseTool):
                 "year": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "年份，例如 3 表示「第 3 年」",
+                    "description": "年份，例如 3 表示「3 年」",
                 },
                 "month": {
                     "type": "integer",

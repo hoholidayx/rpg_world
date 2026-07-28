@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from play_api.backends import data_manager as data_manager_module
-from play_api.backends.data_manager import DataManagerBackend
+from play_api.backends import data_backends as data_backends_module
+from play_api.backends.data_backends import (
+    PlayCatalogBackend,
+    PlayStoryAssetBackend,
+)
 from rpg_core.session.role import (
     PlayerCharacterBindingStatus,
     SessionPlayerCharacterState,
@@ -95,24 +96,6 @@ class FakeCatalog:
                 else models.SESSION_LIFECYCLE_READY
             ),
         )
-
-
-class FakeGateway:
-    def __init__(self) -> None:
-        self.catalog = FakeCatalog()
-        self.sessions = self
-        self.character_management = FakeCharacterManagement()
-        self.lorebook_management = FakeLorebookManagement()
-        self.status = object()
-        self.initialize_calls = 0
-        self.close_calls = 0
-        self.database = object()
-
-    def initialize(self) -> None:
-        self.initialize_calls += 1
-
-    def close(self) -> None:
-        self.close_calls += 1
 
 
 class FakeLorebookManagement:
@@ -205,19 +188,14 @@ class FakeCharacterManagement:
 
 
 @pytest.mark.asyncio
-async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) -> None:
-    gateway = FakeGateway()
-    requested_paths: list[Path] = []
-
-    def fake_get_gateway(path: Path):
-        requested_paths.append(path)
-        return gateway
-
-    monkeypatch.setattr(data_manager_module, "get_data_service_gateway", fake_get_gateway)
+async def test_narrow_data_backends_receive_only_their_services(
+    monkeypatch,
+) -> None:
+    catalog_data = FakeCatalog()
     monkeypatch.setattr(
-        data_manager_module,
+        data_backends_module,
         "SessionCatalogService",
-        lambda fake_gateway: fake_gateway.catalog,
+        lambda fake_data: fake_data,
     )
 
     class FakeRoleService:
@@ -228,61 +206,67 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
             )
 
     monkeypatch.setattr(
-        data_manager_module,
+        data_backends_module,
         "SessionRoleService",
         lambda _fake_gateway: FakeRoleService(),
     )
 
-    db_path = tmp_path / "play.sqlite3"
-    backend = DataManagerBackend(db_path)
+    catalog = PlayCatalogBackend(
+        catalog=catalog_data,
+        sessions=catalog_data,
+        session_composer=object(),
+        rp_modules=object(),
+    )
+    assets = PlayStoryAssetBackend(
+        catalog=catalog_data,
+        character_management=FakeCharacterManagement(),
+        lorebook_management=FakeLorebookManagement(),
+        status_administration=object(),
+        plot_management=object(),
+        plot_story_projection=object(),
+        scene=object(),
+    )
 
-    assert requested_paths == [db_path]
-    assert gateway.initialize_calls == 1
-    assert await backend.list_workspaces() == [{"id": "workspace", "name": "Workspace", "description": None}]
-    assert (await backend.list_stories("workspace"))[0]["title"] == "Story"
-    assert (await backend.list_stories("workspace"))[0]["story_prompt"] == "Prompt"
-    assert (await backend.list_stories("workspace"))[0]["openings"][0]["message"] == "First"
-    assert (await backend.create_story("workspace", title="New Story"))["title"] == "New Story"
-    assert (await backend.create_story("missing", title="New Story")) is None
-    assert (await backend.update_story("workspace", 1, summary="Updated summary"))["summary"] == "Updated summary"
-    assert (await backend.update_story("missing", 1, summary="Updated summary")) is None
-    assert (await backend.list_sessions("workspace", 1))[0]["id"] == "session"
-    assert (await backend.create_session("workspace", 1, title="Title"))["title"] == "Title"
-    assert (await backend.get_session("session"))["id"] == "session"
-    assert await backend.get_session("provisioning") is None
-    assert await backend.list_session_summaries("provisioning") is None
-    assert await backend.get_session_summary("provisioning", "overall") is None
-    assert await backend.list_session_status_tables("provisioning") is None
+    assert not hasattr(catalog, "_gateway")
+    assert not hasattr(assets, "_gateway")
+    assert await catalog.list_workspaces() == [{"id": "workspace", "name": "Workspace", "description": None}]
+    assert (await catalog.list_stories("workspace"))[0]["title"] == "Story"
+    assert (await catalog.list_stories("workspace"))[0]["story_prompt"] == "Prompt"
+    assert (await catalog.list_stories("workspace"))[0]["openings"][0]["message"] == "First"
+    assert (await catalog.create_story("workspace", title="New Story"))["title"] == "New Story"
+    assert (await catalog.create_story("missing", title="New Story")) is None
+    assert (await catalog.update_story("workspace", 1, summary="Updated summary"))["summary"] == "Updated summary"
+    assert (await catalog.update_story("missing", 1, summary="Updated summary")) is None
+    assert (await catalog.list_sessions("workspace", 1))[0]["id"] == "session"
+    assert (await catalog.get_session("session"))["id"] == "session"
+    assert await catalog.get_session("provisioning") is None
+    assert await assets.list_session_status_tables("provisioning") is None
     document = models.StatusTableDocument.from_rows()
-    assert await backend.create_session_status_table(
+    assert await assets.create_session_status_table(
         "provisioning",
         name="hidden",
         status_kind=models.STATUS_KIND_NORMAL,
         document=document,
     ) is None
-    assert await backend.update_session_status_table(
+    assert await assets.update_session_status_table(
         "provisioning",
         1,
         name="hidden",
     ) is None
-    assert await backend.delete_session_status_table("provisioning", 1) is None
-    assert (await backend.list_characters("workspace", 1))[0]["name"] == "Character"
-    assert (await backend.list_characters("workspace", 1))[0]["details"][0]["tags"] == ["tag"]
-    assert (await backend.create_character("workspace", 1, name="New"))["name"] == "New"
-    assert (await backend.get_character("workspace", 1, 1))["name"] == "Character"
-    assert await backend.get_character("missing", 1, 1) is None
-    assert (await backend.update_character("workspace", 1, 1, name="Updated"))["name"] == "Updated"
-    assert await backend.delete_character("workspace", 1, 1) is True
-    assert (await backend.create_character_detail("workspace", 1, 1, name="New Detail"))["name"] == "New Detail"
-    assert (await backend.update_character_detail("workspace", 1, 1, 11, name="Updated Detail"))["version"] == 2
-    assert await backend.delete_character_detail("workspace", 1, 1, 11) is True
-    assert (await backend.list_lorebook_entries("workspace", 1))[0]["name"] == "Entry"
-    assert (await backend.create_lorebook_entry("workspace", 1, name="New"))["name"] == "New"
-    assert (await backend.get_lorebook_entry("workspace", 1, 1))["name"] == "Entry"
-    assert await backend.get_lorebook_entry("missing", 1, 1) is None
-    assert (await backend.update_lorebook_entry("workspace", 1, 1, name="Updated"))["name"] == "Updated"
-    assert await backend.delete_lorebook_entry("workspace", 1, 1) is True
-
-    backend.close()
-
-    assert gateway.close_calls == 1
+    assert await assets.delete_session_status_table("provisioning", 1) is None
+    assert (await assets.list_characters("workspace", 1))[0]["name"] == "Character"
+    assert (await assets.list_characters("workspace", 1))[0]["details"][0]["tags"] == ["tag"]
+    assert (await assets.create_character("workspace", 1, name="New"))["name"] == "New"
+    assert (await assets.get_character("workspace", 1, 1))["name"] == "Character"
+    assert await assets.get_character("missing", 1, 1) is None
+    assert (await assets.update_character("workspace", 1, 1, name="Updated"))["name"] == "Updated"
+    assert await assets.delete_character("workspace", 1, 1) is True
+    assert (await assets.create_character_detail("workspace", 1, 1, name="New Detail"))["name"] == "New Detail"
+    assert (await assets.update_character_detail("workspace", 1, 1, 11, name="Updated Detail"))["version"] == 2
+    assert await assets.delete_character_detail("workspace", 1, 1, 11) is True
+    assert (await assets.list_lorebook_entries("workspace", 1))[0]["name"] == "Entry"
+    assert (await assets.create_lorebook_entry("workspace", 1, name="New"))["name"] == "New"
+    assert (await assets.get_lorebook_entry("workspace", 1, 1))["name"] == "Entry"
+    assert await assets.get_lorebook_entry("missing", 1, 1) is None
+    assert (await assets.update_lorebook_entry("workspace", 1, 1, name="Updated"))["name"] == "Updated"
+    assert await assets.delete_lorebook_entry("workspace", 1, 1) is True

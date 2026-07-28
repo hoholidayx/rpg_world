@@ -43,6 +43,7 @@ from rpg_data.services.message import MessageDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleDataService
+from rpg_data.services.runtime_maintenance import RuntimeMaintenanceDataService
 from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.session_reference import SessionReferenceDataService
 from rpg_data.services.session import SessionDataService
@@ -156,17 +157,14 @@ MESSAGE_AND_LEDGER_BUSINESS_FILES = (
 GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "agent_service/main.py",
     "dream_service/repository.py",
-    "media_service/main.py",
-    "play_api/backends/data_manager.py",
-    "play_api/routers/plot_scheduling.py",
-    "play_api/composition.py",
-    "play_api/routers/sessions.py",
+    "media_service/runtime.py",
+    "play_api/data_runtime.py",
     "channels/cli/memory_recall.py",
     "rpg_core/agent/agent.py",
     "rpg_core/context/factory.py",
     "rpg_mcp/composition.py",
     "run_telegram.py",
-    "tts_service/main.py",
+    "tts_service/runtime.py",
 })
 
 CORE_GATEWAY_LOOKUP_ALLOWLIST = frozenset({
@@ -178,11 +176,12 @@ CORE_GATEWAY_LOOKUP_ALLOWLIST = frozenset({
 # do not perform a global lookup. Freeze that legacy surface independently so a
 # new caller cannot bypass the lookup guard through constructor injection.
 WHOLE_GATEWAY_REFERENCE_ALLOWLIST = frozenset({
-    "media_service/main.py",
-    "play_api/backends/data_manager.py",
+    "agent_service/runtime.py",
+    "media_service/runtime.py",
+    "play_api/data_runtime.py",
     "rpg_mcp/composition.py",
     "run_telegram.py",
-    "tts_service/main.py",
+    "tts_service/runtime.py",
 })
 
 
@@ -304,6 +303,37 @@ def test_gateway_lookup_surface_does_not_grow() -> None:
     assert actual - GATEWAY_LOOKUP_ALLOWLIST == set()
 
 
+def test_play_request_boundaries_do_not_lookup_or_reference_gateway() -> None:
+    violations: list[str] = []
+    for boundary_root in (ROOT / "play_api/routers", ROOT / "play_api/backends"):
+        for path in _python_files(boundary_root):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            if _uses_gateway_lookup(path) or any(
+                isinstance(node, ast.Name) and node.id == "DataServiceGateway"
+                for node in ast.walk(tree)
+            ):
+                violations.append(path.relative_to(ROOT).as_posix())
+
+    assert violations == []
+
+
+def test_agent_service_gateway_lookup_is_limited_to_lifespan() -> None:
+    path = ROOT / "agent_service/main.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    callers = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(
+            isinstance(child, ast.Name)
+            and child.id == "get_data_service_gateway"
+            for child in ast.walk(node)
+        )
+    }
+
+    assert callers == {"lifespan"}
+
+
 def test_rpg_core_gateway_lookup_is_limited_to_composition_roots() -> None:
     actual = {
         path.relative_to(ROOT).as_posix()
@@ -341,6 +371,7 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         RPModuleDataService,
         MessageDataService,
         NarrativeOutcomeDataService,
+        RuntimeMaintenanceDataService,
     )
 
     assert all(service_type.__name__.endswith("DataService") for service_type in service_types)

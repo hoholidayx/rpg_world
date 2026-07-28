@@ -265,7 +265,7 @@ def test_patch_returns_only_affected_advisory_diagnostics(tmp_path) -> None:
                 "rows": [
                     {
                         "key": "时间",
-                        "value": "第 1 年 1 月 1 日 9 时",
+                        "value": "1 年 1 月 1 日 9 时",
                         "updateRule": "每 3 回合延迟更新。",
                     },
                     {"key": "位置", "value": "车站"},
@@ -357,7 +357,7 @@ def test_authoring_diagnostics_match_viewer_and_portable_pack_validator() -> Non
         "rows": [
             {
                 "key": "时间",
-                "value": "第 1 年 1 月 1 日 9 时",
+                "value": "1 年 1 月 1 日 9 时",
                 "updateRule": "每 3 回合延迟更新。",
             },
             {"key": "位置", "value": "车站"},

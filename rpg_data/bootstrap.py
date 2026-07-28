@@ -19,9 +19,6 @@ from rpg_data.settings import get_bootstrap_delete_unindexed_dirs, resolve_works
 
 __all__ = [
     "bootstrap_runtime_data",
-    "delete_unindexed_runtime_item",
-    "delete_unindexed_runtime_items",
-    "scan_unindexed_runtime_data",
 ]
 
 logger = logging.getLogger("rpg_data.bootstrap")
@@ -43,108 +40,6 @@ def bootstrap_runtime_data(database: Database) -> None:
         session_copy_count,
         unindexed_dirs_removed,
     )
-
-
-def scan_unindexed_runtime_data(database: Database, workspace_id: str) -> dict[str, list[dict[str, str]]] | None:
-    """Return workspace-scoped runtime directories that are not indexed by SQL."""
-
-    bind_database(database)
-    workspace_roots = _workspace_roots_from_index()
-    if workspace_id not in workspace_roots:
-        return None
-    items = [
-        _unindexed_item("runtime_directory", item)
-        for item in _scan_unindexed_runtime_dirs(workspace_roots)
-        if item.get("workspace_id") == workspace_id and item.get("kind") != "workspace"
-    ]
-    return {"items": items}
-
-
-def delete_unindexed_runtime_item(database: Database, item: dict[str, str]) -> bool | None:
-    bind_database(database)
-    workspace_id = str(item.get("workspace_id", ""))
-    workspace_roots = _workspace_roots_from_index()
-    if workspace_id not in workspace_roots:
-        return None
-    scan = scan_unindexed_runtime_data(database, workspace_id)
-    if scan is None:
-        return None
-    match = _find_unindexed_item(scan["items"], item)
-    if match is None:
-        return False
-    return _delete_unindexed_runtime_match(workspace_id, match)
-
-
-def delete_unindexed_runtime_items(database: Database, items: list[dict[str, str]]) -> bool | None:
-    bind_database(database)
-    targets = _dedupe_unindexed_items(items)
-    if not targets:
-        return False
-    workspace_id = str(targets[0].get("workspace_id", ""))
-    if any(str(item.get("workspace_id", "")) != workspace_id for item in targets):
-        return False
-    workspace_roots = _workspace_roots_from_index()
-    if workspace_id not in workspace_roots:
-        return None
-    scan = scan_unindexed_runtime_data(database, workspace_id)
-    if scan is None:
-        return None
-    matches: list[dict[str, str]] = []
-    for target in targets:
-        match = _find_unindexed_item(scan["items"], target)
-        if match is None:
-            return False
-        matches.append(match)
-    for match in matches:
-        if not _delete_unindexed_runtime_match(workspace_id, match):
-            return False
-    return True
-
-
-def _delete_unindexed_runtime_match(workspace_id: str, match: dict[str, str]) -> bool:
-    if match["category"] != "runtime_directory":
-        return False
-    return _remove_unindexed_dir(
-        Path(str(match["path"])),
-        kind=str(match["kind"]),
-        workspace_id=workspace_id,
-        story_id=str(match.get("story_id", "")),
-        session_id=str(match.get("session_id", "")),
-    )
-
-
-def _dedupe_unindexed_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
-    deduped: list[dict[str, str]] = []
-    seen: set[tuple[str, ...]] = set()
-    locator_keys = ("category", "kind", "workspace_id", "story_id", "session_id", "relative_path", "path")
-    for item in items:
-        normalized = tuple(str(item.get(key, "")) for key in locator_keys)
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        deduped.append(item)
-    return deduped
-
-
-def _unindexed_item(category: str, item: dict[str, str]) -> dict[str, str]:
-    return {
-        "category": category,
-        "kind": str(item.get("kind", "")),
-        "workspace_id": str(item.get("workspace_id", "")),
-        "story_id": str(item.get("story_id", "")),
-        "session_id": str(item.get("session_id", "")),
-        "relative_path": str(item.get("relative_path", "")),
-        "path": str(item.get("path", "")),
-    }
-
-
-def _find_unindexed_item(items: list[dict[str, str]], target: dict[str, str]) -> dict[str, str] | None:
-    locator_keys = ("category", "kind", "workspace_id", "story_id", "session_id", "relative_path", "path")
-    normalized = {key: str(target.get(key, "")) for key in locator_keys}
-    for item in items:
-        if all(str(item.get(key, "")) == normalized[key] for key in locator_keys):
-            return item
-    return None
 
 
 def _workspace_roots_from_index() -> dict[str, Path]:

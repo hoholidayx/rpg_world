@@ -303,6 +303,10 @@ class PlotScheduleSelector:
         if not event.allow_repeat:
             return False
         latest = max(triggered, key=lambda item: (item.turn_id, item.id))
+        if latest.scene_time_ordinal is None:
+            # Explicit manual injection overrides automatic eligibility rules,
+            # including any earlier SceneTime cooldown anchor.
+            return True
         return (
             scene_time.ordinal_minutes - latest.scene_time_ordinal
             >= event.repeat_cooldown_minutes

@@ -97,6 +97,14 @@ class StatusDocumentScratch:
             for table_id, document in sorted(self._staged_documents.items())
         )
 
+    @property
+    def scene_changed(self) -> bool:
+        """Whether the active Scene document differs from the turn baseline."""
+        return (
+            self._active_scene_id is not None
+            and self._active_scene_id in self._staged_documents
+        )
+
     def create_checkpoint(self) -> dict[int, StatusTableDocument]:
         """Snapshot staged documents for an in-memory tool batch rollback."""
         return dict(self._staged_documents)

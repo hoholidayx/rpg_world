@@ -18,6 +18,7 @@ from rpg_core.context.models import (
     RPModuleRuntimePlacement,
     RPModuleRuntimeSection,
 )
+from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshot
 
 
 class _ContextService:
@@ -96,6 +97,7 @@ def _runtime(events: list[str]) -> SimpleNamespace:
             execution=execution,
             persistent_memory=(),
             story_memory=(),
+            plot_schedule=PlotScheduleSnapshot.disabled("test"),
         ),
         scratch=SimpleNamespace(scene_tracker=None, status_manager=object()),
         transaction=_Transaction(events),

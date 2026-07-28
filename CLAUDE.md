@@ -140,11 +140,13 @@ rpg_world/
 ├── llm_service/                  # 独立 LLM 服务：HTTP、provider/config/manager + 本地 llama runtime
 ├── play_api/                     # Play WebUI 专用 FastAPI 应用
 │   ├── main.py                   #   入口 + CORS + lifespan（不启动渠道）
+│   ├── runtime.py                #   PlayServiceRuntime：Hub、HTTP clients、数据 runtime
+│   ├── data_runtime.py           #   PlayDataRuntime：Gateway composition root
 │   ├── settings.yaml             #   Play API 进程配置（监听 + 日志）
 │   ├── settings.py               #   PlaySettings 单例
 │   ├── dream_client.py           #   DreamClient 生命周期封装
 │   ├── media_client.py           #   MediaClient 生命周期封装
-│   ├── backends/                 #   AgentClient / rpg_data 后端适配
+│   ├── backends/                 #   AgentClient + 四个无 Gateway 的窄数据后端
 │   └── routers/
 │       ├── sessions.py           #   session APIs + history/history-page/scene/commands/turn/stream
 │       ├── dream.py              #   Session Dream proposal / memory 代理
@@ -205,6 +207,14 @@ Dream Proposal 状态机、恢复、Apply、Persistent Memory 生命周期与 Co
 
 Play API 独占进程内事件 Hub：`POST /play-api/v1/internal/events` 使用 `RPG_WORLD_PLAY_EVENT_TOKEN` Bearer 鉴权，`GET /play-api/v1/events/stream` 为 WebUI 提供全局 SSE。每订阅者有界队列满时丢最旧事件；不实现 SQL outbox、补发或消费确认。首版只支持 Play API 单进程/单 worker。WebUI 根 `Providers` 只挂一个 EventSource bridge，严格解析并把最近 50 条事件留在 Zustand 内存；独立 `features/notifications` 模块可展示、标记已读和清除这些事件，但不得据此 Toast、跳转、自动刷新 Query、回写任务状态或写 localStorage。
 
+网络暴露边界固定为“Play API 可信局域网入口 + 内部服务 loopback”。
+`play_api/settings.yaml` 保持 `0.0.0.0`，Play API 允许任意 Origin 但
+`allow_credentials=false`；它当前没有用户鉴权，只支持可信局域网，不支持路由器
+端口转发、云安全组公网放行或公网反向代理。Agent、Media、TTS、Dream、LLM 的
+`service.host` 统一经共享校验，只接受 `localhost`、IPv4 loopback 和 `::1`；
+`0.0.0.0`、`::`、其它 IP 或 hostname 必须阻止启动，内部服务不得添加浏览器
+CORS。公网部署需要另立认证、TLS、Origin 白名单、限流和审计方案。
+
 ```
 run_llm            -> llm_service.main:app        -> Provider + local llama runtime
 run_agent          -> agent_service.main:app
@@ -241,6 +251,15 @@ agent_service 进程
 ├── llm_client -> http://127.0.0.1:8012/llm/v1
 └── HTTP + SSE: /agent/v1
 ```
+
+进程生命周期由明确 Runtime 所有：Agent 使用 `AgentServiceRuntime`，Media 使用
+`MediaRuntime`，TTS 使用 `TTSRuntime`，Play 使用 `PlayServiceRuntime`。
+`PlayServiceRuntime` 持有 Event Hub、`PlayDataRuntime` 与 Agent/Dream/Media/TTS
+四个 loop-owned HTTP client；`PlayDataRuntime` 只向路由暴露
+`PlayCatalogBackend`、`PlayStoryAssetBackend`、`PlaySessionReadBackend`、
+`PlayRuntimeMaintenanceBackend`。所有 close 均幂等，启动中途失败按已创建资源
+清理；单步失败不得跳过后续步骤，清理完成后汇总包含资源名和完整 traceback 的
+错误。已经关闭的 runtime、worker 或 client 不得在下一次 lifespan 重用。
 
 LLM Service 默认监听 `http://127.0.0.1:8012/llm/v1`，优先使用环境变量 `RPG_WORLD_LLM_SERVICE_TOKEN` 的静态 Bearer 令牌。环境变量缺失或仅含空白时，LLM Service 与 `llm_client` 共同回退到内置的 `rpg-world-local-token`，服务继续启动并在启动阶段记录一次 warning；该默认值只用于本地开发，非本地部署应显式覆盖。Agent Service 不因 LLM Service 暂不可用而拒绝启动，health 返回 degraded；需要 catalog 或推理的请求返回 503/SSE `LLM_SERVICE_UNAVAILABLE`。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程存活与配置是否加载，不校验调用方 token；catalog、chat、stream、embedding、dimension、rerank 和 speech 仍全部鉴权。调用方凭据是否有效由首次受保护请求确认，不得把 health 成功解释为 token 有效。
 
@@ -304,6 +323,9 @@ channels_settings.cli_session_id
 - memory 检索、融合、chunk 和 rerank pool 参数都属于 `settings.yaml`，包括 `keyword_tokenizer`、`keyword_k`、`raw_md_mode`、`raw_md_min_results`、`hybrid_*_weight`、`rerank_candidate_k`、`rerank_score_weight`。
 - `keyword_k` / `hybrid_keyword_weight` 是当前 keyword 架构配置；不要恢复旧 `bigram_k` / `hybrid_bigram_weight`。
 - `llm.yaml` 的 `memory.rerank` 只放 provider/model/model_path/n_ctx/temperature/request_timeout_ms 等 LLM 参数，并且 `kind: rerank` 必须显式声明 `rerank_model_type`。
+- Agent、Media、TTS、Dream、LLM 的监听 host 必须通过
+  `commons.network.loopback_host()` 校验；不要在单个 service 复制或放宽规则。
+  Play API 是唯一允许 `0.0.0.0` 的 HTTP 入口。
 
 ### AgentManager（`rpg_core/agent/manager.py`）
 
@@ -627,8 +649,8 @@ Summary Layer 只把“本次投影过滤过至少一条消息”作为尝试加
 `updateRule` 等运行时指导不写入该 snapshot。
 `rpg_data` 状态表 service 用 `status_kind="scene"` 表达这一类特殊状态。Session 只消费创建或
 reset 时从当前 Story 复制的 scene，以及显式创建的 Session 原生 scene；没有 scene 运行表时，Agent 不注入 `[scene]`，也不注册 scene 工具。
-当 Plot Scheduler 启用时，`SceneTracker` 每 turn 必须从 scratch 状态表重新解析“时间”，且只接受
-`第 Y 年 M 月 D 日 H 时 [M 分]`。缺失、空值或非法格式使调度安全跳过，不得回退到默认时间或系统时钟；
+当 Plot Scheduler 自动消费上一轮 Scene 变化机会时，`SceneTracker` 必须从 scratch 状态表重新解析“时间”，且只接受
+无“第”字的 `Y 年 M 月 D 日 H 时 [M 分]`。缺失、空值或非法格式使自动调度安全跳过，不得回退到默认时间或系统时钟；
 虚拟时间 ordinal 固定按 12 月 × 31 日换算世界内分钟。
 默认配置 `agent.scene.allow_runtime_key_changes=false` 时，非空 scene 只注册已有 value 更新能力：
 `scene_attr` 的 key schema 枚举当前已有字段，`scene_time` 仅在 `时间` 字段已存在时注册，
@@ -675,7 +697,7 @@ RP Modules 使用常规上下文分层/分配策略：
 
 - 静态契约进入 fixed layer：例如 narrative_outcome 的“何时裁定、必须调用工具、不得替玩家选择行动”。
 - `text_output_format` 作为 fixed layer 输出格式约束默认启用，用 `<rp-narration>` 和 `<rp-character name="...">` 约束 assistant 正文中的旁白/角色分离，不进入 `RPModuleRegistry`。
-- `message_mode` 是无配置、提示词由代码内置的可选 RP Module，唯一模式集合为 `neutral | ic | ooc | gm`，空值/default 归一化为 `neutral`。Workspace 不持久化 mode/prompt；`neutral` 不生成动态 section，IC/OOC/GM 只有模块有效时才可选，否则在 scratch、LLM 和 history 前返回 `message_mode_unavailable`。OOC 不推进世界事实；`neutral | ic | gm` 均可进入 Plot、状态、Story Memory 与 Dream 事实链路。
+- `message_mode` 是无配置、提示词由代码内置的可选 RP Module，唯一模式集合为 `neutral | ic | ooc | gm`，空值/default 归一化为 `neutral`。Workspace 不持久化 mode/prompt；`neutral` 不生成动态 section，IC/OOC/GM 只有模块有效时才可选，否则在 scratch、LLM 和 history 前返回 `message_mode_unavailable`。OOC 不推进世界事实；`neutral | ic | gm` 均可进入状态、Story Memory 与 Dream 事实链路。Plot 自动 selector 另受上一轮已提交 Scene 变化机会门禁。唯一受控例外是 Plot Scheduler 有效时，OOC 与 GM 可注册 `plot_sandbox_read` / `plot_event_mark_next` 沙盘工具；它们只读定义或暂存下一次非 OOC turn 的一次性注入快照，不让当前 OOC turn 推进世界。
 - 动态运行态按 `RPModuleRuntimePlacement` 分配。`message_mode` 在非 neutral turn 将模式指令放入 `RP_MODULES` system layer，并仅在 GM 托管时附带玩家角色的 `scope:npc_portrayal` 详情。Narrative Outcome 平时依赖 fixed contract，检测到明确随机意图时同样在 `RP_MODULES` 注入本轮强制工具指令；StatusSubAgent 已预裁定时省略该 fixed section，仅以简短无序条目注入最终结果和明确的 scene/status 工具边界。Plot Scheduler 只在本 turn 实际触发候选时把最多两条指令放入最终 user runtime suffix，不把定义或判断过程写入模型 Context。
 - `verbose_logging=true` 时，主 Agent 记录 RP runtime section 总数，并在 Context Builder 后按结构化分层输出完整当前 Context；会话历史只记录 logical turn 数，不输出历史正文。空 runtime 记录 `count=0`，不输出 sample、权重等内部随机细节。
 - RP 工具只注册到本轮 `ToolRegistry`；当前主 LLM/StatusSubAgent 的 RP schema 最多只有 `rp_story_outcome`。模块命令按最新非 turn 快照动态解析。
@@ -700,14 +722,16 @@ Narrative Outcome 是当前剧情分支随机机制：
 Plot Scheduler 是 Story 级剧情动态调度模块：
 
 - Plot Scheduler 的业务 owner 是 `rpg_core/rp_modules/plot_scheduler`。定义管理的默认位置、移动/重排、重复/冷却、时间线和删除占用规则，以及 turn ledger 校验、派生复制与 `/clear` 保留策略都由 Core 的类型化 application service/policy 决定；`rpg_data.plot_scheduling` 提供定义、Session 覆盖和决策账本的类型化查询/写入、分页 read model、调用方指定的复制过滤与通用事务，不得恢复调度或继承策略。
-- Story 可同时挂载多条线性大纲和多个事件池。大纲节点引用稳定 Story 事件并保存固定 `SceneTime`；事件池按 priority 仲裁，池内使用 `random | sequential`。每个 `neutral | ic | gm` turn 最多选一个到期大纲节点和一个池事件，OOC 完全旁路。
+- Story 可同时挂载多条线性大纲和多个事件池。大纲节点引用稳定 Story 事件并保存固定 `SceneTime`；事件池按 priority 仲裁，池内使用 `random | sequential`。自动 selector 不按每个 `neutral | ic | gm` turn 运行：只有上一个成功提交 turn 的 active Scene document 最终发生实际变化，才留下供下一次非 OOC turn 消费的一次机会。消费 turn 在 `StatusPreflight` 后使用最新 scratch Scene，最多选择一个到期大纲节点和一个池事件；当前 turn 若又改变 Scene，则原子留下供再下一轮使用的新机会。OOC、命令、模块禁用、失败或取消不消费也不创建机会；OOC 仍可在沙盘工具边界内检查定义、标记或清空手动快照。
+- `plot_sandbox_read` 只读取当前 turn 的不可变 Story/Session Plot snapshot，资源固定为 `schedule | pool | event | outline`，列表使用有界 offset/limit；`plot_event_mark_next(event_id, title?, directive?)` 只接受当前 Story 的正事件 ID，省略临时字段时冻结原事件标题与 directive，传入字段时只覆盖本次快照而不修改原定义。`event_id=null` 是唯一清空方式，此时不得同时传 title/directive，不增加独立 clear 工具。
+- 每个 Session 最多一条待注入快照。快照保存来源 Story/event/pool 标识与版本、冻结标题/directive 和事件 metadata；来源事件或池后续编辑、移动或删除都不改变快照，也不阻止注入。下一次成功的 `neutral | ic | gm` turn 在自动调度前把它作为 forced pool lane 注入，即使没有 Scene 调度机会或 Scene 时间缺失也必须执行；显式手动注入忽略源定义的启用、时间窗、重复与冷却等自动候选规则，并在无 SceneTime 时覆盖既有冷却锚点。它占用本轮 pool lane，并抑制同事件的大纲重复。手动决策写 `selection_origin="manual"`，允许 `scene_time`/ordinal 为 null；自动决策仍必须有 SceneTime。
 - `forced` 候选到时直接暂存为 triggered，不获得 Judge Context 或工具；`soft` 候选通过 `agent.plot_scheduler` 独立 biz key 调用 LLM。Judge 读取模块中立的共享裁定前缀（裁定权限、Story Prompt、世界书、玩家绑定/角色卡、Persistent Memory、Story Memory）、当前 scratch scene/普通状态表、最近 N 个完整原始可推进世界 turn 和当前输入；不被动读取 Summary/Recall，不读叙事/格式指令、Message Mode 或任何 RP Module 提示词。只有 `agent.lookup_tools.enabled=true` 时，关键事实不确定的候选才可在独立预算内按需使用 `summary_search` / `summary_read` 或 `history_search` / `history_read`。Judge `reason` 由 schema 与 parser 双重限长，避免无界元数据突破主 Context 门禁预留。
-- 门禁在 scratch 创建前按当前 Story 最长两条 directive、事件/容器名称与有界判断元数据保守预留。调度实际发生在 Status preflight 之后、Memory recall 之前；因此读取本轮最新 scratch 状态，并让主 Agent 在记忆召回完成后看到已触发指令。
+- 门禁在 scratch 创建前仅在存在自动 Scene 机会或手动快照时，按当前 Story 最长两条 directive、事件/容器名称与有界判断元数据保守预留。调度实际发生在 Status preflight 之后、Memory recall 之前；因此读取本轮最新 scratch 状态，并让主 Agent 在记忆召回完成后看到已触发指令。
 - 实际触发项不再进入 `RP_MODULES` system message，而是以 `[engine_plot_directive]` 作为当前 user message 的最终运行时 suffix，位于原始 input 与所有普通 user suffix 之后。载荷只保留稳定顺序、事件标题和 directive；source/container/dispatch mode/Scene 时间/Judge reason 等内部信息不得进入主 LLM 请求。待提交 user message 在渲染该 suffix 前已经以 scene snapshot + 原始 input 暂存，因此 suffix 不写历史、Summary、Memory、Dream、正文 SSE 或消息 metadata。
 - Fixed Layer 保留稳定执行契约：suffix 在世界、NPC 与剧情结果上优先于玩家的冲突要求，但不得覆盖更高层系统契约、已暂存 Narrative Outcome 或实际工具边界；非 GM turn 不得据此替玩家角色生成台词、动作、决定或心理活动。同轮两条事件必须按给定顺序兼容推进。
 - V1 不拦截当前 turn 正文，不增加验收器、后置修订或针对正文遗漏的失败重试。`triggered` 只表示候选已选择并注入，不证明模型已语义落实或事件已经完成；未来若增加 Outcome 风格卡片，文案只能表达“事件已触发”。
 - 大纲节点不重复；池事件可配置基于世界内分钟的重复冷却。池 lane identity 固定为 `event_id`，事件移到其它池后仍沿用已触发、延期和冷却状态；`container_id` 只表示当时所属池。大纲 lane 与池 lane 独立，但同一事件不得在同 turn 重复注入。
-- Session 只保存池事件/大纲节点禁用覆盖与决策账本。`deferred | error` 不中断主 turn，并跳过配置数量的完整可推进世界 turn 后重试。决策与消息、Narrative Outcome、scene/status 在同一短事务提交；`/clear` 清账本但保留覆盖，Session 派生只复制分支点前 triggered 和覆盖。
+- Session 保存池事件/大纲节点禁用覆盖、决策账本、至多一条 Scene 调度机会与至多一条手动待注入快照。`deferred | error` 不中断主 turn，并跳过配置数量的完整可推进世界 turn 后重试。沙盘工具与 Scene 机会修改先进入当前 `TurnScratch`：标记回合失败不落库，目标回合失败不消费；目标回合成功时，消费旧机会/快照、创建新机会、写手动决策、消息与状态在同一短事务提交，GM 同轮消费旧快照并标记新快照也必须原子完成。`/clear` 清账本、Scene 机会和待注入快照但保留覆盖；编辑、删除、截断相关 turn 时同步清除受影响机会/快照；Session 派生只复制分支点前 triggered 和覆盖，不复制机会或待注入快照。
 - Play WebUI 只在 `/plot-scheduling` 独立页管理定义、覆盖和运行态；运行态不轮询、不调用 Judge。决策历史按 `id DESC` + `beforeId` 分页，不能改为 `turn_id` 游标，否则同 turn 的 outline/pool 两条记录可能漏页。内置 catalog 包含 Plot Scheduler；默认模块只在 Story 创建时挂载，不追溯修改既有 Story。
 
 Dice 只保留低层随机与调试能力：
@@ -729,7 +753,7 @@ agent.send(user_input)
     → Outcome 阶段：需要裁定时只暂存 outcome，并停止后续状态阶段
     → Route 阶段：只选择相关 scene、表 ID 及已有 key
     → Update 阶段：scene 与每张命中表分别调用；目标失败只恢复该目标，其他确定性变化保留在 scratch
-  → PlotSchedulingPreflightHook：按 scratch SceneTime 选择 outline/pool 候选；forced 直接暂存，soft 隔离调用 Judge
+  → PlotSchedulingPreflightHook：有上轮 Scene 变化机会时按最新 scratch SceneTime 选择 outline/pool；手动快照无条件注入；forced 直接暂存，soft 隔离调用 Judge
   → SceneTracker.get_context() → [scene] 嵌入 user message
   → MemoryRecallHook：失败 warning-and-continue
   → turn runtime 收集 runtime sections；已暂存 outcome 在主 Agent 首次调用前注入
@@ -738,7 +762,7 @@ agent.send(user_input)
     → 主 Agent 在漏判时可补判 outcome；已预裁定时不再获得重复调用选项，真实持久变化先修正状态，再输出 RP 正文
     → LLM 也可调用其它 RP module tools，或按需查询 Summary，再用 History 核对 SQL 主历史
     → 每轮记录 TurnStats + CallRecord
-  → TurnRuntime.commit() 短事务写入主/backup 消息、Narrative Outcome、Plot decisions 与状态表
+  → TurnRuntime.commit() 短事务写入主/backup 消息、Narrative Outcome、Plot decisions、状态表与 Scene 机会消费/创建
   → 同步适配为 AgentReply；流式仅在 commit 成功后发送带 usage/turn_id 的 DONE
   → PostCommitHooks：story memory extraction / summary compression 逐项隔离
 ```
@@ -797,6 +821,11 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 | scene / commands / chat | 对应 router 文件 | legacy placeholder，保留模块名但不作为主入口 |
 
 - Play API 通过 `agent_service.client.AgentClient` 访问 Agent 服务，并通过 loop-owned `DreamClient` 访问 Dream 服务；不得在 Play API 进程直接运行 Dream 领域或写 Persistent Memory 账本。
+- Play 本地数据由 lifespan-owned `PlayDataRuntime` 一次性组装四个窄后端：
+  Catalog、Story Asset、Session Read 与 Runtime Maintenance。router 通过 FastAPI
+  dependency 从 `app.state` 获取对应后端，不得查询 Gateway；四个后端也不得保存
+  Gateway、Database、Repository 或 Peewee record。Session 创建必须经 Agent
+  service，再由 Catalog 后端读取响应 summary。
 - Play WebUI 会话内请求只传 `session_id`；Play API 负责从 catalog 解析 workspace/story。
 - Agent service / AgentClient 不接受 Provider API key 参数或 header；provider/key 选择只由 LLM Service 配置控制。Agent → LLM Service 只使用独立的静态 Bearer 服务令牌。
 - 主 Agent LLM 只允许 `agent.main.provider_option_keys` 白名单，解析优先级为 `config < story < session`；生成中切换固定当前 turn，从下一 turn 生效。

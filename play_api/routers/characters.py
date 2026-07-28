@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from commons.types import JsonObject
-from play_api.backends import get_data_manager_backend
+from play_api.backends import PlayStoryAssetBackend
+from play_api.dependencies import get_story_asset_backend
 from play_api.routers._data_errors import data_integrity_conflict
 from rpg_core.character_tags import normalize_character_detail_tags
 from rpg_data.errors import DataIntegrityError
@@ -169,8 +170,12 @@ def _character_response(item: dict[str, object]) -> PlayCharacter:
 
 
 @router.get("", response_model=list[PlayCharacter])
-async def list_characters(workspace_id: str, story_id: int) -> list[PlayCharacter]:
-    characters = await get_data_manager_backend().list_characters(
+async def list_characters(
+    workspace_id: str,
+    story_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
+) -> list[PlayCharacter]:
+    characters = await assets.list_characters(
         workspace_id,
         story_id,
     )
@@ -184,9 +189,10 @@ async def create_character(
     workspace_id: str,
     story_id: int,
     payload: PlayCharacterPayload,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlayCharacter:
     try:
-        character = await get_data_manager_backend().create_character(
+        character = await assets.create_character(
             workspace_id,
             story_id,
             name=payload.name,
@@ -212,9 +218,10 @@ async def update_character(
     story_id: int,
     character_id: int,
     payload: PlayCharacterPatch,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlayCharacter:
     try:
-        character = await get_data_manager_backend().update_character(
+        character = await assets.update_character(
             workspace_id,
             story_id,
             character_id,
@@ -241,9 +248,10 @@ async def delete_character(
     workspace_id: str,
     story_id: int,
     character_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> None:
     try:
-        deleted = await get_data_manager_backend().delete_character(
+        deleted = await assets.delete_character(
             workspace_id,
             story_id,
             character_id,
@@ -266,9 +274,10 @@ async def create_character_detail(
     story_id: int,
     character_id: int,
     payload: PlayCharacterDetailPayload,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlayCharacterDetail:
     try:
-        detail = await get_data_manager_backend().create_character_detail(
+        detail = await assets.create_character_detail(
             workspace_id,
             story_id,
             character_id,
@@ -297,9 +306,10 @@ async def update_character_detail(
     character_id: int,
     detail_id: int,
     payload: PlayCharacterDetailPatch,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> PlayCharacterDetail:
     try:
-        detail = await get_data_manager_backend().update_character_detail(
+        detail = await assets.update_character_detail(
             workspace_id,
             story_id,
             character_id,
@@ -328,9 +338,10 @@ async def delete_character_detail(
     story_id: int,
     character_id: int,
     detail_id: int,
+    assets: PlayStoryAssetBackend = Depends(get_story_asset_backend),
 ) -> None:
     try:
-        deleted = await get_data_manager_backend().delete_character_detail(
+        deleted = await assets.delete_character_detail(
             workspace_id,
             story_id,
             character_id,

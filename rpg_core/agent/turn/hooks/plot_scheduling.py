@@ -66,11 +66,37 @@ class PlotSchedulingPreflightHook:
             or not is_world_advancing_mode(plan.request.mode)
         ):
             return
+        manual_event_id: int | None = None
+        if snapshot.pending_injection is not None:
+            manual_event_id = snapshot.pending_injection.source_event_id
+            self._stage_manual_injection(
+                turn_scratch,
+                snapshot.pending_injection,
+                (
+                    turn_scratch.scene_tracker.get_scene_time()
+                    if turn_scratch.scene_tracker is not None
+                    else None
+                ),
+            )
+        scene_opportunity = turn_scratch.plot_scene_opportunity
+        if snapshot.scene_opportunity is None:
+            return
+        if scene_opportunity is None or not scene_opportunity.available:
+            raise RuntimeError("Plot Scene opportunity scratch state is missing")
+        scene_opportunity.consume()
+
         scene_tracker = turn_scratch.scene_tracker
         scene_time = (
             scene_tracker.get_scene_time() if scene_tracker is not None else None
         )
         if scene_time is None:
+            if manual_event_id is not None:
+                logger.info(
+                    _TAG + " manual injection bypassed unavailable Scene time: session_id={} event_id={}",
+                    snapshot.session_id,
+                    manual_event_id,
+                )
+                return
             error = (
                 scene_tracker.scene_time_error
                 if scene_tracker is not None
@@ -92,6 +118,11 @@ class PlotSchedulingPreflightHook:
             ),
         )
         for candidate in candidates:
+            if manual_event_id is not None and (
+                candidate.source_kind == data_models.PLOT_SOURCE_POOL
+                or candidate.event.id == manual_event_id
+            ):
+                continue
             await self._stage_candidate(
                 plan=plan,
                 turn_scratch=turn_scratch,
@@ -99,6 +130,57 @@ class PlotSchedulingPreflightHook:
                 candidate=candidate,
                 scene_time=scene_time,
             )
+
+    def _stage_manual_injection(
+        self,
+        turn_scratch: "TurnScratch",
+        pending: data_models.SessionPlotPendingInjection,
+        scene_time,
+    ) -> None:
+        turn_scratch.plot_schedule_injections.append(
+            PlotScheduleInjection(
+                source_kind=data_models.PLOT_SOURCE_POOL,
+                source_id=pending.source_event_id,
+                event_id=pending.source_event_id,
+                container_id=pending.source_pool_id,
+                container_name=pending.source_pool_name,
+                event_title=pending.event_title,
+                directive=pending.directive,
+                dispatch_mode=data_models.PLOT_DISPATCH_FORCED,
+                scene_time=scene_time,
+                reason="用户已手动标记为下一次非 OOC turn 强制注入。",
+            )
+        )
+        event_snapshot = dict(pending.event_snapshot)
+        event_snapshot.update({
+            "sourceKind": data_models.PLOT_SOURCE_POOL,
+            "sourceId": pending.source_event_id,
+            "containerId": pending.source_pool_id,
+            "containerName": pending.source_pool_name,
+            "eventId": pending.source_event_id,
+            "eventTitle": pending.event_title,
+            "directive": pending.directive,
+            "dispatchMode": data_models.PLOT_DISPATCH_FORCED,
+            "eventVersion": pending.source_event_version,
+            "selectionOrigin": data_models.PLOT_SELECTION_ORIGIN_MANUAL,
+        })
+        turn_scratch.plot_schedule_decisions.append(
+            data_models.StagedPlotScheduleDecision(
+                source_kind=data_models.PLOT_SOURCE_POOL,
+                source_id=pending.source_event_id,
+                event_id=pending.source_event_id,
+                container_id=pending.source_pool_id,
+                decision_status=data_models.PLOT_DECISION_TRIGGERED,
+                dispatch_mode=data_models.PLOT_DISPATCH_FORCED,
+                scene_time=scene_time,
+                event_snapshot=event_snapshot,
+                selection_origin=data_models.PLOT_SELECTION_ORIGIN_MANUAL,
+                reason="用户手动标记的一次性事件注入。",
+            )
+        )
+        if turn_scratch.plot_pending_injection is None:
+            raise RuntimeError("manual Plot injection scratch state is missing")
+        turn_scratch.plot_pending_injection.consume()
 
     async def _stage_candidate(
         self,

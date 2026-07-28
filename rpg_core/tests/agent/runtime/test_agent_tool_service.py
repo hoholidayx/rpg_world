@@ -14,6 +14,11 @@ from rpg_core.agent.turn import (
     TurnMode,
     TurnRequest,
 )
+from rpg_core.rp_modules.plot_scheduler import (
+    PlotPendingInjectionTurnState,
+    PlotScheduleSnapshot,
+)
+from rpg_data import models
 
 
 class _Tool(BaseTool):
@@ -262,3 +267,85 @@ def test_state_tool_set_reports_exact_runtime_capabilities() -> None:
     assert state_tools.supports("scene_time") is True
     assert state_tools.supports("scene_del_attr") is False
     assert AgentToolService.state_tools(None, None).names == ()
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (TurnMode.OOC, True),
+        (TurnMode.GM, True),
+        (TurnMode.NEUTRAL, False),
+        (TurnMode.IC, False),
+    ],
+)
+def test_plot_sandbox_tools_are_only_exposed_in_ooc_and_gm(
+    mode: TurnMode,
+    expected: bool,
+) -> None:
+    resources = AgentContextResources(
+        builder=SimpleNamespace(),
+        character_manager=None,
+        lorebook_manager=None,
+        status_manager=None,
+        scene_tracker=None,
+        memory_manager=None,
+    )
+    service = AgentToolService(
+        resources=lambda: resources,
+        history_query=_HistoryQuery(),
+        summary_query=_SummaryQuery(),
+    )
+    service.refresh_base_registry()
+    snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(story_id=1),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(),
+    )
+    scratch = SimpleNamespace(
+        turn_id=1,
+        plot_pending_injection=PlotPendingInjectionTurnState(),
+    )
+
+    registry = service.registry_for_turn(
+        None,
+        None,
+        turn_execution=_execution(mode),
+        turn_scratch=scratch,
+        plot_schedule_snapshot=snapshot,
+    )
+    names = {tool.name for tool in registry} if registry is not None else set()
+
+    assert ({"plot_sandbox_read", "plot_event_mark_next"} <= names) is expected
+
+
+def test_plot_sandbox_tools_are_hidden_when_module_snapshot_is_disabled() -> None:
+    resources = AgentContextResources(
+        builder=SimpleNamespace(),
+        character_manager=None,
+        lorebook_manager=None,
+        status_manager=None,
+        scene_tracker=None,
+        memory_manager=None,
+    )
+    service = AgentToolService(
+        resources=lambda: resources,
+        history_query=_HistoryQuery(),
+        summary_query=_SummaryQuery(),
+    )
+    service.refresh_base_registry()
+
+    registry = service.registry_for_turn(
+        None,
+        None,
+        turn_execution=_execution(TurnMode.OOC),
+        turn_scratch=SimpleNamespace(
+            turn_id=1,
+            plot_pending_injection=PlotPendingInjectionTurnState(),
+        ),
+        plot_schedule_snapshot=PlotScheduleSnapshot.disabled("s1", 1),
+    )
+
+    assert registry is None

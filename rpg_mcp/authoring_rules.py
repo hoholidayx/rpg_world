@@ -361,7 +361,7 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
 _FIELD_AVOID: dict[tuple[str, str], str] = {
     ("StoryCore", "summary"): "不要写固定 Prompt、逐场景正文或当前 Session 状态。",
     ("StoryCore", "storyPrompt"): "不要写易变 Scene、当前状态值或 message_mode 提示。",
-    ("StoryCore", "timeSetting"): "不要用“第 1 年”代替已确定的 2019、2020 等虚拟年份。",
+    ("StoryCore", "timeSetting"): "不要用“1 年”代替已确定的 2019、2020 等虚拟年份。",
     ("StoryCore", "metadata"): "不要写 _rpgStoryDesign；该键由运行时适配器保留。",
     ("CharacterSpec", "description"): "不要写性格、说话方式、行为倾向或心理活动。",
     ("CharacterDetailSpec", "content"): "不要在同一 detail 混合客观信息和 NPC 演绎要求。",
@@ -445,8 +445,8 @@ _EXAMPLES: dict[str, Any] = {
     "directive": "让停电警报响起，并由在场 NPC 提出两种可调查方向。",
     "suitabilityHint": "玩家已抵达旧城区，且尚未取得录音笔中的第二段录音。",
     "dispatchMode": "soft",
-    "scheduledTime": "第 2020 年 7 月 18 日 9 时",
-    "deadlineTime": "第 2020 年 7 月 21 日 18 时",
+    "scheduledTime": "2020 年 7 月 18 日 9 时",
+    "deadlineTime": "2020 年 7 月 21 日 18 时",
     "position": 10,
     "allowRepeat": False,
     "repeatCooldownMinutes": 0,
@@ -520,7 +520,7 @@ _EXAMPLE_OVERRIDES: dict[tuple[str, str], Any] = {
     ("StatusTableSpec", "rows"): [
         {
             "key": "时间",
-            "value": "第 2020 年 7 月 18 日 9 时",
+            "value": "2020 年 7 月 18 日 9 时",
             "runtimeKeyLocked": True,
             "updateRule": "当当前 Scene 中已确认发生时间推进时立即更新。",
             "metadata": {},
@@ -541,7 +541,7 @@ _EXAMPLE_OVERRIDES: dict[tuple[str, str], Any] = {
         },
     ],
     ("StatusRowSpec", "key"): "时间",
-    ("StatusRowSpec", "value"): "第 2020 年 7 月 18 日 9 时",
+    ("StatusRowSpec", "value"): "2020 年 7 月 18 日 9 时",
     ("StatusRowSpec", "updateRule"): (
         "当当前 Scene 中已确认发生时间推进时，立即更新为新的故事虚拟时间。"
     ),
@@ -820,7 +820,7 @@ _DIAGNOSTIC_RULES: tuple[dict[str, Any], ...] = (
         "profiles": ["draft", "package"],
         "pathPattern": "/resources/statusTables/*/rows/*/value",
         "message": "Scene 时间使用了疑似占位年份。",
-        "suggestion": "若故事已锚定现实年代，使用第 2019 年、第 2020 年等虚拟年份。",
+        "suggestion": "若故事已锚定现实年代，使用 2019 年、2020 年等虚拟年份。",
         "runtimeEffect": "Plot Scheduler 严格按 SceneTime 比较故事时间。",
     },
     {
@@ -1341,7 +1341,7 @@ change the import contract.
   personality, speech, behavior, and psychology in tagged details; portrayal
   details carry `scope:npc_portrayal` and are filtered by player/NPC/GM turn.
 - Scene tables contain `时间`, `位置`, and `在场人物`. Use parseable virtual
-  time such as `第 2020 年 7 月 18 日 9 时`.
+  time such as `2020 年 7 月 18 日 9 时`.
 - Status table `description` contains table-wide semantics, value formats,
   and shared immediate-update rules.
 - Status rows contain only `key`, `value`, `runtimeKeyLocked`, `updateRule`,
@@ -1477,7 +1477,7 @@ def evaluate_authoring_diagnostics(
             if row.update_rule and scheduling_pattern.search(row.update_rule):
                 emit("status.update-rule-scheduling", f"{base}/updateRule")
             if table.status_kind == "scene" and row.key == "时间":
-                year_match = re.search(r"第\s*(\d+)\s*年", row.value)
+                year_match = re.search(r"(\d+)\s*年", row.value)
                 if year_match and int(year_match.group(1)) < 1000:
                     emit("status.scene-placeholder-year", f"{base}/value")
 

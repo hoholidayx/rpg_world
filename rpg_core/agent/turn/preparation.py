@@ -89,6 +89,8 @@ class TurnPreparation:
             scratch.status_manager,
             rp_module_runtime=runtime.rp_module_runtime,
             turn_execution=runtime.plan.execution,
+            turn_scratch=scratch,
+            plot_schedule_snapshot=runtime.plan.plot_schedule,
         )
         schemas = self._tool_service.main_schemas(
             tool_registry,

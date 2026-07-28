@@ -37,7 +37,7 @@ def test_scene_tracker_existing_table_round_trip():
             "status_kind": "scene",
             "name": "当前场景",
             "headers": ["属性", "值"],
-            "rows": [["时间", "第 9 年 8 月 7 日 12 时"], ["位置", "大厅"]],
+            "rows": [["时间", "9 年 8 月 7 日 12 时"], ["位置", "大厅"]],
             "document": {
                 "rows": [{
                     "key": "位置",
@@ -53,12 +53,12 @@ def test_scene_tracker_existing_table_round_trip():
     assert tracker.load_from_status_table() is True
     context = tracker.get_context()
     snapshot_context = tracker.get_snapshot_context()
-    assert "第 9 年 8 月 7 日 12 时" in context
+    assert "9 年 8 月 7 日 12 时" in context
     assert "大厅" in context
     assert "scene 数据可能不准确" in context
     assert "遵循核心状态同步协议" in context
     assert "角色明确抵达新地点时更新" in context
-    assert "第 9 年 8 月 7 日 12 时" in snapshot_context
+    assert "9 年 8 月 7 日 12 时" in snapshot_context
     assert "大厅" in snapshot_context
     assert "scene 数据可能不准确" not in snapshot_context
     assert "遵循核心状态同步协议" not in snapshot_context
@@ -79,7 +79,7 @@ def test_scene_tracker_exports_and_restores_time_state():
             "status_kind": "scene",
             "name": "当前场景",
             "headers": ["属性", "值"],
-            "rows": [["时间", "第 1 年 1 月 1 日 6 时"]],
+            "rows": [["时间", "1 年 1 月 1 日 6 时"]],
         }
     )
     cloned = SceneTracker()
@@ -87,7 +87,7 @@ def test_scene_tracker_exports_and_restores_time_state():
     assert cloned.load_from_status_table() is True
     cloned.set_time_state(source.get_time_state())
 
-    assert cloned.set_time(hour=16)["时间"] == "第 3 年 6 月 15 日 16 时 30 分"
+    assert cloned.set_time(hour=16)["时间"] == "3 年 6 月 15 日 16 时 30 分"
 
 
 def test_scene_tracker_does_not_create_unmounted_scene():
@@ -133,7 +133,7 @@ async def test_scene_tracker_default_policy_is_existing_value_only():
             "name": "当前场景",
             "headers": ["属性", "值"],
             "rows": [
-                ["时间", "第 1 年 1 月 1 日 6 时"],
+                ["时间", "1 年 1 月 1 日 6 时"],
                 ["位置", "大厅"],
                 ["天气", "晴"],
             ],
@@ -220,7 +220,7 @@ def test_scene_tracker_invalidates_time_when_runtime_key_is_deleted():
             "status_kind": "scene",
             "name": "当前场景",
             "headers": ["属性", "值"],
-            "rows": [["时间", "第 1 年 1 月 1 日 8 时"], ["位置", "森林"]],
+            "rows": [["时间", "1 年 1 月 1 日 8 时"], ["位置", "森林"]],
         }
     )
     tracker = SceneTracker(allow_runtime_key_changes=True)

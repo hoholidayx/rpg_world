@@ -7,11 +7,6 @@ import pytest
 
 from rpg_core.scene.status import SceneStatusService
 from rpg_core.status.context_service import StatusContextService
-from rpg_data.bootstrap import (
-    delete_unindexed_runtime_item,
-    delete_unindexed_runtime_items,
-    scan_unindexed_runtime_data,
-)
 from rpg_data.repositories.records import SessionStatusTableRecord
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
@@ -199,56 +194,6 @@ def test_gateway_bootstrap_can_preserve_unindexed_runtime_dirs(
     assert unindexed_session.is_dir()
     assert "runtime bootstrap unindexed directory cleanup disabled" in caplog.text
     assert "unindexed_dirs_removed=0" in caplog.text
-
-
-def test_scan_unindexed_runtime_data_reports_without_deleting(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_UNINDEXED_DIRS", "false")
-    db_path = tmp_path / "scan_unindexed.sqlite3"
-    gateway = get_data_service_gateway(db_path)
-
-    workspace_root = tmp_path / "data" / "demo_workspace"
-    unindexed_session = workspace_root / "stories" / "1" / "s_unindexed"
-    unindexed_session.mkdir(parents=True, exist_ok=True)
-    (unindexed_session / "marker.txt").write_text("unindexed", encoding="utf-8")
-
-    scan = scan_unindexed_runtime_data(gateway.database, "demo_workspace")
-
-    assert scan is not None
-    assert any(item["kind"] == "session" and item["session_id"] == "s_unindexed" for item in scan["items"])
-    assert unindexed_session.is_dir()
-
-
-def test_workspace_unindexed_runtime_scan_and_delete(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_UNINDEXED_DIRS", "false")
-    db_path = tmp_path / "delete_unindexed.sqlite3"
-    gateway = get_data_service_gateway(db_path)
-
-    workspace_root = tmp_path / "data" / "demo_workspace"
-    unindexed_session = workspace_root / "stories" / "1" / "s_unindexed"
-    unindexed_session.mkdir(parents=True, exist_ok=True)
-    (unindexed_session / "marker.txt").write_text("tmp", encoding="utf-8")
-    top_unindexed_workspace = tmp_path / "data" / "unindexed_workspace"
-    (top_unindexed_workspace / "stories").mkdir(parents=True, exist_ok=True)
-
-    scan = scan_unindexed_runtime_data(gateway.database, "demo_workspace")
-
-    assert scan is not None
-    assert scan_unindexed_runtime_data(gateway.database, "missing") is None
-    assert all(item["workspace_id"] == "demo_workspace" for item in scan["items"])
-    assert all(item["kind"] != "workspace" for item in scan["items"])
-    session_item = next(item for item in scan["items"] if item["category"] == "runtime_directory")
-
-    assert delete_unindexed_runtime_item(gateway.database, {**session_item, "path": str(unindexed_session / "wrong")}) is False
-    assert delete_unindexed_runtime_items(gateway.database, [session_item]) is True
-    assert not unindexed_session.exists()
-    assert delete_unindexed_runtime_item(gateway.database, session_item) is False
-    assert top_unindexed_workspace.is_dir()
 
 
 def test_gateway_is_cached_by_database_path_and_reset_closes(tmp_path: Path) -> None:

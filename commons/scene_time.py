@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Mapping
 
 _SCENE_TIME_RE = re.compile(
-    r"^\s*第\s*(?P<year>\d+)\s*年\s*"
+    r"^\s*(?P<year>\d+)\s*年\s*"
     r"(?P<month>\d+)\s*月\s*"
     r"(?P<day>\d+)\s*日\s*"
     r"(?P<hour>\d+)\s*时"
@@ -44,7 +44,7 @@ class SceneTime:
     def parse(cls, value: str) -> "SceneTime":
         match = _SCENE_TIME_RE.fullmatch(str(value or ""))
         if match is None:
-            raise ValueError("scene time must match '第 Y 年 M 月 D 日 H 时 [M 分]'")
+            raise ValueError("scene time must match 'Y 年 M 月 D 日 H 时 [M 分]'")
         return cls(**{
             key: int(raw) if raw is not None else 0
             for key, raw in match.groupdict().items()
@@ -83,7 +83,7 @@ class SceneTime:
         }
 
     def format(self) -> str:
-        value = f"第 {self.year} 年 {self.month} 月 {self.day} 日 {self.hour} 时"
+        value = f"{self.year} 年 {self.month} 月 {self.day} 日 {self.hour} 时"
         return f"{value} {self.minute} 分" if self.minute else value
 
     @property

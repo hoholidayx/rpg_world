@@ -21,6 +21,12 @@ if TYPE_CHECKING:
     from rpg_core.agent.turn.transaction.commit_plan import TurnCommitTransactionPort
     from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
     from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
+    from rpg_core.rp_modules.plot_scheduler.manual_injection import (
+        PlotPendingInjectionCommitService,
+    )
+    from rpg_core.rp_modules.plot_scheduler.scene_opportunity import (
+        PlotSceneOpportunityCommitService,
+    )
 
 
 class TurnRuntimeFactory:
@@ -37,6 +43,8 @@ class TurnRuntimeFactory:
         transaction_data: "TurnCommitTransactionPort | None" = None,
         narrative_outcome_ledger: "NarrativeOutcomeLedgerService | None" = None,
         plot_schedule_ledger: "PlotScheduleLedgerService | None" = None,
+        plot_pending_injection_commit: "PlotPendingInjectionCommitService | None" = None,
+        plot_scene_opportunity_commit: "PlotSceneOpportunityCommitService | None" = None,
     ) -> None:
         self._lifecycle = lifecycle
         self._context_service = context_service
@@ -46,6 +54,8 @@ class TurnRuntimeFactory:
         self._transaction_data = transaction_data
         self._narrative_outcome_ledger = narrative_outcome_ledger
         self._plot_schedule_ledger = plot_schedule_ledger
+        self._plot_pending_injection_commit = plot_pending_injection_commit
+        self._plot_scene_opportunity_commit = plot_scene_opportunity_commit
 
     async def create(self, plan: "TurnExecutionPlan") -> TurnRuntime:
         self._context_service.enforce_window_threshold(
@@ -69,8 +79,16 @@ class TurnRuntimeFactory:
             transaction_data=self._transaction_data,
             narrative_outcome_ledger=self._narrative_outcome_ledger,
             plot_schedule_ledger=self._plot_schedule_ledger,
+            plot_pending_injection_commit=self._plot_pending_injection_commit,
+            plot_scene_opportunity_commit=self._plot_scene_opportunity_commit,
         )
-        scratch = transaction.begin(stats, mode=plan.request.mode)
+        scratch = transaction.begin(
+            stats,
+            mode=plan.request.mode,
+            pending_plot_injection=plan.plot_schedule.pending_injection,
+            plot_scene_opportunity=plan.plot_schedule.scene_opportunity,
+            track_plot_scene_opportunity=plan.plot_schedule.enabled,
+        )
         runtime = TurnRuntime(
             plan=plan,
             transaction=transaction,

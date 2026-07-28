@@ -31,7 +31,7 @@ class SceneTracker:
     PRESENT_CHARACTERS_ATTR = SCENE_PRESENT_CHARACTERS_ATTR
     TIME_STATE_FIELDS = ("year", "month", "day", "hour", "minute")
     DEFAULT_ATTRS: dict[str, str] = {
-        TIME_ATTR: "第 1 年 1 月 1 日 6 时",
+        TIME_ATTR: "1 年 1 月 1 日 6 时",
         LOCATION_ATTR: "",
         PRESENT_CHARACTERS_ATTR: "",
     }
@@ -144,7 +144,7 @@ class SceneTracker:
         例::
 
             tracker.set_time(year=3, month=6, day=15, hour=14, minute=30)
-            # → 时间变为 "第 3 年 6 月 15 日 14 时 30 分"
+            # → 时间变为 "3 年 6 月 15 日 14 时 30 分"
 
         其余关键字参数直接写入状态表（不参与 _format_time）。
         """
