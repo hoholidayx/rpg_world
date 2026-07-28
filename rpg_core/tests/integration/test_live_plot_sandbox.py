@@ -1,117 +1,39 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from copy import deepcopy
-from dataclasses import dataclass
 
 import pytest
-import pytest_asyncio
 
 from llm_client.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_PLOT_SCHEDULER_BIZ_KEY,
 )
 from llm_client.manager import LLMClientManager
-from llm_client.provider import RemoteLLMProvider
-from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleManagementService
 from rpg_core.rp_modules.plot_scheduler.tools import (
     PLOT_EVENT_MARK_NEXT_TOOL_NAME,
     PLOT_SANDBOX_READ_TOOL_NAME,
 )
 from rpg_data import models
-from tests.support.backend import shutdown_agent
+from tests.support.live_agent import (
+    DEMO_PLAYER_CHARACTER_NAME,
+    LiveDemoHarness,
+    ToolInvocation,
+    main_tool_call_names,
+    main_tool_invocations,
+    status_snapshot,
+)
 from tests.support.plot_execution_verifier import verify_plot_execution
 
 pytestmark = [pytest.mark.integration, pytest.mark.live_llm]
 
-_DEMO_WORKSPACE_ID = "demo_workspace"
-_DEMO_STORY_TITLE = "奥术学院 Demo"
-_DEMO_SESSION_ID = "s_academy01"
-_DEMO_PLAYER_CHARACTER_NAME = "Alice"
 _PLOT_SUFFIX_OPEN = "[engine_plot_directive]"
 _PLOT_SUFFIX_CLOSE = "[/engine_plot_directive]"
 
 
-@dataclass(frozen=True)
-class _RecordedLiveCall:
-    biz_key: str
-    messages: list[dict]
-    tools: list[dict] | None
-
-
-@dataclass(frozen=True)
-class _LivePlotSandboxHarness:
-    agent: RPGGameAgent
-    workspace_id: str
-    story_id: int
-    session_id: str
-    calls: list[_RecordedLiveCall]
-
-
-@dataclass(frozen=True)
-class _ToolInvocation:
-    arguments: dict[str, object]
-    result: dict[str, object]
-
-
-@pytest.fixture
-def live_call_recorder(monkeypatch) -> list[_RecordedLiveCall]:
-    calls: list[_RecordedLiveCall] = []
-    original_chat = RemoteLLMProvider.chat
-
-    async def recorded_chat(self, messages, tools=None):  # noqa: ANN001, ANN202
-        calls.append(
-            _RecordedLiveCall(
-                biz_key=self.biz_key,
-                messages=deepcopy(messages),
-                tools=deepcopy(tools),
-            )
-        )
-        return await original_chat(self, messages, tools)
-
-    monkeypatch.setattr(RemoteLLMProvider, "chat", recorded_chat)
-    return calls
-
-
-@pytest_asyncio.fixture
-async def live_plot_sandbox_harness(
-    integration_settings,  # noqa: ARG001
-    integration_data_gateway,
-    live_call_recorder,
-):
-    try:
-        await LLMClientManager.get().client.health()
-    except Exception:
-        pytest.skip("standalone LLM service is not available")
-    session = integration_data_gateway.sessions.get_session(_DEMO_SESSION_ID)
-    assert session is not None
-    assert session.workspace_id == _DEMO_WORKSPACE_ID
-    story = integration_data_gateway.sessions.get_story(
-        session.workspace_id,
-        session.story_id,
-    )
-    assert story is not None
-    assert story.title == _DEMO_STORY_TITLE
-    agent = RPGGameAgent(session_id=session.id)
-    await agent.initialize()
-    try:
-        yield _LivePlotSandboxHarness(
-            agent,
-            session.workspace_id,
-            session.story_id,
-            session.id,
-            live_call_recorder,
-        )
-    finally:
-        await shutdown_agent(agent)
-        await LLMClientManager.areset()
-
-
 def _demo_plot_event(
     gateway,
-    harness: _LivePlotSandboxHarness,
+    harness: LiveDemoHarness,
     title: str,
 ):
     service = PlotScheduleManagementService(gateway.plot_scheduling)
@@ -123,51 +45,12 @@ def _demo_plot_event(
     return next(event for event in schedule.events if event.title == title)
 
 
-def _status_snapshot(gateway, session_id: str) -> dict[str, dict[str, str]]:
-    return {
-        table.name: {
-            row.key: str(row.value or "")
-            for row in table.document.rows
-        }
-        for table in gateway.status.list_tables(session_id)
-    }
-
-
-def _tool_invocations(reply, tool_name: str) -> list[_ToolInvocation]:  # noqa: ANN001
-    invocations: list[_ToolInvocation] = []
-    for record in reply.tool_records or []:
-        results_by_call_id = {
-            str(result.get("tool_call_id", "")): result
-            for result in record.tool_results
-        }
-        for tool_call in record.assistant_message.get("tool_calls", []) or []:
-            function = tool_call.get("function", {})
-            if function.get("name") != tool_name:
-                continue
-            call_id = str(tool_call.get("id", ""))
-            tool_result = results_by_call_id.get(call_id)
-            assert tool_result is not None, f"missing result for tool call {call_id!r}"
-            arguments = json.loads(str(function.get("arguments", "{}")))
-            result = json.loads(str(tool_result.get("content", "{}")))
-            assert isinstance(arguments, dict)
-            assert isinstance(result, dict)
-            invocations.append(_ToolInvocation(arguments, result))
-    return invocations
-
-
-def _tool_call_names(reply) -> list[str]:  # noqa: ANN001
-    return [
-        str(tool_call.get("function", {}).get("name", ""))
-        for record in reply.tool_records or []
-        for tool_call in record.assistant_message.get("tool_calls", []) or []
-    ]
-
-
 def _read_result_contains_event(
-    invocation: _ToolInvocation,
+    invocation: ToolInvocation,
     event_id: int,
 ) -> bool:
     payload = invocation.result
+    assert isinstance(payload, dict)
     if payload.get("resource") == "event":
         if payload.get("view") == "detail":
             return payload.get("item", {}).get("id") == event_id
@@ -185,10 +68,10 @@ def _read_result_contains_event(
 
 @pytest.mark.asyncio
 async def test_live_llm_reads_plot_event_with_sandbox_tool(
-    live_plot_sandbox_harness,
+    live_demo_harness,
     integration_data_gateway,
 ) -> None:
-    harness = live_plot_sandbox_harness
+    harness = live_demo_harness
     title = "无署名纸鹤送达"
     event = _demo_plot_event(
         integration_data_gateway,
@@ -210,19 +93,23 @@ async def test_live_llm_reads_plot_event_with_sandbox_tool(
 
     matching_calls = [
         invocation
-        for invocation in _tool_invocations(reply, PLOT_SANDBOX_READ_TOOL_NAME)
+        for invocation in main_tool_invocations(
+            reply,
+            PLOT_SANDBOX_READ_TOOL_NAME,
+        )
         if invocation.arguments.get("resource") == "event"
         and invocation.arguments.get("id") == event.id
     ]
     assert matching_calls, "live LLM did not read the requested Plot event"
     payload = matching_calls[-1].result
+    assert isinstance(payload, dict)
     assert payload["ok"] is True
     assert payload["resource"] == "event"
     assert payload["view"] == "detail"
     assert payload["item"]["id"] == event.id
     assert payload["item"]["title"] == title
     assert payload["item"]["directive"] == event.directive
-    assert not _tool_invocations(reply, PLOT_EVENT_MARK_NEXT_TOOL_NAME)
+    assert not main_tool_invocations(reply, PLOT_EVENT_MARK_NEXT_TOOL_NAME)
     assert (
         integration_data_gateway.plot_scheduling.get_pending_injection(
             harness.session_id
@@ -235,10 +122,10 @@ async def test_live_llm_reads_plot_event_with_sandbox_tool(
 
 @pytest.mark.asyncio
 async def test_live_llm_marks_and_executes_plot_event_on_next_world_turn(
-    live_plot_sandbox_harness,
+    live_demo_harness,
     integration_data_gateway,
 ) -> None:
-    harness = live_plot_sandbox_harness
+    harness = live_demo_harness
     original_title = "灰袍监察员经过"
     event = _demo_plot_event(
         integration_data_gateway,
@@ -274,7 +161,7 @@ async def test_live_llm_marks_and_executes_plot_event_on_next_world_turn(
         timeout=180,
     )
 
-    call_names = _tool_call_names(mark_reply)
+    call_names = main_tool_call_names(mark_reply)
     assert PLOT_SANDBOX_READ_TOOL_NAME in call_names
     assert PLOT_EVENT_MARK_NEXT_TOOL_NAME in call_names
     assert call_names.index(PLOT_SANDBOX_READ_TOOL_NAME) < call_names.index(
@@ -282,14 +169,14 @@ async def test_live_llm_marks_and_executes_plot_event_on_next_world_turn(
     )
     assert any(
         _read_result_contains_event(invocation, event.id)
-        for invocation in _tool_invocations(
+        for invocation in main_tool_invocations(
             mark_reply,
             PLOT_SANDBOX_READ_TOOL_NAME,
         )
     )
     matching_calls = [
         invocation
-        for invocation in _tool_invocations(
+        for invocation in main_tool_invocations(
             mark_reply,
             PLOT_EVENT_MARK_NEXT_TOOL_NAME,
         )
@@ -299,6 +186,7 @@ async def test_live_llm_marks_and_executes_plot_event_on_next_world_turn(
     ]
     assert matching_calls, "live LLM did not mark the requested Plot event"
     payload = matching_calls[-1].result
+    assert isinstance(payload, dict)
     assert payload["ok"] is True
     assert payload["pendingForNextWorldTurn"] is True
     assert payload["pendingInjection"]["sourceEventId"] == event.id
@@ -328,7 +216,7 @@ async def test_live_llm_marks_and_executes_plot_event_on_next_world_turn(
         enabled=False,
         config={},
     )
-    status_before = _status_snapshot(
+    status_before = status_snapshot(
         integration_data_gateway,
         harness.session_id,
     )
@@ -413,7 +301,7 @@ async def test_live_llm_marks_and_executes_plot_event_on_next_world_turn(
     assert temporary_directive not in persisted_turn[0].content
     assert _PLOT_SUFFIX_OPEN not in persisted_turn[0].content
 
-    status_after = _status_snapshot(
+    status_after = status_snapshot(
         integration_data_gateway,
         harness.session_id,
     )
@@ -434,7 +322,7 @@ async def test_live_llm_marks_and_executes_plot_event_on_next_world_turn(
             outcome=None,
             status_before=status_before,
             status_after=status_after,
-            player_character_name=_DEMO_PLAYER_CHARACTER_NAME,
+            player_character_name=DEMO_PLAYER_CHARACTER_NAME,
             message_mode="ic",
         ),
         timeout=120,
