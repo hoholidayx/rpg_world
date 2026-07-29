@@ -2,7 +2,8 @@
 
 更新时间：2026-07-29
 
-状态：Day 1 已完成，Day 2 待执行
+状态：Day 1 已完成；Day 2 实现、自动化与针对性真实 smoke 已完成，完整 20-turn
+人工脚本待继续
 
 执行投入：单一 Codex Sol Max 主执行通道
 
@@ -54,6 +55,10 @@
 
 必须保持：
 
+- 畸形、未闭合或混合 RP 标签继续原文可见；SSE 解析失败继续按原始帧降级，
+  不以收紧 Schema、DONE 或事件顺序作为稳定性手段。
+- 已经展示给玩家的消息，在权威历史确实覆盖前不得清除。
+- 优化不得改变既有业务逻辑，只修复明确逻辑错误和必要的架构竞态。
 - 只有服务端确认 `cancelled` 时才展示 stopped。
 - ERROR、缺失 DONE、网络中断或取消不得伪装为成功提交。
 - Context 达门禁阈值时阻止普通正文，但斜杠命令始终可执行。
@@ -87,22 +92,26 @@
 
 任务：
 
-- [ ] 收敛发送、流式、停止、取消、ERROR、DONE 和组件卸载的状态转换。
-- [ ] 保证同一 Session 同时只有一个活动请求，重复点击不会重复发送。
-- [ ] 防止停止竞态、切换 Session 后旧请求回写，以及 local stream message
+- [x] 收敛发送、流式、停止、取消、ERROR、DONE 和组件卸载的状态转换。
+- [x] 保证同一 Session 同时只有一个活动请求，重复点击不会重复发送。
+- [x] 防止停止竞态、切换 Session 后旧请求回写，以及 local stream message
   与持久历史重复。
-- [ ] DONE 后才刷新已提交历史和 Context preview。
-- [ ] 刷新失败时保留已显示回复，提供明确重试，且不清空未提交草稿。
-- [ ] 增加正常完成、Provider ERROR、停止成功、停止 stale/not-running、
+- [x] committed DONE 后使用权威历史收敛本地副本；保留既有宽松 EOF、畸形 SSE
+  原文降级，不收紧 DONE、Schema 或事件顺序。
+- [x] 刷新失败时保留已显示回复，提供明确重试，且不清空未提交草稿。
+- [x] 增加正常完成、Provider ERROR、停止成功、停止 stale/not-running、
   网络中断和 Session 切换测试。
 
 验收：
 
-- [ ] 每个流式请求最终只收敛到一个明确终态。
-- [ ] ERROR、断流和取消不产生成功 UI 或虚构 committed turn。
-- [ ] composer 在所有失败路径上都能恢复可用。
+- [x] 每个活动请求的所有权最终只收敛到一个明确状态，旧请求不能结算新请求。
+- [x] ERROR、断流和取消不产生成功 UI 或虚构 committed turn。
+- [x] composer 在所有失败路径上都能恢复可用。
 - [ ] 人工连续执行 20 个 turn，包含停止、retry、edit 和命令，不出现重复消息、
   消息丢失或永久锁定。
+
+本日已完成针对性真实 smoke：普通提交、停止、retry、edit、命令及命令后的普通
+turn 均通过；由于未完整执行连续 20-turn 脚本，上述最后一项保持未勾选。
 
 ### Day 3：故障隔离与恢复体验
 
@@ -179,8 +188,8 @@
 - [ ] 新 Session 完成“角色 → Opening”原子绑定。
 - [ ] 普通、IC、OOC、GM 正文均可发送并提交。
 - [ ] 斜杠命令正常，且 Context 达阈值后仍可执行。
-- [ ] 正常流式完成后消息只出现一次，usage 和 committed turn 正确。
-- [ ] 停止生成只在收到 `cancelled` 后显示 stopped。
+- [x] 正常流式完成后消息只出现一次，usage 和 committed turn 正确。
+- [x] 停止生成只在收到 `cancelled` 后显示 stopped。
 - [ ] retry、edit、delete 后历史和当前页正确收敛。
 - [ ] 历史前后翻页、返回最新页和页面刷新恢复正确。
 - [ ] 切换 Session 时旧请求不会回写新 Session。
@@ -237,7 +246,8 @@
 ## 9. 当前进度
 
 - [x] Day 1：可靠基线与自动门禁
-- [ ] Day 2：核心聊天状态机
+- [ ] Day 2：核心聊天状态机（实现、自动化与针对性 smoke 已完成；20-turn
+  完整人工脚本待继续）
 - [ ] Day 3：故障隔离与恢复体验
 - [ ] Day 4：桌面体验、手机可达性与性能
 - [ ] Day 5：回归与内部灰度
@@ -280,14 +290,51 @@
 
 ### Day 2
 
-- 日期：
-- 执行会话/负责人：
-- 开始提交：
+- 日期：2026-07-29
+- 执行会话/负责人：Codex Sol Max
+- 开始提交：`5d548b2`
 - 实际提交：
+  - `5b83fdd test: lock play webui fallback compatibility`
+  - `9eaacf3 fix: serialize and isolate session stream lifecycle`
+  - `0fb00a3 test: cover session stream ownership and recovery`
 - 完成项：
-- 验证命令与结果：
-- 偏差：
-- 遗留：
+  - 为发送、retry、edit 和 timeline mutation 增加同步互斥，阻止异步 preflight
+    期间的重复提交与删除竞态；
+  - 将 stream、stop、history refresh 和 Session view 绑定到明确的
+    `sessionId + requestId` 所有权，旧 Session 事件、finally、toast 和刷新不能
+    回写新 Session；
+  - 历史窗口在内部校验 Session 所有权，避免外层守卫生效前写入旧页；
+  - 刷新失败保留已显示回复并提供“重试刷新”，刷新重试与新 stream 互斥；
+  - 只有权威历史确实覆盖本地 user/assistant 正文时才去重，宽松 EOF 和无法解析的
+    SSE 原始帧继续可见；
+  - 保持停止语义：仅 `cancelled` 显示 stopped，`not_running` 刷新权威状态，
+    `stale` 保持当前生成继续；
+  - 真实验收发现并修复“stream 先结算、`cancelled` 后返回”竞态；迟到的服务端
+    取消确认在没有新请求接管时仍能将本地消息落成 stopped，且保留已生成正文。
+- 自动验证：
+  - `npm run check`：通过；
+  - `npm run lint`：`0 errors, 26 warnings`，均为存量 warning；
+  - `npm run test`：`9 files, 64 tests passed`；
+  - `npm run typecheck`：通过，包含 `next typegen`；
+  - `npm run build`：通过，Session 路由 `251 kB First Load JS`；
+  - `git diff --check`：通过。
+- 真实服务 smoke：
+  - 正常 Provider turn 成功提交并由持久历史覆盖本地副本；
+  - 服务端确认取消后显示 stopped，且 composer 恢复；
+  - 对 stopped turn 执行 retry 成功，随后 edit 成功；
+  - `/roll` 命令及其后的普通 Provider turn 成功；
+  - 最终页面中编辑后消息与最后普通消息各一份，无残留 streaming 或 composer
+    锁死。
+- 验收环境：
+  - 原用户数据库因 migration checksum mismatch 按硬切 Schema 规则拒绝启动，
+    未修改、删除或迁移；
+  - 改用 `/tmp/rpg-world-day2-qa.UtsXEK` 临时数据库和 workspace 完成真实验收，
+    服务停止后已删除该临时目录。
+- 偏差与遗留：
+  - 尚未完整执行连续 20-turn 人工脚本，Day 2 总状态保持未完成；
+  - Session 路由由 Day 1 的 `250 kB` 变为 `251 kB`，留到 Day 4 按需加载与
+    首屏体积任务处理；
+  - 未修改或提交用户已有的 `todos/architecture_hardening/`。
 
 ### Day 3
 
@@ -328,3 +375,5 @@
 - 非阻断：Next 15.5.22 的上游依赖仍触发 3 个 production audit high，暂无
   可接受的非破坏性自动修复。
 - 非阻断：Play WebUI workflow 尚未推送，远端首次运行结果待回填。
+- 非阻断：Day 2 的连续 20-turn 完整人工脚本尚未执行，进入 Day 3 前优先补齐。
+- 非阻断：Session 路由当前为 `251 kB First Load JS`，按计划留到 Day 4 处理。
