@@ -2,7 +2,7 @@
 
 更新时间：2026-07-29
 
-状态：Day 1、Day 2 已完成；Day 3 待执行
+状态：Day 1、Day 2、Day 3 已完成；Day 4 待执行
 
 执行投入：单一 Codex Sol Max 主执行通道
 
@@ -118,22 +118,22 @@ edit、命令及命令后的普通 turn 均通过。斜杠命令仅为当前页�
 
 任务：
 
-- [ ] 将 Media、TTS、Dream、Plot/Story 工作台错误限制在各自容器内。
-- [ ] 仅在用户打开对应工作台时启用非核心查询。
-- [ ] 对重型工作台组件使用动态加载，不进入 Session 核心首屏包。
-- [ ] 为核心 Session、角色绑定和历史错误提供页面级恢复入口。
-- [ ] 为局部服务错误提供独立 retry，不要求刷新整页。
-- [ ] 统一错误层级：
+- [x] 将 Media、TTS、Dream、Plot/Story 工作台错误限制在各自容器内。
+- [x] 仅在用户打开对应工作台时启用非核心查询。
+- [x] 对重型工作台组件使用动态加载，不进入 Session 核心首屏包。
+- [x] 为核心 Session、角色绑定和历史错误提供页面级恢复入口。
+- [x] 为局部服务错误提供独立 retry，不要求刷新整页。
+- [x] 统一错误层级：
   - 页面阻断：Session、角色或历史不可用。
   - 局部错误：Media、TTS、Dream、Plot 等能力不可用。
   - 短暂反馈：可恢复操作使用 toast。
-- [ ] 增加可选服务不可用、恢复和重复重试测试。
+- [x] 增加可选服务不可用、恢复和重复重试测试。
 
 验收：
 
-- [ ] 分别关闭 Media、TTS、Dream 服务时，历史、发送和停止仍正常。
-- [ ] 服务恢复后可在原页面重试局部能力。
-- [ ] 局部失败不污染正文、消息 metadata 或持久状态。
+- [x] 分别关闭 Media、TTS、Dream 服务时，历史、发送和停止仍正常。
+- [x] 服务恢复后可在原页面重试局部能力。
+- [x] 局部失败不污染正文、消息 metadata 或持久状态。
 
 ### Day 4：桌面体验、手机可达性与性能
 
@@ -199,10 +199,10 @@ edit、命令及命令后的普通 turn 均通过。斜杠命令仅为当前页�
 
 - [ ] Agent/Provider ERROR 不留下成功消息或锁死 composer。
 - [ ] 流中断或缺失 DONE 不显示成功。
-- [ ] Media service 不可用时基础聊天正常。
-- [ ] TTS service 不可用时基础聊天正常。
-- [ ] Dream service 不可用时基础聊天正常。
-- [ ] 局部服务恢复后可在原页面重试。
+- [x] Media service 不可用时基础聊天正常。
+- [x] TTS service 不可用时基础聊天正常。
+- [x] Dream service 不可用时基础聊天正常。
+- [x] 局部服务恢复后可在原页面重试。
 
 ### 设备与可访问性
 
@@ -248,7 +248,7 @@ edit、命令及命令后的普通 turn 均通过。斜杠命令仅为当前页�
 
 - [x] Day 1：可靠基线与自动门禁
 - [x] Day 2：核心聊天状态机
-- [ ] Day 3：故障隔离与恢复体验
+- [x] Day 3：故障隔离与恢复体验
 - [ ] Day 4：桌面体验、手机可达性与性能
 - [ ] Day 5：回归与内部灰度
 - [ ] 内部灰度门槛全部通过
@@ -350,14 +350,52 @@ edit、命令及命令后的普通 turn 均通过。斜杠命令仅为当前页�
 
 ### Day 3
 
-- 日期：
-- 执行会话/负责人：
-- 开始提交：
+- 日期：2026-07-29
+- 执行会话/负责人：Codex Sol Max
+- 开始提交：`663b6e3`
 - 实际提交：
+  - `8645815 fix: isolate optional session workspace failures`
+  - `docs: record play webui day 3 progress`
 - 完成项：
-- 验证命令与结果：
+  - 首次 Session 或权威历史不可用时使用页面级 loading/error/retry 阻断发送；
+    已有权威历史的后台刷新失败继续保留当前页面，不清屏；
+  - 角色绑定所需的角色列表失败时在绑定容器内提供重试；已有有效绑定时不因该
+    查询的刷新失败阻断聊天；
+  - 角色与状态、剧情故事、故事与记忆、图像工作室四个工作台改为首次打开后
+    动态加载，并使用各自的 React Error Boundary 隔离渲染故障；角色绑定与
+    Status HUD 所需的核心角色/状态查询仍按既有业务需要保留；
+  - Media 工作台查询只在打开后启用，Provider、来源 Turn、背景、Story 库和
+    Gallery 均提供局部重试；Media mutation 失败统一使用短暂 toast；
+  - TTS 保持用户点击单条 assistant 回复后才发起请求，失败只留在该消息且可
+    重试；没有增加预取、持久化或自动轮询；
+  - Dream 保持手动刷新且不轮询，并修复“部分 refetch 失败仍提示刷新成功”的
+    明确 UI 逻辑错误。
+- 自动验证：
+  - `npm run check`：通过；
+  - `npm run lint`：`0 errors, 26 warnings`，均为既有 warning；
+  - `npm run test`：`14 files, 72 tests passed`；
+  - `npm run typecheck`：通过，包含 `next typegen`；
+  - `npm run build`：通过，Session 路由 `189 kB First Load JS`；
+  - `git diff --check`：通过。
+- 真实服务 smoke：
+  - 使用 `/tmp/rpg-world-day3-smoke.a56g5c` 隔离数据库和 workspace，未触碰
+    原用户数据库；
+  - Media 下线时工作台的 Provider/来源、Story 背景和 Gallery 分区分别显示
+    错误与重试；关闭工作台后普通 Provider turn 成功提交，玩家消息仅一份，
+    assistant 回复完成且 composer 恢复；Media 重启后工作台原页恢复；
+  - TTS 下线时错误仅出现在被点击的 assistant 消息，Timeline 和 composer
+    保持可用；重启后请求不再返回连接错误，并到达 Provider 配置边界；
+  - Dream 下线时“持久记忆”仅显示局部错误，Timeline 和 composer 保持可用；
+    重启后点击局部重试成功加载 3 条 active Memory；
+  - 剧情故事工作台打开和关闭期间 composer 始终存在，防剧透保持开启。
 - 偏差：
+  - 动态拆包同时提前完成了 Day 4 的 Session 首屏体积目标，First Load JS 从
+    Day 2 的 `251 kB` 降为 `189 kB`；未为此改变查询或业务语义；
+  - 隔离环境未配置 Speech API key，因此 TTS 重启后的真实播放停在预期的
+    Provider 配置错误；服务连接恢复和消息级重试路径已验证。
 - 遗留：
+  - 真实 Speech Provider 播放需在显式配置测试密钥的 opt-in 环境补验；
+  - 未修改或提交用户已有的 `todos/architecture_hardening/`。
 
 ### Day 4
 
@@ -387,4 +425,5 @@ edit、命令及命令后的普通 turn 均通过。斜杠命令仅为当前页�
 - 非阻断：Next 15.5.22 的上游依赖仍触发 3 个 production audit high，暂无
   可接受的非破坏性自动修复。
 - 非阻断：Play WebUI workflow 尚未推送，远端首次运行结果待回填。
-- 非阻断：Session 路由当前为 `251 kB First Load JS`，按计划留到 Day 4 处理。
+- 非阻断：TTS 真实 Speech Provider 播放需在显式配置测试密钥的 opt-in 环境
+  补验；本次已验证服务连接恢复与消息级重试。
