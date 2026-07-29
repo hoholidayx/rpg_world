@@ -51,6 +51,7 @@ export type RefreshSessionDataOptions = {
   clearLastTurnUsage?: boolean
   preserveDiagnostics?: boolean
   preserveCommandMessages?: boolean
+  preserveLocalMessages?: boolean
   historyMode?: HistoryRefreshMode
   scrollToBottom?: boolean
 }

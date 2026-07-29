@@ -14,6 +14,7 @@ import {
   canRetryMessage,
   mapHistoryToMessages,
   parseNarrativeOutcomeToolResult,
+  unreconciledLocalMessages,
 } from './sessionTimelineMessages'
 
 const player: SessionPlayerCharacter = {
@@ -126,6 +127,38 @@ describe('mapHistoryToMessages', () => {
       content: '及时赶到了站台。',
       canCopy: false,
     })
+  })
+})
+
+describe('unreconciledLocalMessages', () => {
+  it('hides a local assistant prefix only after persistent history contains it', () => {
+    const historyMessages = mapHistoryToMessages({ turns: [turn], playerCharacter: player })
+    const localAssistant = {
+      ...historyMessages.find(
+        (message) => message.role === SESSION_TIMELINE_ROLE.ASSISTANT,
+      )!,
+      id: 'local-assistant',
+      messageId: undefined,
+      content: '<rp-narration>列车灯',
+      status: SESSION_MESSAGE_STATUS.STREAMING,
+    }
+
+    expect(unreconciledLocalMessages(historyMessages, [localAssistant])).toEqual([])
+  })
+
+  it('retains divergent raw fallback text that persistent history does not cover', () => {
+    const historyMessages = mapHistoryToMessages({ turns: [turn], playerCharacter: player })
+    const rawFallback = {
+      ...historyMessages.find(
+        (message) => message.role === SESSION_TIMELINE_ROLE.ASSISTANT,
+      )!,
+      id: 'local-assistant',
+      messageId: undefined,
+      content: 'data: 无法解析但玩家已经看到',
+      status: SESSION_MESSAGE_STATUS.ERROR,
+    }
+
+    expect(unreconciledLocalMessages(historyMessages, [rawFallback])).toEqual([rawFallback])
   })
 })
 

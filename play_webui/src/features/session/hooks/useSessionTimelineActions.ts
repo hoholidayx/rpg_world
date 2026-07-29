@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { deleteSessionMessage, truncateSessionTurn, type getSession } from '@/lib/api/sessions'
 import type { SessionPlayerCharacter } from '@/types/session'
@@ -82,11 +82,24 @@ export function useSessionTimelineActions({
   const queryClient = useQueryClient()
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
+  const turnStartLockRef = useRef<symbol | null>(null)
+  const timelineMutationLockRef = useRef<symbol | null>(null)
+  const sessionIdRef = useRef(sessionId)
+  const sendingRef = useRef(sending)
+  const stoppingRef = useRef(stopping)
+  sessionIdRef.current = sessionId
+  sendingRef.current = sending
+  stoppingRef.current = stopping
 
   useEffect(() => {
+    turnStartLockRef.current = null
     setEditingMessageId(null)
     setEditDraft('')
   }, [sessionId, timelineResetKey])
+
+  useEffect(() => {
+    timelineMutationLockRef.current = null
+  }, [sessionId])
 
   const ensureCanStartTurn = useCallback(() => {
     if (!session) {
@@ -103,6 +116,10 @@ export function useSessionTimelineActions({
     }
     if (stopping) {
       showToast('正在停止当前生成，请稍后再试')
+      return false
+    }
+    if (timelineMutationLockRef.current) {
+      showToast('正在更新历史，请稍后再试')
       return false
     }
     return true
@@ -136,103 +153,126 @@ export function useSessionTimelineActions({
       return
     }
 
-    if (!isSlashCommandInput(trimmedText)) {
-      const latestContext = await refreshContextPreview({
-        mode: turnMode,
-        narrativeStyleId: turnNarrativeStyleId,
-      })
-      if (
-        latestContext.available
-        && isContextInputBlocked(latestContext.usage, contextInputBlockThresholdRatio)
-      ) {
-        showToast('主 Agent Context 已达到输入阈值，请先执行 /compact 手动压缩')
-        return
-      }
-    }
-
-    const ensuredLatestTurnId = await jumpToLatestHistoryBottom({ silent: true })
-    if (ensuredLatestTurnId === null) {
-      showToast(SESSION_HISTORY_MESSAGES.LATEST_LOAD_FAILED)
+    if (turnStartLockRef.current) {
+      showToast('当前仍在生成，请稍后再试')
       return
     }
 
-    const persistedLastTurnId = Math.max(lastPersistedTurnId, ensuredLatestTurnId)
-    const replacingLastTurn = Boolean(message?.messageId) && message?.turnId === persistedLastTurnId
-    const turnId = replacingLastTurn && message ? message.turnId : Math.max(lastTurnId, persistedLastTurnId) + 1
-    const timelineAnchorTurnId = replacingLastTurn && message
-      ? Math.max(0, message.turnId - 1)
-      : persistedLastTurnId
-    const playerSpeaker = makePlayerSpeaker(playerCharacter, turnMode)
-    const userMessage: SessionTimelineMessage = {
-      id: `local-${source}-user-${turnId}-${crypto.randomUUID()}`,
-      turnId,
-      seqInTurn: 1,
-      role: SESSION_TIMELINE_ROLE.USER,
-      mode: turnMode,
-      content: trimmedText,
-      createdAt: new Date().toISOString(),
-      speaker: playerSpeaker,
-      canCopy: true,
-      canRetry: false,
-      canEdit: false,
-      canDelete: false,
-    }
-    const assistantMessage = streamPlaceholder(turnId)
+    const turnStartToken = Symbol('session-turn-start')
+    turnStartLockRef.current = turnStartToken
+    const ownsTurnStart = () => (
+      turnStartLockRef.current === turnStartToken
+      && sessionIdRef.current === sessionId
+    )
 
-    logger.info('timeline stream action started', {
-      source,
-      turnId,
-      messageId: message?.messageId,
-      replacingLastTurn,
-      mode: turnMode,
-      narrativeStyleId: turnNarrativeStyleId,
-      textLength: trimmedText.length,
-      hasText: Boolean(trimmedText),
-    })
+    try {
+      if (!isSlashCommandInput(trimmedText)) {
+        const latestContext = await refreshContextPreview({
+          mode: turnMode,
+          narrativeStyleId: turnNarrativeStyleId,
+        })
+        if (!ownsTurnStart()) return
+        if (
+          latestContext.available
+          && isContextInputBlocked(latestContext.usage, contextInputBlockThresholdRatio)
+        ) {
+          showToast('主 Agent Context 已达到输入阈值，请先执行 /compact 手动压缩')
+          return
+        }
+      }
 
-    setEditingMessageId(null)
-    setEditDraft('')
-    if (replacingLastTurn && message) {
-      try {
-        await truncateSessionTurn(sessionId, message.turnId)
-        queryClient.removeQueries({
-          queryKey: ['play-session-dream-evidence-history', sessionId],
-          exact: true,
-        })
-        setOptimisticTruncateFromTurn(message.turnId)
-        logger.info('timeline truncate before regeneration completed', {
-          source,
-          turnId: message.turnId,
-          messageId: message.messageId,
-          status: 'success',
-        })
-      } catch (error) {
-        logger.warn('timeline truncate before regeneration failed', {
-          source,
-          turnId: message.turnId,
-          messageId: message.messageId,
-          status: 'error',
-          error,
-        })
-        showToast(error instanceof Error ? error.message : failureToast)
+      const ensuredLatestTurnId = await jumpToLatestHistoryBottom({ silent: true })
+      if (!ownsTurnStart()) return
+      if (ensuredLatestTurnId === null) {
+        showToast(SESSION_HISTORY_MESSAGES.LATEST_LOAD_FAILED)
         return
       }
-    }
 
-    await streamLocalTurn({
-      text: trimmedText,
-      turnId,
-      timelineAnchorTurnId,
-      userMessage,
-      assistantMessage,
-      source,
-      mode: turnMode,
-      narrativeStyleId: turnNarrativeStyleId,
-      pendingToast,
-      successToast,
-      failureToast,
-      clearComposer,
-    })
+      const persistedLastTurnId = Math.max(lastPersistedTurnId, ensuredLatestTurnId)
+      const replacingLastTurn = Boolean(message?.messageId) && message?.turnId === persistedLastTurnId
+      const turnId = replacingLastTurn && message ? message.turnId : Math.max(lastTurnId, persistedLastTurnId) + 1
+      const timelineAnchorTurnId = replacingLastTurn && message
+        ? Math.max(0, message.turnId - 1)
+        : persistedLastTurnId
+      const playerSpeaker = makePlayerSpeaker(playerCharacter, turnMode)
+      const userMessage: SessionTimelineMessage = {
+        id: `local-${source}-user-${turnId}-${crypto.randomUUID()}`,
+        turnId,
+        seqInTurn: 1,
+        role: SESSION_TIMELINE_ROLE.USER,
+        mode: turnMode,
+        content: trimmedText,
+        createdAt: new Date().toISOString(),
+        speaker: playerSpeaker,
+        canCopy: true,
+        canRetry: false,
+        canEdit: false,
+        canDelete: false,
+      }
+      const assistantMessage = streamPlaceholder(turnId)
+
+      logger.info('timeline stream action started', {
+        source,
+        turnId,
+        messageId: message?.messageId,
+        replacingLastTurn,
+        mode: turnMode,
+        narrativeStyleId: turnNarrativeStyleId,
+        textLength: trimmedText.length,
+        hasText: Boolean(trimmedText),
+      })
+
+      setEditingMessageId(null)
+      setEditDraft('')
+      if (replacingLastTurn && message) {
+        try {
+          await truncateSessionTurn(sessionId, message.turnId)
+          if (!ownsTurnStart()) return
+          queryClient.removeQueries({
+            queryKey: ['play-session-dream-evidence-history', sessionId],
+            exact: true,
+          })
+          setOptimisticTruncateFromTurn(message.turnId)
+          logger.info('timeline truncate before regeneration completed', {
+            source,
+            turnId: message.turnId,
+            messageId: message.messageId,
+            status: 'success',
+          })
+        } catch (error) {
+          if (!ownsTurnStart()) return
+          logger.warn('timeline truncate before regeneration failed', {
+            source,
+            turnId: message.turnId,
+            messageId: message.messageId,
+            status: 'error',
+            error,
+          })
+          showToast(error instanceof Error ? error.message : failureToast)
+          return
+        }
+      }
+
+      if (!ownsTurnStart()) return
+      await streamLocalTurn({
+        text: trimmedText,
+        turnId,
+        timelineAnchorTurnId,
+        userMessage,
+        assistantMessage,
+        source,
+        mode: turnMode,
+        narrativeStyleId: turnNarrativeStyleId,
+        pendingToast,
+        successToast,
+        failureToast,
+        clearComposer,
+      })
+    } finally {
+      if (turnStartLockRef.current === turnStartToken) {
+        turnStartLockRef.current = null
+      }
+    }
   }, [
     contextInputBlockThresholdRatio,
     ensureCanStartTurn,
@@ -359,6 +399,22 @@ export function useSessionTimelineActions({
       showToast('当前消息不可删除')
       return
     }
+    if (sessionIdRef.current !== sessionId) return
+    if (turnStartLockRef.current || sendingRef.current) {
+      showToast('当前仍在生成，请稍后再试')
+      return
+    }
+    if (stoppingRef.current) {
+      showToast('正在停止当前生成，请稍后再试')
+      return
+    }
+    if (timelineMutationLockRef.current) {
+      showToast('正在更新历史，请稍后再试')
+      return
+    }
+
+    const mutationToken = Symbol('session-timeline-delete')
+    timelineMutationLockRef.current = mutationToken
     showToast('正在删除消息')
     logger.info('timeline delete started', {
       turnId: message.turnId,
@@ -366,11 +422,19 @@ export function useSessionTimelineActions({
     })
     try {
       await deleteSessionMessage(sessionId, message.messageId)
+      if (
+        timelineMutationLockRef.current !== mutationToken
+        || sessionIdRef.current !== sessionId
+      ) return
       queryClient.removeQueries({
         queryKey: ['play-session-dream-evidence-history', sessionId],
         exact: true,
       })
       const refreshed = await refreshSessionData({ silent: true })
+      if (
+        timelineMutationLockRef.current !== mutationToken
+        || sessionIdRef.current !== sessionId
+      ) return
       logger.info('timeline delete completed', {
         turnId: message.turnId,
         messageId: message.messageId,
@@ -378,6 +442,10 @@ export function useSessionTimelineActions({
       })
       showToast(refreshed ? '已删除消息' : '删除已提交，但刷新失败，请手动刷新页面')
     } catch (error) {
+      if (
+        timelineMutationLockRef.current !== mutationToken
+        || sessionIdRef.current !== sessionId
+      ) return
       logger.warn('timeline delete failed', {
         turnId: message.turnId,
         messageId: message.messageId,
@@ -385,12 +453,28 @@ export function useSessionTimelineActions({
         error,
       })
       showToast(error instanceof Error ? error.message : '删除失败')
+    } finally {
+      if (timelineMutationLockRef.current === mutationToken) {
+        timelineMutationLockRef.current = null
+      }
     }
   }, [logger, queryClient, refreshSessionData, sessionId, showToast])
 
   const handleDelete = useCallback((message: SessionTimelineMessage) => {
     if (!message.canDelete) {
       showToast('当前消息不可删除')
+      return
+    }
+    if (turnStartLockRef.current || sendingRef.current) {
+      showToast('当前仍在生成，请稍后再试')
+      return
+    }
+    if (stoppingRef.current) {
+      showToast('正在停止当前生成，请稍后再试')
+      return
+    }
+    if (timelineMutationLockRef.current) {
+      showToast('正在更新历史，请稍后再试')
       return
     }
     requestConfirm({

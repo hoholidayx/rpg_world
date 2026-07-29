@@ -34,9 +34,15 @@ import {
 type ActiveStream = {
   controller: AbortController
   requestId: string
+  sessionId: string
   source: SessionStreamSource
   assistantMessageId: string
   turnId: number
+}
+
+type StreamRefreshRecovery = {
+  sessionId: string
+  options: RefreshSessionDataOptions
 }
 
 export type StreamLocalTurnOptions = {
@@ -93,35 +99,56 @@ export function useSessionStreamTurn({
   const queryClient = useQueryClient()
   const [sending, setSending] = useState(false)
   const [stoppingRequestId, setStoppingRequestId] = useState<string | null>(null)
+  const [refreshRecovery, setRefreshRecovery] = useState<StreamRefreshRecovery | null>(null)
+  const [refreshRetrying, setRefreshRetrying] = useState(false)
   const activeStreamRef = useRef<ActiveStream | null>(null)
+  const sendingRequestIdRef = useRef<string | null>(null)
+  const refreshRetryTokenRef = useRef<symbol | null>(null)
+  const sessionIdRef = useRef(sessionId)
+  const mountedRef = useRef(true)
   const stoppingRequestIdRef = useRef<string | null>(null)
   const stopSettledRequestIdsRef = useRef<Set<string>>(new Set())
   const nextTimelineGroupOrderRef = useRef(0)
+  sessionIdRef.current = sessionId
 
   useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    sendingRequestIdRef.current = null
+    refreshRetryTokenRef.current = null
+    setSending(false)
+    setRefreshRecovery(null)
+    setRefreshRetrying(false)
     setStoppingRequestId(null)
     stoppingRequestIdRef.current = null
     stopSettledRequestIdsRef.current.clear()
   }, [sessionId])
 
   useEffect(() => {
+    const effectSessionId = sessionId
     return () => {
       const active = activeStreamRef.current
-      if (!active) return
+      if (!active || active.sessionId !== effectSessionId) return
       logger.info('stream cleanup stop requested', {
         requestId: active.requestId,
         source: active.source,
         turnId: active.turnId,
       })
       queryClient.removeQueries({
-        queryKey: ['play-session-dream-evidence-history', sessionId],
+        queryKey: ['play-session-dream-evidence-history', active.sessionId],
         exact: true,
       })
-      active.controller.abort()
       activeStreamRef.current = null
-      void stopSessionStream(sessionId, active.requestId).catch((error) => {
+      active.controller.abort()
+      void stopSessionStream(active.sessionId, active.requestId).catch((error) => {
         logger.warn('stream cleanup stop failed', {
           requestId: active.requestId,
+          sessionId: active.sessionId,
           source: active.source,
           turnId: active.turnId,
           error,
@@ -442,8 +469,31 @@ export function useSessionStreamTurn({
     failureToast,
     clearComposer = false,
   }: StreamLocalTurnOptions) => {
+    if (stoppingRequestIdRef.current) {
+      showToast('正在停止当前生成，请稍后再试')
+      return
+    }
+    if (refreshRetryTokenRef.current) {
+      logger.warn('stream start ignored while history recovery owns the session view', {
+        source,
+        turnId,
+      })
+      showToast('正在刷新历史，请稍后再试')
+      return
+    }
+    if (activeStreamRef.current || sendingRequestIdRef.current) {
+      logger.warn('stream start ignored because another request owns the session view', {
+        activeRequestId: activeStreamRef.current?.requestId,
+        source,
+        turnId,
+      })
+      showToast('当前仍在生成，请稍后再试')
+      return
+    }
+
     const controller = new AbortController()
     const requestId = crypto.randomUUID()
+    const requestSessionId = sessionId
     const timelineGroupOrder = ++nextTimelineGroupOrderRef.current
     const timelineGroup = {
       timelineGroupId: `stream:${requestId}`,
@@ -483,10 +533,17 @@ export function useSessionStreamTurn({
     activeStreamRef.current = {
       controller,
       requestId,
+      sessionId: requestSessionId,
       source,
       assistantMessageId: assistantMessage.id,
       turnId,
     }
+    sendingRequestIdRef.current = requestId
+    const ownsRequest = () => (
+      activeStreamRef.current?.requestId === requestId
+      && activeStreamRef.current.sessionId === requestSessionId
+      && sessionIdRef.current === requestSessionId
+    )
     setLocalTurnUsageByTurn((current) => {
       const next = { ...current }
       delete next[turnId]
@@ -515,6 +572,8 @@ export function useSessionStreamTurn({
     let contextThresholdRejected = false
     let contextThresholdMessage = ''
     let activeSession: string | null = null
+    let receivedCommittedTurn = false
+    let preserveVisibleFallback = false
     try {
       await consumeChatStream(
         {
@@ -527,6 +586,25 @@ export function useSessionStreamTurn({
         {
           signal: controller.signal,
           onEvent: (event) => {
+            if (!ownsRequest()) {
+              logger.info('stale stream event ignored', {
+                requestId,
+                requestSessionId,
+                currentSessionId: sessionIdRef.current,
+                eventId: event.eventId,
+                eventType: event.type,
+              })
+              return
+            }
+            if (
+              event.eventId < 0
+              || (
+                receivedCommittedTurn
+                && event.type === PLAY_STREAM_EVENT_TYPE.TEXT_DELTA
+              )
+            ) {
+              preserveVisibleFallback = true
+            }
             appendStreamEvent(
               event,
               assistantMessage.id,
@@ -542,6 +620,7 @@ export function useSessionStreamTurn({
               && event.payload.committedTurnId
               && event.payload.committedTurnId > 0
             ) {
+              receivedCommittedTurn = true
               onCommittedNarrativeStyle(narrativeStyleId)
               onTurnCommitted(event.payload.committedTurnId)
             }
@@ -562,6 +641,7 @@ export function useSessionStreamTurn({
           },
         },
       )
+      if (!ownsRequest()) return
       if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) return
       if (streamFailure) throw new Error(streamFailure)
       if (activeSession && activeSession !== sessionId) {
@@ -577,16 +657,25 @@ export function useSessionStreamTurn({
         queryKey: ['play-session-dream-evidence-history', sessionId],
         exact: true,
       })
-      const refreshed = await refreshSessionData({
+      const refreshOptions: RefreshSessionDataOptions = {
         silent: true,
         clearLastTurnUsage: clearCommandInput,
         preserveDiagnostics: !clearCommandInput,
         preserveCommandMessages: commandInput && !clearCommandInput,
+        preserveLocalMessages: !receivedCommittedTurn || preserveVisibleFallback,
         historyMode: clearCommandInput
           ? HISTORY_REFRESH_MODE.LATEST
           : HISTORY_REFRESH_MODE.ACTIVE,
         scrollToBottom: clearCommandInput,
-      })
+      }
+      const refreshed = await refreshSessionData(refreshOptions)
+      if (!ownsRequest()) return
+      setRefreshRecovery(refreshed
+        ? null
+        : {
+            sessionId: requestSessionId,
+            options: refreshOptions,
+          })
       if (clearCommandInput) {
         queryClient.removeQueries({ queryKey: ['play-session-dream-proposal', sessionId] })
         queryClient.removeQueries({ queryKey: ['play-session-dream-proposals', sessionId] })
@@ -600,8 +689,15 @@ export function useSessionStreamTurn({
       })
       showToast(refreshed ? successToast : `${successToast}，但刷新失败，请手动刷新页面`)
     } catch (error) {
-      if (controller.signal.aborted) {
-        markStreamStopped(assistantMessage.id, turnId)
+      if (!ownsRequest()) {
+        logger.info('stale stream failure ignored', {
+          requestId,
+          requestSessionId,
+          currentSessionId: sessionIdRef.current,
+        })
+      } else if (controller.signal.aborted) {
+        // A local abort can also mean navigation or deletion. Only a confirmed
+        // Stop API cancellation may render the player-visible stopped state.
       } else if (contextThresholdRejected) {
         setLocalMessages((current) => current.filter((message) => message.turnId !== turnId))
         if (clearComposer) setComposerText(text)
@@ -638,8 +734,11 @@ export function useSessionStreamTurn({
         showToast(errorText)
       }
     } finally {
-      setSending(false)
       if (activeStreamRef.current?.requestId === requestId) activeStreamRef.current = null
+      if (sendingRequestIdRef.current === requestId) {
+        sendingRequestIdRef.current = null
+        setSending(false)
+      }
       stopSettledRequestIdsRef.current.delete(requestId)
     }
   }, [
@@ -647,7 +746,6 @@ export function useSessionStreamTurn({
     appendStreamEvent,
     contextPreviewUsage,
     logger,
-    markStreamStopped,
     onActiveSession,
     onCommittedNarrativeStyle,
     onTurnCommitted,
@@ -655,7 +753,6 @@ export function useSessionStreamTurn({
     refreshContextPreview,
     refreshSessionData,
     sessionId,
-    setLastTurnUsage,
     setLocalTurnUsageByTurn,
     setComposerText,
     setForceScrollKey,
@@ -666,6 +763,14 @@ export function useSessionStreamTurn({
   const stopActiveStream = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const active = activeStreamRef.current
     if (!active) return false
+    if (active.sessionId !== sessionIdRef.current) {
+      logger.info('stale session stream stop ignored', {
+        requestId: active.requestId,
+        requestSessionId: active.sessionId,
+        currentSessionId: sessionIdRef.current,
+      })
+      return false
+    }
 
     if (stoppingRequestIdRef.current === active.requestId) {
       logger.info('stream stop duplicate ignored', {
@@ -684,7 +789,7 @@ export function useSessionStreamTurn({
     })
 
     try {
-      const result = await stopSessionStream(sessionId, active.requestId)
+      const result = await stopSessionStream(active.sessionId, active.requestId)
       logger.info('stream stop result received', {
         requestId: active.requestId,
         source: active.source,
@@ -694,23 +799,49 @@ export function useSessionStreamTurn({
       })
       if (result.status === TURN_CANCEL_STATUS.CANCELLED) {
         stopSettledRequestIdsRef.current.add(active.requestId)
+        const currentActive = activeStreamRef.current
+        const ownsCurrentView = (
+          mountedRef.current
+          && sessionIdRef.current === active.sessionId
+          && (!currentActive || currentActive.requestId === active.requestId)
+          && (
+            !sendingRequestIdRef.current
+            || sendingRequestIdRef.current === active.requestId
+          )
+        )
+        if (ownsCurrentView) {
+          markStreamStopped(active.assistantMessageId, active.turnId)
+          if (!silent) showToast('已停止当前流式响应')
+        }
         if (activeStreamRef.current?.requestId === active.requestId) activeStreamRef.current = null
         active.controller.abort()
-        markStreamStopped(active.assistantMessageId, active.turnId)
-        if (!silent) showToast('已停止当前流式响应')
         return true
       }
       if (result.status === TURN_CANCEL_STATUS.NOT_RUNNING) {
         stopSettledRequestIdsRef.current.add(active.requestId)
         queryClient.removeQueries({
-          queryKey: ['play-session-dream-evidence-history', sessionId],
+          queryKey: ['play-session-dream-evidence-history', active.sessionId],
           exact: true,
         })
-        await refreshSessionData({ silent: true })
-        if (!silent) showToast('生成已结束，已刷新状态')
+        const refreshOptions: RefreshSessionDataOptions = {
+          silent: true,
+          preserveLocalMessages: true,
+        }
+        const refreshed = await refreshSessionData(refreshOptions)
+        if (!refreshed && sessionIdRef.current === active.sessionId) {
+          setRefreshRecovery({
+            sessionId: active.sessionId,
+            options: refreshOptions,
+          })
+        }
+        if (!silent && sessionIdRef.current === active.sessionId) {
+          showToast(refreshed ? '生成已结束，已刷新状态' : '生成已结束，但历史刷新失败')
+        }
         return false
       }
-      if (!silent) showToast('当前生成状态已变化，未停止')
+      if (!silent && sessionIdRef.current === active.sessionId) {
+        showToast('当前生成状态已变化，未停止')
+      }
       return false
     } catch (error) {
       const stillActive = activeStreamRef.current?.requestId === active.requestId
@@ -723,14 +854,28 @@ export function useSessionStreamTurn({
         error,
       })
       if (stillActive) {
-        if (!silent) showToast('停止失败，生成仍在继续')
+        if (!silent && sessionIdRef.current === active.sessionId) {
+          showToast('停止失败，生成仍在继续')
+        }
       } else {
         queryClient.removeQueries({
-          queryKey: ['play-session-dream-evidence-history', sessionId],
+          queryKey: ['play-session-dream-evidence-history', active.sessionId],
           exact: true,
         })
-        await refreshSessionData({ silent: true })
-        if (!silent) showToast('停止失败，已刷新状态')
+        const refreshOptions: RefreshSessionDataOptions = {
+          silent: true,
+          preserveLocalMessages: true,
+        }
+        const refreshed = await refreshSessionData(refreshOptions)
+        if (!refreshed && sessionIdRef.current === active.sessionId) {
+          setRefreshRecovery({
+            sessionId: active.sessionId,
+            options: refreshOptions,
+          })
+        }
+        if (!silent && sessionIdRef.current === active.sessionId) {
+          showToast(refreshed ? '停止失败，已刷新状态' : '停止失败，历史刷新也失败')
+        }
       }
       return false
     } finally {
@@ -739,11 +884,11 @@ export function useSessionStreamTurn({
         setStoppingRequestId((current) => (current === active.requestId ? null : current))
       }
     }
-  }, [logger, markStreamStopped, queryClient, refreshSessionData, sessionId, showToast])
+  }, [logger, markStreamStopped, queryClient, refreshSessionData, showToast])
 
   const handleExitSession = useCallback(() => {
     const active = activeStreamRef.current
-    if (active) {
+    if (active?.sessionId === sessionIdRef.current) {
       logger.info('stream exit stop requested', {
         requestId: active.requestId,
         source: active.source,
@@ -753,13 +898,14 @@ export function useSessionStreamTurn({
       stoppingRequestIdRef.current = null
       setStoppingRequestId(null)
       queryClient.removeQueries({
-        queryKey: ['play-session-dream-evidence-history', sessionId],
+        queryKey: ['play-session-dream-evidence-history', active.sessionId],
         exact: true,
       })
       active.controller.abort()
-      void stopSessionStream(sessionId, active.requestId).catch((error) => {
+      void stopSessionStream(active.sessionId, active.requestId).catch((error) => {
         logger.warn('stream exit stop failed', {
           requestId: active.requestId,
+          sessionId: active.sessionId,
           source: active.source,
           turnId: active.turnId,
           error,
@@ -767,11 +913,11 @@ export function useSessionStreamTurn({
       })
     }
     onExit()
-  }, [logger, onExit, queryClient, sessionId])
+  }, [logger, onExit, queryClient])
 
   const prepareForSessionDeletion = useCallback(() => {
     const active = activeStreamRef.current
-    if (!active) return
+    if (!active || active.sessionId !== sessionIdRef.current) return
     logger.info('stream local view cancelled for session deletion', {
       requestId: active.requestId,
       source: active.source,
@@ -783,11 +929,48 @@ export function useSessionStreamTurn({
     active.controller.abort()
   }, [logger])
 
+  const retryCompletionRefresh = useCallback(async () => {
+    if (
+      !refreshRecovery
+      || refreshRetryTokenRef.current
+      || sendingRequestIdRef.current
+      || activeStreamRef.current
+      || refreshRecovery.sessionId !== sessionIdRef.current
+    ) return false
+
+    const recovery = refreshRecovery
+    const retryToken = Symbol('stream-refresh-retry')
+    refreshRetryTokenRef.current = retryToken
+    setRefreshRetrying(true)
+    try {
+      const refreshed = await refreshSessionData(recovery.options)
+      if (
+        refreshRetryTokenRef.current !== retryToken
+        || sessionIdRef.current !== recovery.sessionId
+      ) return false
+      if (refreshed) {
+        setRefreshRecovery(null)
+        showToast('历史已刷新')
+        return true
+      }
+      showToast('历史刷新仍失败，请稍后重试')
+      return false
+    } finally {
+      if (refreshRetryTokenRef.current === retryToken) {
+        refreshRetryTokenRef.current = null
+        if (sessionIdRef.current === recovery.sessionId) setRefreshRetrying(false)
+      }
+    }
+  }, [refreshRecovery, refreshSessionData, showToast])
+
   return {
     sending,
     stopping: Boolean(stoppingRequestId),
+    refreshRecoveryPending: Boolean(refreshRecovery?.sessionId === sessionId),
+    refreshRetrying,
     streamLocalTurn,
     stopActiveStream,
+    retryCompletionRefresh,
     handleExitSession,
     prepareForSessionDeletion,
   }

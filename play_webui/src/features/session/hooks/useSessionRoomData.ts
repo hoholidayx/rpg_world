@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { listCharacters } from '@/lib/api/characters'
 import { getContextPreview } from '@/lib/api/contextPreview'
@@ -11,7 +11,10 @@ import { fromContextPreviewEstimate, type ContextUsageSnapshot } from '@/types/c
 import { PLAYER_CHARACTER_STATUS } from '@/types/session'
 import { STATUS_KIND } from '@/types/statusTables'
 import type { SessionRoomLogger } from '../sessionRoomLogger'
-import { mapHistoryToMessages } from '../sessionTimelineMessages'
+import {
+  mapHistoryToMessages,
+  unreconciledLocalMessages,
+} from '../sessionTimelineMessages'
 import {
   HISTORY_REFRESH_MODE,
   SESSION_HISTORY_MESSAGES,
@@ -43,6 +46,8 @@ export function useSessionRoomData({
   const [lastTurnUsage, setLastTurnUsage] = useState<ContextUsageSnapshot | null>(null)
   const [forceScrollKey, setForceScrollKey] = useState(0)
   const [timelineResetKey, setTimelineResetKey] = useState(0)
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
 
   const sessionQuery = useQuery({
     queryKey: ['play-session', sessionId],
@@ -155,9 +160,10 @@ export function useSessionRoomData({
     const historyMessages = optimisticTruncateFromTurn === null
       ? baseMessages
       : baseMessages.filter((message) => message.turnId < optimisticTruncateFromTurn)
+    const visibleLocalMessages = unreconciledLocalMessages(historyMessages, localMessages)
 
     const outcomeTurns = new Set<number>()
-    return [...historyMessages, ...localMessages]
+    return [...historyMessages, ...visibleLocalMessages]
       .filter((message) => {
         if (message.role !== SESSION_TIMELINE_ROLE.OUTCOME) return true
         if (outcomeTurns.has(message.turnId)) return false
@@ -186,23 +192,27 @@ export function useSessionRoomData({
   }: {
     silent?: boolean
   } = {}) => {
+    const requestedSessionId = sessionId
     const latestTurnIdFromJump = await jumpToLatestPage()
+    if (sessionIdRef.current !== requestedSessionId) return null
     if (latestTurnIdFromJump === null) {
       if (!silent) showToast(SESSION_HISTORY_MESSAGES.LATEST_LOAD_FAILED)
       return null
     }
     setForceScrollKey((current) => current + 1)
     return latestTurnIdFromJump
-  }, [jumpToLatestPage, showToast])
+  }, [jumpToLatestPage, sessionId, showToast])
 
   const refreshSessionData = useCallback(async ({
     silent = false,
     clearLastTurnUsage = true,
     preserveDiagnostics = false,
     preserveCommandMessages = false,
+    preserveLocalMessages = false,
     historyMode = HISTORY_REFRESH_MODE.ACTIVE,
     scrollToBottom = false,
   }: RefreshSessionDataOptions = {}) => {
+    const requestedSessionId = sessionId
     try {
       const [, historyRefreshed] = await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['play-session', sessionId] }),
@@ -220,19 +230,28 @@ export function useSessionRoomData({
         }),
         queryClient.invalidateQueries({ queryKey: ['play-session-context-preview', sessionId] }),
       ])
+      if (sessionIdRef.current !== requestedSessionId) {
+        logger.info('stale session data refresh ignored', {
+          requestedSessionId,
+          currentSessionId: sessionIdRef.current,
+        })
+        return false
+      }
       if (!historyRefreshed) throw new Error('history page refresh failed')
-      setLocalMessages((current) => (
-        current.filter((message) => (
-          (
-            preserveDiagnostics
-            && (
-              message.role === SESSION_TIMELINE_ROLE.THINKING
-              || message.role === SESSION_TIMELINE_ROLE.TOOL
+      if (!preserveLocalMessages) {
+        setLocalMessages((current) => (
+          current.filter((message) => (
+            (
+              preserveDiagnostics
+              && (
+                message.role === SESSION_TIMELINE_ROLE.THINKING
+                || message.role === SESSION_TIMELINE_ROLE.TOOL
+              )
             )
-          )
-          || (preserveCommandMessages && message.metadata?.localCommand === true)
+            || (preserveCommandMessages && message.metadata?.localCommand === true)
+          ))
         ))
-      ))
+      }
       if (!preserveDiagnostics) setLocalTurnUsageByTurn({})
       setOptimisticTruncateFromTurn(null)
       setTimelineResetKey((current) => current + 1)
@@ -243,11 +262,13 @@ export function useSessionRoomData({
         clearLastTurnUsage,
         preserveDiagnostics,
         preserveCommandMessages,
+        preserveLocalMessages,
         historyMode,
         scrollToBottom,
       })
       return true
     } catch (error) {
+      if (sessionIdRef.current !== requestedSessionId) return false
       logger.warn('session data refresh failed', { status: 'error', error })
       if (!silent) showToast('刷新失败，请手动刷新页面')
       return false

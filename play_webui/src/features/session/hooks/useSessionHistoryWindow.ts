@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getSessionHistoryPage } from '@/lib/api/sessions'
 import { sessionHistoryPaginationConfig } from '@/lib/config/appConfig'
@@ -93,6 +93,8 @@ export function useSessionHistoryWindow({
   const [activePageKey, setActivePageKey] = useState('')
   const [loadingDirection, setLoadingDirection] = useState<HistoryLoadDirection | null>(null)
   const [jumpingToLatest, setJumpingToLatest] = useState(false)
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
 
   const latestQuery = useQuery({
     queryKey: ['play-session-history-page', sessionId, HISTORY_PAGE_QUERY_SCOPE.LATEST, pageTurnLimit],
@@ -151,6 +153,8 @@ export function useSessionHistoryWindow({
   }, [latestPage])
 
   const loadAdjacentPage = useCallback(async (direction: HistoryLoadDirection) => {
+    const requestedSessionId = sessionId
+    if (sessionIdRef.current !== requestedSessionId) return false
     if (!activePage || loadingDirection) return false
     if (direction === HISTORY_LOAD_DIRECTION.BEFORE && !activePage.hasBefore) return false
     if (direction === HISTORY_LOAD_DIRECTION.AFTER && !activePage.hasAfter) return false
@@ -159,6 +163,7 @@ export function useSessionHistoryWindow({
       ? cachedBefore(pages, activePage)
       : cachedAfter(pages, activePage)
     if (cached) {
+      if (sessionIdRef.current !== requestedSessionId) return false
       setActivePageKey(pageKey(cached))
       return true
     }
@@ -173,6 +178,7 @@ export function useSessionHistoryWindow({
         beforeTurnId: direction === HISTORY_LOAD_DIRECTION.BEFORE ? boundaryTurnId : undefined,
         afterTurnId: direction === HISTORY_LOAD_DIRECTION.AFTER ? boundaryTurnId : undefined,
       })
+      if (sessionIdRef.current !== requestedSessionId) return false
       if (!page.turns.length) return false
       rememberPage(page, activePage)
       logger.info('history page loaded', {
@@ -183,26 +189,33 @@ export function useSessionHistoryWindow({
       })
       return true
     } catch (error) {
+      if (sessionIdRef.current !== requestedSessionId) return false
       logger.warn('history page load failed', { direction, error })
       return false
     } finally {
-      setLoadingDirection(null)
+      if (sessionIdRef.current === requestedSessionId) setLoadingDirection(null)
     }
   }, [activePage, loadingDirection, logger, pageTurnLimit, pages, rememberPage, sessionId])
 
   const fetchLatestPage = useCallback(async ({ apply = true }: { apply?: boolean } = {}) => {
+    const requestedSessionId = sessionId
+    if (sessionIdRef.current !== requestedSessionId) return null
     try {
       const result = await refetchLatestPage()
+      if (sessionIdRef.current !== requestedSessionId) return null
       if (!result.data) return null
       if (apply) applyLatestPage(result.data)
       return result.data
     } catch (error) {
+      if (sessionIdRef.current !== requestedSessionId) return null
       logger.warn('history latest page reload failed', { error })
       return null
     }
-  }, [applyLatestPage, logger, refetchLatestPage])
+  }, [applyLatestPage, logger, refetchLatestPage, sessionId])
 
   const refreshHistoryWindow = useCallback(async ({ mode }: { mode: HistoryRefreshMode }) => {
+    const requestedSessionId = sessionId
+    if (sessionIdRef.current !== requestedSessionId) return false
     if (mode === HISTORY_REFRESH_MODE.LATEST) return Boolean(await fetchLatestPage())
 
     if (!activePage) return Boolean(await fetchLatestPage())
@@ -216,6 +229,7 @@ export function useSessionHistoryWindow({
         limit: pageTurnLimit,
         ...request,
       })
+      if (sessionIdRef.current !== requestedSessionId) return false
       if (!page.turns.length && page.latestTurnId > 0) {
         return Boolean(await fetchLatestPage())
       }
@@ -230,6 +244,7 @@ export function useSessionHistoryWindow({
       })
       return true
     } catch (error) {
+      if (sessionIdRef.current !== requestedSessionId) return false
       logger.warn('history active page refresh failed', { error })
       return false
     }
@@ -244,14 +259,17 @@ export function useSessionHistoryWindow({
   }, [activePage?.latestTurnId, latestPage?.latestTurnId, pages])
 
   const jumpToLatestPage = useCallback(async () => {
+    const requestedSessionId = sessionId
+    if (sessionIdRef.current !== requestedSessionId) return null
     setJumpingToLatest(true)
     try {
       const fetchedLatestPage = await fetchLatestPage()
+      if (sessionIdRef.current !== requestedSessionId) return null
       return fetchedLatestPage?.latestTurnId ?? null
     } finally {
-      setJumpingToLatest(false)
+      if (sessionIdRef.current === requestedSessionId) setJumpingToLatest(false)
     }
-  }, [fetchLatestPage])
+  }, [fetchLatestPage, sessionId])
 
   const loadPreviousPage = useCallback(() => loadAdjacentPage(HISTORY_LOAD_DIRECTION.BEFORE), [loadAdjacentPage])
   const loadNextPage = useCallback(() => loadAdjacentPage(HISTORY_LOAD_DIRECTION.AFTER), [loadAdjacentPage])

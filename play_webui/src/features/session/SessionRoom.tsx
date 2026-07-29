@@ -754,6 +754,25 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           onEditSend={timelineActions.handleSendEdit}
         />
 
+        {stream.refreshRecoveryPending ? (
+          <div
+            role="status"
+            className="relative z-10 mx-3 mb-2 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100 sm:mx-5"
+          >
+            <span>回复已保留，但历史刷新失败。</span>
+            <button
+              type="button"
+              disabled={stream.refreshRetrying || stream.sending || stream.stopping}
+              onClick={() => {
+                void stream.retryCompletionRefresh()
+              }}
+              className="shrink-0 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-black text-white transition hover:bg-amber-800 disabled:cursor-wait disabled:opacity-60 dark:bg-amber-300 dark:text-amber-950 dark:hover:bg-amber-200"
+            >
+              {stream.refreshRetrying ? '刷新中' : '重试刷新'}
+            </button>
+          </div>
+        ) : null}
+
         <div className="relative z-10">
           <SessionComposer
             sessionId={sessionId}

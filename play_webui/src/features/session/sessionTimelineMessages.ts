@@ -118,6 +118,32 @@ export function streamPlaceholder(turnId: number): SessionTimelineMessage {
   }
 }
 
+export function unreconciledLocalMessages(
+  historyMessages: SessionTimelineMessage[],
+  localMessages: SessionTimelineMessage[],
+) {
+  const persistedTurnMessages = historyMessages.filter((message) => Boolean(message.messageId))
+  return localMessages.filter((localMessage) => {
+    if (
+      localMessage.role !== SESSION_TIMELINE_ROLE.USER
+      && localMessage.role !== SESSION_TIMELINE_ROLE.ASSISTANT
+    ) return true
+
+    return !persistedTurnMessages.some((historyMessage) => {
+      if (
+        historyMessage.turnId !== localMessage.turnId
+        || historyMessage.role !== localMessage.role
+      ) return false
+      if (!localMessage.content) return true
+      if (historyMessage.content === localMessage.content) return true
+      return (
+        localMessage.role === SESSION_TIMELINE_ROLE.ASSISTANT
+        && historyMessage.content.startsWith(localMessage.content)
+      )
+    })
+  })
+}
+
 function timelineRole(role: HistoryMessage['role']): SessionTimelineMessage['role'] {
   if (
     role === HISTORY_MESSAGE_ROLE.USER
