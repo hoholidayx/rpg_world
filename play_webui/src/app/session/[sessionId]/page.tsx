@@ -1,4 +1,12 @@
+import type { Viewport } from 'next'
 import { SessionRoom } from '@/features/session/SessionRoom'
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  interactiveWidget: 'resizes-content',
+}
 
 export default async function SessionPage({
   params,

@@ -25,6 +25,7 @@ export function ThemeSwitcher({
 }: ThemeSwitcherProps) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const theme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
   const selectedOption = themeOptions.find((option) => option.value === theme) ?? themeOptions[2]
@@ -35,18 +36,28 @@ export function ThemeSwitcher({
     const handlePointerDown = (event: PointerEvent) => {
       if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false)
     }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      requestAnimationFrame(() => triggerRef.current?.focus())
+    }
     document.addEventListener('pointerdown', handlePointerDown)
-    return () => document.removeEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
   }, [open])
 
   return (
     <div ref={wrapperRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((isOpen) => !isOpen)}
         className={cn(
           'flex items-center justify-center border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200',
-          triggerSize === 'compact' ? 'h-10 w-10 rounded-lg' : 'h-11 w-11 rounded-xl',
+          triggerSize === 'compact' ? 'h-11 w-11 rounded-lg sm:h-10 sm:w-10' : 'h-11 w-11 rounded-xl',
         )}
         aria-haspopup="menu"
         aria-expanded={open}

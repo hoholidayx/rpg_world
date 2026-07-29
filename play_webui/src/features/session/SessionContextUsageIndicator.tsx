@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils/cn'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
 
@@ -64,6 +64,7 @@ export function SessionContextUsageIndicator({
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
   const ratio = contextPreviewUsage?.ratio ?? null
   const progress = ratio === null ? 0 : Math.min(100, Math.max(0, ratio * 100))
   const ringColor = statusColor[contextPreviewUsage?.status ?? 'unknown']
@@ -77,7 +78,9 @@ export function SessionContextUsageIndicator({
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      requestAnimationFrame(() => triggerRef.current?.focus())
     }
     document.addEventListener('mousedown', handlePointerDown)
     document.addEventListener('keydown', handleKeyDown)
@@ -90,6 +93,7 @@ export function SessionContextUsageIndicator({
   return (
     <div ref={rootRef} className="relative inline-flex items-center">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
@@ -110,7 +114,7 @@ export function SessionContextUsageIndicator({
         <div
           role="dialog"
           aria-label="context-preview 与上一轮真实 usage 详情"
-          className="absolute bottom-[calc(100%+12px)] right-0 z-30 w-[min(380px,calc(100vw-32px))] rounded-lg border border-slate-200 bg-white p-4 text-left shadow-2xl shadow-slate-900/15 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40"
+          className="fixed inset-x-4 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[65] max-h-[min(70dvh,calc(100dvh-1.5rem))] overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-4 text-left shadow-2xl shadow-slate-900/15 [overflow-wrap:anywhere] dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40 sm:absolute sm:inset-x-auto sm:bottom-[calc(100%+12px)] sm:right-0 sm:max-h-[calc(100dvh-2rem)] sm:w-[min(380px,calc(100vw-32px))]"
         >
           <section>
             <div className="flex items-start justify-between gap-3">

@@ -124,7 +124,7 @@ function TablePopover({
           </div>
           {item.table.description ? <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-slate-500 dark:text-slate-300">{item.table.description}</p> : null}
         </div>
-        <button type="button" onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800" aria-label="关闭状态详情">
+        <button type="button" onClick={onClose} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800 sm:h-8 sm:w-8" aria-label="关闭状态详情">
           <X size={15} />
         </button>
       </header>
@@ -323,7 +323,7 @@ export function SessionStatusHud({
               <h3 className="text-sm font-black text-slate-950 dark:text-slate-100">{hiddenItems.length ? '更多状态表' : '状态 HUD'}</h3>
               <p className="mt-0.5 text-[11px] font-semibold text-slate-400">悬停展开列表 · 点击查看全部字段</p>
             </div>
-            <button type="button" onClick={() => setPickerOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800" aria-label="关闭状态表选择器"><X size={15} /></button>
+            <button type="button" onClick={() => setPickerOpen(false)} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800 sm:h-8 sm:w-8" aria-label="关闭状态表选择器"><X size={15} /></button>
           </header>
           <div className="max-h-64 overflow-y-auto p-2">
             {pickerItems.map((item) => (

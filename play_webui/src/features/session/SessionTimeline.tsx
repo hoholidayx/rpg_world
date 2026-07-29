@@ -19,6 +19,11 @@ import {
   type HistoryLoadDirection,
   type SessionTimelineMessage,
 } from './sessionRoomTypes'
+import {
+  createTimelineScrollScheduler,
+  isTimelineNearBottom,
+  TIMELINE_SCROLL_TARGET,
+} from './sessionTimelineScroll'
 
 const BOUNDARY_LOAD_SOURCE = {
   AUTO: 'auto',
@@ -93,7 +98,7 @@ function MiniButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300 disabled:shadow-none disabled:hover:border-slate-100 disabled:hover:bg-slate-50 disabled:hover:text-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:shadow-black/30 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 dark:disabled:border-slate-800 dark:disabled:bg-slate-900/60 dark:disabled:text-slate-600 dark:disabled:hover:border-slate-800 dark:disabled:hover:bg-slate-900/60 dark:disabled:hover:text-slate-600"
+      className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300 disabled:shadow-none disabled:hover:border-slate-100 disabled:hover:bg-slate-50 disabled:hover:text-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:shadow-black/30 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 dark:disabled:border-slate-800 dark:disabled:bg-slate-900/60 dark:disabled:text-slate-600 dark:disabled:hover:border-slate-800 dark:disabled:hover:bg-slate-900/60 dark:disabled:hover:text-slate-600 sm:h-8 sm:w-8"
     >
       {children}
     </button>
@@ -255,14 +260,14 @@ function MessageBubble({
           <button
             type="button"
             onClick={onEditCancel}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-600 transition hover:border-violet-200 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200"
+            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-600 transition hover:border-violet-200 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200 sm:h-9"
           >
             取消
           </button>
           <button
             type="button"
             onClick={onEditSend}
-            className="h-9 rounded-lg bg-violet-600 px-4 text-sm font-bold text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 dark:shadow-violet-950/40"
+            className="h-11 rounded-lg bg-violet-600 px-4 text-sm font-bold text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 dark:shadow-violet-950/40 sm:h-9"
           >
             发送
           </button>
@@ -277,7 +282,7 @@ function MessageBubble({
     return (
       <details
         className={cn(
-          'group rounded-lg border px-4 py-3 text-[length:var(--session-message-font-size)] leading-[var(--session-message-line-height)] break-words whitespace-normal',
+          'group rounded-lg border px-4 py-3 text-[length:var(--session-message-font-size)] leading-[var(--session-message-line-height)] whitespace-normal [overflow-wrap:anywhere]',
           toneClass,
         )}
       >
@@ -295,7 +300,7 @@ function MessageBubble({
   return (
     <div
       className={cn(
-        'rounded-lg border px-5 py-4 text-[length:var(--session-message-font-size)] leading-[var(--session-message-line-height)] break-words whitespace-pre-wrap',
+        'rounded-lg border px-5 py-4 text-[length:var(--session-message-font-size)] leading-[var(--session-message-line-height)] whitespace-pre-wrap [overflow-wrap:anywhere]',
         toneClass,
         isUser ? 'ml-auto w-fit max-w-full text-left font-semibold' : '',
       )}
@@ -311,7 +316,7 @@ function AssistantTaggedText({ content }: { content: string }) {
   if (!result.structured) return <>{content}</>
 
   return (
-    <div className="space-y-3 whitespace-normal">
+    <div className="space-y-3 whitespace-normal [overflow-wrap:anywhere]">
       {result.segments.map((segment, index) => (
         <AssistantSegment key={`${segment.kind}-${index}`} segment={segment} />
       ))}
@@ -474,7 +479,7 @@ function NarrativeOutcomeCard({ message }: { message: SessionTimelineMessage }) 
           </span>
         ) : null}
       </div>
-      <p className="mt-2 text-sm font-semibold leading-6">{outcome.reason}</p>
+      <p className="mt-2 text-sm font-semibold leading-6 [overflow-wrap:anywhere]">{outcome.reason}</p>
     </article>
   )
 }
@@ -563,7 +568,7 @@ export function SessionTimeline({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const topBoundaryRef = useRef<HTMLDivElement | null>(null)
   const bottomBoundaryRef = useRef<HTMLDivElement | null>(null)
-  const bottomAnchorRef = useRef<HTMLDivElement | null>(null)
+  const scrollSchedulerRef = useRef<ReturnType<typeof createTimelineScrollScheduler> | null>(null)
   const shouldStickToBottomRef = useRef(true)
   const initialScrollDoneRef = useRef(false)
   const previousPageRef = useRef<HistoryPage | null>(null)
@@ -612,19 +617,31 @@ export function SessionTimeline({
     }, TIMELINE_SCROLL.programmaticGuardMs)
   }, [])
 
+  const scheduleTimelineScroll = useCallback((
+    target: typeof TIMELINE_SCROLL_TARGET[keyof typeof TIMELINE_SCROLL_TARGET],
+    behavior: ScrollBehavior,
+  ) => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    if (!scrollSchedulerRef.current) {
+      scrollSchedulerRef.current = createTimelineScrollScheduler({
+        requestFrame: (callback) => window.requestAnimationFrame(callback),
+        cancelFrame: (handle) => window.cancelAnimationFrame(handle),
+        prefersReducedMotion: () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+      })
+    }
+    scrollSchedulerRef.current.schedule(container, target, behavior)
+  }, [])
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
     markProgrammaticScroll()
-    requestAnimationFrame(() => {
-      bottomAnchorRef.current?.scrollIntoView({ behavior, block: 'end' })
-    })
-  }, [markProgrammaticScroll])
+    scheduleTimelineScroll(TIMELINE_SCROLL_TARGET.BOTTOM, behavior)
+  }, [markProgrammaticScroll, scheduleTimelineScroll])
 
   const scrollToTop = useCallback((behavior: ScrollBehavior) => {
     markProgrammaticScroll()
-    requestAnimationFrame(() => {
-      scrollContainerRef.current?.scrollTo({ top: 0, behavior })
-    })
-  }, [markProgrammaticScroll])
+    scheduleTimelineScroll(TIMELINE_SCROLL_TARGET.TOP, behavior)
+  }, [markProgrammaticScroll, scheduleTimelineScroll])
 
   const startBoundaryCooldown = useCallback(() => {
     boundaryCooldownRef.current = true
@@ -672,8 +689,12 @@ export function SessionTimeline({
       userScrollDirectionRef.current = scrollDelta < 0 ? USER_SCROLL_DIRECTION.UP : USER_SCROLL_DIRECTION.DOWN
     }
     lastScrollTopRef.current = nextScrollTop
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-    shouldStickToBottomRef.current = distanceFromBottom < TIMELINE_SCROLL.stickToBottomDistancePx
+    shouldStickToBottomRef.current = isTimelineNearBottom({
+      scrollHeight: container.scrollHeight,
+      scrollTop: container.scrollTop,
+      clientHeight: container.clientHeight,
+      thresholdPx: TIMELINE_SCROLL.stickToBottomDistancePx,
+    })
   }, [])
 
   useEffect(() => {
@@ -699,6 +720,7 @@ export function SessionTimeline({
     return () => {
       if (boundaryCooldownTimerRef.current) clearTimeout(boundaryCooldownTimerRef.current)
       if (programmaticScrollTimerRef.current) clearTimeout(programmaticScrollTimerRef.current)
+      scrollSchedulerRef.current?.cancel()
     }
   }, [])
 
@@ -715,7 +737,7 @@ export function SessionTimeline({
       return
     }
 
-    if (shouldStickToBottomRef.current) scrollToBottom('smooth')
+    if (shouldStickToBottomRef.current) scrollToBottom('auto')
   }, [displayMessages.length, lastMessageFingerprint, scrollToBottom])
 
   useEffect(() => {
@@ -793,7 +815,7 @@ export function SessionTimeline({
       <div
         ref={scrollContainerRef}
         onScroll={updateStickToBottom}
-        className="h-full overflow-y-auto px-4 py-7 sm:px-6"
+        className="h-full overflow-y-auto overscroll-contain px-4 py-7 sm:px-6"
       >
         <div className="mx-auto max-w-5xl">
           <div className="mb-7 flex items-center justify-center gap-4 text-xs font-bold uppercase text-slate-400 dark:text-slate-300">
@@ -877,7 +899,7 @@ export function SessionTimeline({
               )}
             </div>
           ) : null}
-          <div ref={bottomAnchorRef} aria-hidden="true" className="h-px" />
+          <div aria-hidden="true" className="h-px" />
         </div>
       </div>
       {showJumpToLatest ? (

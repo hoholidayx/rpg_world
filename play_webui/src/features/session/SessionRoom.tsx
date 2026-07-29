@@ -663,23 +663,23 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       data-workspace={data.session?.workspace ?? ''}
       data-story-id={data.session?.storyId ?? ''}
       data-session-id={sessionId}
-      className="min-h-screen bg-[#f7f8fc] text-slate-900 dark:bg-[#0b1020] dark:text-slate-100 lg:h-screen lg:min-h-0 lg:overflow-hidden"
+      className="h-screen h-[100dvh] min-h-0 overflow-hidden bg-[#f7f8fc] text-slate-900 dark:bg-[#0b1020] dark:text-slate-100"
     >
       <section
         style={layout.sessionExperienceStyle}
-        className="relative isolate flex min-h-screen min-w-0 flex-col overflow-hidden lg:h-screen lg:min-h-0"
+        className="relative isolate flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       >
         <SessionMediaBackground
           sessionId={sessionId}
           background={mediaBackground}
           revisionToken={mediaBackgroundRevision}
         />
-        <header className="relative z-20 flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-3 py-3 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90 sm:px-5">
+        <header className="relative z-20 flex min-h-[73px] shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-3 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90 sm:px-5">
           <div className="flex min-w-0 w-full items-center gap-3 sm:w-auto sm:flex-1">
             <Link
               href="/"
               aria-label="返回 RPG World Play 首页"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-black text-white shadow-lg shadow-violet-200 transition hover:scale-105 dark:shadow-violet-950/40"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-black text-white shadow-lg shadow-violet-200 transition hover:scale-105 dark:shadow-violet-950/40 sm:h-10 sm:w-10"
             >
               R
             </Link>
@@ -692,112 +692,116 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               </div>
             </div>
           </div>
-          <div className="flex w-full max-w-full items-center gap-2 overflow-x-auto pb-0.5 sm:w-auto">
-            <button
-              type="button"
-              onClick={() => {
-                layout.setSettingsOpen(false)
-                activatePanel('world')
-                setWorkspacePanel({ kind: 'world', tab: 'characters' })
-              }}
-              className={cn(
-                'flex h-10 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-black shadow-sm transition dark:bg-slate-900',
-                workspacePanel?.kind === 'world'
-                  ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/60 dark:bg-violet-500/15 dark:text-violet-200'
-                  : 'border-slate-200 text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:text-slate-300',
-              )}
-              aria-label="打开角色与状态面板"
-            >
-              <UsersRound size={17} />
-              <span className="hidden xl:inline">角色与状态</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                layout.setSettingsOpen(false)
-                activatePanel('plot')
-                setWorkspacePanel({ kind: 'plot' })
-              }}
-              className={cn(
-                'flex h-10 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-black shadow-sm transition dark:bg-slate-900',
-                workspacePanel?.kind === 'plot'
-                  ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/60 dark:bg-amber-500/15 dark:text-amber-200'
-                  : 'border-slate-200 text-slate-700 hover:border-amber-200 hover:bg-amber-50 hover:text-amber-800 dark:border-slate-700 dark:text-slate-300',
-              )}
-              aria-label="打开剧情故事面板"
-            >
-              <Route size={17} />
-              <span className="hidden xl:inline">剧情故事</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                layout.setSettingsOpen(false)
-                activatePanel('story')
-                setWorkspacePanel({ kind: 'story', tab: 'summaries' })
-              }}
-              className={cn(
-                'flex h-10 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-black shadow-sm transition dark:bg-slate-900',
-                workspacePanel?.kind === 'story'
-                  ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-500/15 dark:text-indigo-200'
-                  : 'border-slate-200 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:text-slate-300',
-              )}
-              aria-label="打开故事与记忆面板"
-            >
-              <BookOpenText size={17} />
-              <span className="hidden xl:inline">故事与记忆</span>
-            </button>
-            <ThemeSwitcher menuAlign="right" menuSide="bottom" triggerSize="compact" />
-            <NotificationCenter />
-            <button
-              type="button"
-              onClick={() => {
-                activatePanel('media')
-                setMediaGalleryOpen(true)
-              }}
-              className="flex h-10 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
-              aria-label="打开 Session 图像工作室"
-            >
-              <Images size={16} />
-              <span className="hidden sm:inline">图像</span>
-            </button>
-            <button
-              type="button"
-              onClick={stream.handleExitSession}
-              className="flex h-10 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
-              aria-label="退出当前会话"
-            >
-              <LogOut size={16} />
-              <span className="hidden sm:inline">退出</span>
-            </button>
-            <SessionSettingsMenu
-              open={layout.settingsOpen}
-              fontScale={layout.fontScale}
-              showThinking={layout.showThinking}
-              showTools={layout.showTools}
-              playerCharacter={data.playerCharacter}
-              onToggleOpen={() => layout.setSettingsOpen((current) => !current)}
-              onFontScaleChange={layout.setFontScale}
-              onResetFontScale={layout.resetFontScale}
-              onShowThinkingChange={layout.setShowThinking}
-              onShowToolsChange={layout.setShowTools}
-              onOpenRoleDialog={role.openRoleDialog}
-              onOpenRPModulesDialog={() => {
-                layout.setSettingsOpen(false)
-                setRPModulesDialogOpen(true)
-              }}
-              onOpenDreamMemory={() => {
-                layout.setSettingsOpen(false)
-                const returnTo = `/session/${encodeURIComponent(sessionId)}`
-                router.push(buildDreamPageHref(sessionId, returnTo))
-              }}
-              onDeleteSession={() => {
-                layout.setSettingsOpen(false)
-                deleteSessionMutation.reset()
-                setDeleteRedirecting(false)
-                setDeleteDialogOpen(true)
-              }}
-            />
+          <div className="flex w-full min-w-0 max-w-full items-center gap-2 sm:w-auto">
+            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-0.5 sm:flex-none">
+              <button
+                type="button"
+                onClick={() => {
+                  layout.setSettingsOpen(false)
+                  activatePanel('world')
+                  setWorkspacePanel({ kind: 'world', tab: 'characters' })
+                }}
+                className={cn(
+                  'flex h-11 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-black shadow-sm transition dark:bg-slate-900 sm:h-10',
+                  workspacePanel?.kind === 'world'
+                    ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/60 dark:bg-violet-500/15 dark:text-violet-200'
+                    : 'border-slate-200 text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:text-slate-300',
+                )}
+                aria-label="打开角色与状态面板"
+              >
+                <UsersRound size={17} />
+                <span className="hidden xl:inline">角色与状态</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  layout.setSettingsOpen(false)
+                  activatePanel('plot')
+                  setWorkspacePanel({ kind: 'plot' })
+                }}
+                className={cn(
+                  'flex h-11 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-black shadow-sm transition dark:bg-slate-900 sm:h-10',
+                  workspacePanel?.kind === 'plot'
+                    ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/60 dark:bg-amber-500/15 dark:text-amber-200'
+                    : 'border-slate-200 text-slate-700 hover:border-amber-200 hover:bg-amber-50 hover:text-amber-800 dark:border-slate-700 dark:text-slate-300',
+                )}
+                aria-label="打开剧情故事面板"
+              >
+                <Route size={17} />
+                <span className="hidden xl:inline">剧情故事</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  layout.setSettingsOpen(false)
+                  activatePanel('story')
+                  setWorkspacePanel({ kind: 'story', tab: 'summaries' })
+                }}
+                className={cn(
+                  'flex h-11 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-black shadow-sm transition dark:bg-slate-900 sm:h-10',
+                  workspacePanel?.kind === 'story'
+                    ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-500/15 dark:text-indigo-200'
+                    : 'border-slate-200 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:text-slate-300',
+                )}
+                aria-label="打开故事与记忆面板"
+              >
+                <BookOpenText size={17} />
+                <span className="hidden xl:inline">故事与记忆</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  activatePanel('media')
+                  setMediaGalleryOpen(true)
+                }}
+                className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 sm:h-10"
+                aria-label="打开 Session 图像工作室"
+              >
+                <Images size={16} />
+                <span className="hidden sm:inline">图像</span>
+              </button>
+              <button
+                type="button"
+                onClick={stream.handleExitSession}
+                className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 sm:h-10"
+                aria-label="退出当前会话"
+              >
+                <LogOut size={16} />
+                <span className="hidden sm:inline">退出</span>
+              </button>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <ThemeSwitcher menuAlign="right" menuSide="bottom" triggerSize="compact" />
+              <NotificationCenter />
+              <SessionSettingsMenu
+                open={layout.settingsOpen}
+                fontScale={layout.fontScale}
+                showThinking={layout.showThinking}
+                showTools={layout.showTools}
+                playerCharacter={data.playerCharacter}
+                onToggleOpen={() => layout.setSettingsOpen((current) => !current)}
+                onFontScaleChange={layout.setFontScale}
+                onResetFontScale={layout.resetFontScale}
+                onShowThinkingChange={layout.setShowThinking}
+                onShowToolsChange={layout.setShowTools}
+                onOpenRoleDialog={role.openRoleDialog}
+                onOpenRPModulesDialog={() => {
+                  layout.setSettingsOpen(false)
+                  setRPModulesDialogOpen(true)
+                }}
+                onOpenDreamMemory={() => {
+                  layout.setSettingsOpen(false)
+                  const returnTo = `/session/${encodeURIComponent(sessionId)}`
+                  router.push(buildDreamPageHref(sessionId, returnTo))
+                }}
+                onDeleteSession={() => {
+                  layout.setSettingsOpen(false)
+                  deleteSessionMutation.reset()
+                  setDeleteRedirecting(false)
+                  setDeleteDialogOpen(true)
+                }}
+              />
+            </div>
           </div>
         </header>
 

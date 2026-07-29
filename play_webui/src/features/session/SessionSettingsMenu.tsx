@@ -73,20 +73,20 @@ export function SessionSettingsMenu({
   onDeleteSession: () => void
 }) {
   return (
-    <div className="relative">
+    <div className="relative shrink-0">
       <button
         type="button"
         aria-expanded={open}
         aria-label="设置"
         title="设置"
         onClick={onToggleOpen}
-        className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
+        className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 sm:h-10 sm:w-10"
       >
         <Settings size={18} />
       </button>
 
       {open ? (
-        <section className="absolute right-0 top-full z-30 mt-2 max-h-[calc(100vh-6rem)] w-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-200/80 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40" aria-label="会话设置菜单">
+        <section className="absolute right-0 top-full z-30 mt-2 max-h-[calc(100dvh-6rem)] w-72 overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-200/80 [overflow-wrap:anywhere] dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40" aria-label="会话设置菜单">
           <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
             <strong className="block text-sm font-black text-slate-950 dark:text-slate-100">会话设置</strong>
             <span className="mt-1 block text-xs font-semibold text-slate-400 dark:text-slate-300">布局与输入偏好</span>

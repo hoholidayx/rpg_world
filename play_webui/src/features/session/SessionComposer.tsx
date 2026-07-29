@@ -1,4 +1,4 @@
-import {
+import React, {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -50,6 +50,7 @@ function PopupSingleSelect<TValue extends string | number | null>({
   icon,
   disabled = false,
   statusMessage,
+  className,
 }: {
   label: string
   value: TValue
@@ -60,6 +61,7 @@ function PopupSingleSelect<TValue extends string | number | null>({
   icon?: ReactNode
   disabled?: boolean
   statusMessage?: string | null
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -115,7 +117,7 @@ function PopupSingleSelect<TValue extends string | number | null>({
   }
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={cn('relative min-w-0', className)}>
       <button
         ref={triggerRef}
         type="button"
@@ -125,7 +127,7 @@ function PopupSingleSelect<TValue extends string | number | null>({
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          'inline-flex h-9 min-w-32 max-w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 text-left text-xs font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:shadow-black/30 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-100',
+          'inline-flex h-11 w-full min-w-0 max-w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-xs font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:shadow-black/30 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-100 sm:h-9 sm:min-w-32 sm:gap-3',
           open ? 'border-violet-200 bg-violet-50 text-violet-700 ring-4 ring-violet-100 dark:border-violet-500/60 dark:bg-violet-500/10 dark:text-violet-100 dark:ring-violet-500/20' : '',
           disabled ? 'cursor-not-allowed opacity-60' : '',
         )}
@@ -168,7 +170,7 @@ function PopupSingleSelect<TValue extends string | number | null>({
                 }}
                 onKeyDown={handleOptionKeyDown}
                 className={cn(
-                  'grid min-h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-md px-2 py-2 text-left text-xs font-black transition',
+                  'grid min-h-11 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-md px-2 py-2 text-left text-xs font-black transition sm:min-h-9',
                   active
                     ? 'bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-100'
                     : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50',
@@ -421,9 +423,9 @@ export function SessionComposer({
   }, [])
 
   return (
-    <section className="border-t border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-950/95 sm:px-6">
+    <section className="shrink-0 border-t border-slate-200 bg-white px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 dark:border-slate-800 dark:bg-slate-950/95 sm:px-6 sm:py-4">
       <div className="mx-auto max-w-6xl overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-2 dark:border-slate-800">
+        <div className="flex flex-nowrap items-center justify-between gap-3 border-b border-slate-200 px-3 py-2 dark:border-slate-800 sm:px-4">
           {modeOptions.length > 0 ? (
             <PopupSingleSelect
               label="模式"
@@ -432,6 +434,7 @@ export function SessionComposer({
               onChange={onModeChange}
               side="bottom"
               align="left"
+              className="min-w-32"
             />
           ) : <span />}
           <CommandPaletteDialog
@@ -441,14 +444,14 @@ export function SessionComposer({
           />
         </div>
 
-        <div className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_128px]">
+        <div className="grid grid-cols-[minmax(0,1fr)_48px] items-end gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_128px] sm:gap-3 sm:px-4 sm:py-3">
           <textarea
             ref={textareaRef}
             value={text}
             onChange={(event) => onTextChange(event.target.value)}
             onKeyDown={handleKeyDown}
             disabled={disabled}
-            className="min-h-24 resize-none border-0 bg-transparent pt-2 text-[length:var(--session-composer-font-size)] leading-[var(--session-composer-line-height)] text-slate-900 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:text-slate-500"
+            className="min-h-20 resize-none border-0 bg-transparent pt-2 text-[length:var(--session-composer-font-size)] leading-[var(--session-composer-line-height)] text-slate-900 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:text-slate-500 sm:min-h-24"
             placeholder={
               disabled
                 ? '请先选择你要扮演的角色'
@@ -457,12 +460,12 @@ export function SessionComposer({
                   : '输入你的行动、台词或 GM 指令...'
             }
           />
-          <div className="relative my-1 min-h-20 sm:min-h-24">
+          <div className="relative h-12 w-12 self-end sm:my-1 sm:h-auto sm:min-h-24 sm:w-auto">
             {quickReplyOpen ? (
               <div
                 role="listbox"
                 aria-label="快速回复"
-                className="absolute bottom-[calc(100%+10px)] right-0 z-50 w-72 overflow-hidden rounded-lg border border-violet-200 bg-white p-1 shadow-2xl shadow-violet-950/20 dark:border-violet-500/40 dark:bg-slate-950"
+                className="absolute bottom-[calc(100%+10px)] right-0 z-50 w-[min(18rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-violet-200 bg-white p-1 shadow-2xl shadow-violet-950/20 dark:border-violet-500/40 dark:bg-slate-950"
               >
                 <p className="px-3 py-2 text-[11px] font-black uppercase tracking-wide text-slate-400">滑动选择快速回复</p>
                 {quickReplies.map((reply) => (
@@ -506,8 +509,9 @@ export function SessionComposer({
                 else onSend()
               }}
               disabled={actionDisabled}
+              aria-label={actionStopping ? '停止中' : sending ? '停止' : '发送'}
               className={cn(
-                'flex h-full min-h-20 w-full items-center justify-center gap-2 rounded-lg px-5 text-base font-black text-white shadow-lg transition sm:min-h-24',
+                'flex h-12 w-12 items-center justify-center gap-2 rounded-lg text-base font-black text-white shadow-lg transition sm:h-full sm:min-h-24 sm:w-full sm:px-5',
                 actionDisabled
                   ? 'cursor-not-allowed bg-slate-300 shadow-none dark:bg-slate-700'
                   : sending
@@ -516,13 +520,15 @@ export function SessionComposer({
               )}
             >
               {actionSending ? <Square size={16} fill="currentColor" /> : <Plane size={17} fill="currentColor" />}
-              {actionStopping ? '停止中' : sending ? '停止' : '发送'}
+              <span className="hidden sm:inline">
+                {actionStopping ? '停止中' : sending ? '停止' : '发送'}
+              </span>
             </button>
           </div>
         </div>
 
         {contextInputBlocked ? (
-          <div className="mx-4 mb-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-5 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+          <div className="mx-3 mb-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-5 text-rose-700 [overflow-wrap:anywhere] dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 sm:mx-4">
             <AlertTriangle size={15} className="mt-0.5 shrink-0" />
             <span>
               下一轮主 Agent Context 已达到 {Math.round(contextInputBlockThresholdRatio * 100)}% 输入阈值。
@@ -532,7 +538,7 @@ export function SessionComposer({
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-b-lg bg-slate-50 px-4 py-2 dark:bg-slate-950/60">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_44px] items-center gap-2 rounded-b-lg bg-slate-50 px-3 py-2 dark:bg-slate-950/60 sm:flex sm:flex-wrap sm:justify-between sm:gap-3 sm:px-4">
           <PopupSingleSelect
             label="风格"
             value={narrativeStyleId}
@@ -542,28 +548,28 @@ export function SessionComposer({
             statusMessage={mode === 'ooc' ? 'OOC 以场外讨论指令为准；当前叙事风格选择会保留，切换模式后继续使用。' : null}
             side="top"
             align="left"
+            className="min-w-0"
           />
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
-            <p className="text-xs font-semibold text-slate-400 dark:text-slate-300">Enter 发送 / Shift+Enter 换行</p>
-            <PopupSingleSelect
-              label="LLM"
-              value={mainLLMValue}
-              options={mainLLMOptions}
-              onChange={(value) => onMainLLMChange(value === INHERIT_MAIN_LLM_OPTION ? null : value)}
-              side="top"
-              align="right"
-              icon={<Cpu size={14} />}
-              disabled={mainLLMLoading || mainLLMUpdating || !mainLLMSelection || !mainLLMCatalog}
-              statusMessage={mainLLMUpdating ? '正在切换；当前生成不会被取消。' : mainLLMStatus}
-            />
-            <SessionContextUsageIndicator
-              contextPreviewUsage={contextPreviewUsage}
-              lastTurnUsage={lastTurnUsage}
-              thresholdRatio={contextInputBlockThresholdRatio}
-              previewModel={mainLLMSelection?.effective.model}
-              loading={contextUsageLoading}
-            />
-          </div>
+          <p className="ml-auto hidden text-xs font-semibold text-slate-400 dark:text-slate-300 sm:block">Enter 发送 / Shift+Enter 换行</p>
+          <PopupSingleSelect
+            label="LLM"
+            value={mainLLMValue}
+            options={mainLLMOptions}
+            onChange={(value) => onMainLLMChange(value === INHERIT_MAIN_LLM_OPTION ? null : value)}
+            side="top"
+            align="right"
+            icon={<Cpu size={14} />}
+            disabled={mainLLMLoading || mainLLMUpdating || !mainLLMSelection || !mainLLMCatalog}
+            statusMessage={mainLLMUpdating ? '正在切换；当前生成不会被取消。' : mainLLMStatus}
+            className="min-w-0"
+          />
+          <SessionContextUsageIndicator
+            contextPreviewUsage={contextPreviewUsage}
+            lastTurnUsage={lastTurnUsage}
+            thresholdRatio={contextInputBlockThresholdRatio}
+            previewModel={mainLLMSelection?.effective.model}
+            loading={contextUsageLoading}
+          />
         </div>
       </div>
     </section>

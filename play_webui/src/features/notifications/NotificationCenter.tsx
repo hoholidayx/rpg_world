@@ -98,7 +98,7 @@ export function NotificationCenter() {
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((isOpen) => !isOpen)}
-        className={`relative flex h-10 w-10 items-center justify-center rounded-full border text-slate-500 shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-200 dark:focus-visible:ring-violet-500/30 ${
+        className={`relative flex h-11 w-11 items-center justify-center rounded-full border text-slate-500 shadow-sm transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-200 dark:focus-visible:ring-violet-500/30 sm:h-10 sm:w-10 ${
           open
             ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/60 dark:bg-violet-500/15 dark:text-violet-200'
             : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200'
@@ -122,7 +122,7 @@ export function NotificationCenter() {
           id={panelId}
           role="dialog"
           aria-label="通知中心"
-          className="absolute right-[-3.5rem] top-full z-50 mt-3 flex max-h-[calc(100vh-96px)] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-2xl shadow-slate-900/15 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40 sm:right-0 sm:max-h-[520px] sm:w-[380px]"
+          className="absolute right-[-3.5rem] top-full z-50 mt-3 flex max-h-[calc(100dvh-96px)] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-2xl shadow-slate-900/15 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40 sm:right-0 sm:max-h-[520px] sm:w-[380px]"
         >
           <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3.5 dark:border-slate-800">
             <div>
