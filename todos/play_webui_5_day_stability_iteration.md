@@ -2,8 +2,7 @@
 
 更新时间：2026-07-29
 
-状态：Day 1 已完成；Day 2 实现、自动化与针对性真实 smoke 已完成，完整 20-turn
-人工脚本待继续
+状态：Day 1、Day 2 已完成；Day 3 待执行
 
 执行投入：单一 Codex Sol Max 主执行通道
 
@@ -57,7 +56,8 @@
 
 - 畸形、未闭合或混合 RP 标签继续原文可见；SSE 解析失败继续按原始帧降级，
   不以收紧 Schema、DONE 或事件顺序作为稳定性手段。
-- 已经展示给玩家的消息，在权威历史确实覆盖前不得清除。
+- 已经展示给玩家的持久化业务对话消息和当前流正文，在权威历史确实覆盖前不得
+  清除；斜杠命令反馈不进入历史持久化，允许在刷新或权威历史收敛后消失。
 - 优化不得改变既有业务逻辑，只修复明确逻辑错误和必要的架构竞态。
 - 只有服务端确认 `cancelled` 时才展示 stopped。
 - ERROR、缺失 DONE、网络中断或取消不得伪装为成功提交。
@@ -107,11 +107,12 @@
 - [x] 每个活动请求的所有权最终只收敛到一个明确状态，旧请求不能结算新请求。
 - [x] ERROR、断流和取消不产生成功 UI 或虚构 committed turn。
 - [x] composer 在所有失败路径上都能恢复可用。
-- [ ] 人工连续执行 20 个 turn，包含停止、retry、edit 和命令，不出现重复消息、
+- [x] 人工连续执行 20 个 turn，包含停止、retry、edit 和命令，不出现重复消息、
   消息丢失或永久锁定。
 
-本日已完成针对性真实 smoke：普通提交、停止、retry、edit、命令及命令后的普通
-turn 均通过；由于未完整执行连续 20-turn 脚本，上述最后一项保持未勾选。
+本日已完成针对性真实 smoke 和连续 20-turn 人工脚本：普通提交、停止、retry、
+edit、命令及命令后的普通 turn 均通过。斜杠命令仅为当前页面临时反馈，不进入
+历史持久化；其在刷新或权威历史收敛后消失符合业务语义，不计为消息丢失。
 
 ### Day 3：故障隔离与恢复体验
 
@@ -246,8 +247,7 @@ turn 均通过；由于未完整执行连续 20-turn 脚本，上述最后一项
 ## 9. 当前进度
 
 - [x] Day 1：可靠基线与自动门禁
-- [ ] Day 2：核心聊天状态机（实现、自动化与针对性 smoke 已完成；20-turn
-  完整人工脚本待继续）
+- [x] Day 2：核心聊天状态机
 - [ ] Day 3：故障隔离与恢复体验
 - [ ] Day 4：桌面体验、手机可达性与性能
 - [ ] Day 5：回归与内部灰度
@@ -297,6 +297,7 @@ turn 均通过；由于未完整执行连续 20-turn 脚本，上述最后一项
   - `5b83fdd test: lock play webui fallback compatibility`
   - `9eaacf3 fix: serialize and isolate session stream lifecycle`
   - `0fb00a3 test: cover session stream ownership and recovery`
+  - `b7b35d2 docs: record play webui day 2 progress`
 - 完成项：
   - 为发送、retry、edit 和 timeline mutation 增加同步互斥，阻止异步 preflight
     期间的重复提交与删除竞态；
@@ -325,13 +326,24 @@ turn 均通过；由于未完整执行连续 20-turn 脚本，上述最后一项
   - `/roll` 命令及其后的普通 Provider turn 成功；
   - 最终页面中编辑后消息与最后普通消息各一份，无残留 streaming 或 composer
     锁死。
+- 连续 20-turn 人工验收：
+  - 连续 20 次操作覆盖 6 次成功 Provider 结算（其中包含 retry、edit 各 1 次
+    后的成功结算）、1 次服务端确认停止和 13 次 `/roll` 命令；
+  - 每次操作结算时对应消息仅一份，composer 均恢复可用；最终无残留 streaming
+    或停止按钮；
+  - retry 未产生重复消息；edit 后旧正文按既有编辑语义被替换，新正文仅一份；
+  - 命令反馈按用户确认的业务语义不进入历史持久化，允许在刷新或后续权威历史
+    收敛后消失；“不丢消息”约束只覆盖应持久化的业务对话消息和当前流正文。
 - 验收环境：
   - 原用户数据库因 migration checksum mismatch 按硬切 Schema 规则拒绝启动，
     未修改、删除或迁移；
   - 改用 `/tmp/rpg-world-day2-qa.UtsXEK` 临时数据库和 workspace 完成真实验收，
     服务停止后已删除该临时目录。
+  - 连续 20-turn 使用 `/tmp/rpg-world-day2-20turn.9KBo2Y` 隔离数据库和
+    workspace；未触碰原用户数据库，验收服务停止后删除该临时目录。
 - 偏差与遗留：
-  - 尚未完整执行连续 20-turn 人工脚本，Day 2 总状态保持未完成；
+  - 验收中曾将命令反馈随权威历史收敛后消失误判为消息丢失；用户确认命令不应
+    持久化后已撤销候选改动，最终未改变该业务逻辑；
   - Session 路由由 Day 1 的 `250 kB` 变为 `251 kB`，留到 Day 4 按需加载与
     首屏体积任务处理；
   - 未修改或提交用户已有的 `todos/architecture_hardening/`。
@@ -375,5 +387,4 @@ turn 均通过；由于未完整执行连续 20-turn 脚本，上述最后一项
 - 非阻断：Next 15.5.22 的上游依赖仍触发 3 个 production audit high，暂无
   可接受的非破坏性自动修复。
 - 非阻断：Play WebUI workflow 尚未推送，远端首次运行结果待回填。
-- 非阻断：Day 2 的连续 20-turn 完整人工脚本尚未执行，进入 Day 3 前优先补齐。
 - 非阻断：Session 路由当前为 `251 kB First Load JS`，按计划留到 Day 4 处理。
