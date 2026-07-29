@@ -15,16 +15,24 @@ import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
 import type { SessionOpeningOption, SessionPlayerCharacter } from '@/types/session'
 import { SessionComposer } from './SessionComposer'
+import {
+  resolveSessionCoreRecovery,
+  SessionCoreRecovery,
+} from './SessionCoreRecovery'
 import { SessionDerivationDialog } from './SessionDerivationDialog'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
 import { SessionMediaBackground } from './SessionMediaBackground'
-import { SessionMediaGallery } from './SessionMediaGallery'
 import { SessionRPModulesDialog } from './SessionRPModulesDialog'
-import { SessionPlotStoryPanel } from './SessionPlotStoryPanel'
 import { SessionStatusHud } from './SessionStatusHud'
-import { SessionStoryPanel, type SessionStoryTab } from './SessionStoryPanel'
+import type { SessionStoryTab } from './SessionStoryPanel'
 import { SessionTimeline } from './SessionTimeline'
-import { SessionWorldPanel, type SessionWorldTab } from './SessionWorldPanel'
+import type { SessionWorldTab } from './SessionWorldPanel'
+import {
+  LazySessionMediaPanel,
+  LazySessionPlotPanel,
+  LazySessionStoryPanel,
+  LazySessionWorldPanel,
+} from './SessionLazyPanels'
 import { useSessionRoomData } from './hooks/useSessionRoomData'
 import { useSessionDerivation } from './hooks/useSessionDerivation'
 import { useSessionRoomLayout } from './hooks/useSessionRoomLayout'
@@ -54,6 +62,8 @@ type SessionWorkspaceState =
   | { kind: 'plot' }
   | { kind: 'story'; tab: SessionStoryTab }
   | null
+
+type SessionOptionalPanel = 'world' | 'plot' | 'story' | 'media'
 
 function sortedStatusTables<T extends { sortOrder: number; id: number }>(tables: T[]) {
   return [...tables].sort((first, second) => (
@@ -85,9 +95,11 @@ function PlayerCharacterDialog({
   selectedCharacterId,
   pending,
   error,
+  loadError,
   onSelect,
   onSubmit,
   onClose,
+  onRetryLoad,
 }: {
   open: boolean
   required: boolean
@@ -97,9 +109,11 @@ function PlayerCharacterDialog({
   selectedCharacterId: number | null
   pending: boolean
   error: string | null
+  loadError: string | null
   onSelect: (characterId: number) => void
   onSubmit: () => void
   onClose: () => void
+  onRetryLoad: () => void
 }) {
   if (!open) return null
 
@@ -142,7 +156,24 @@ function PlayerCharacterDialog({
             </p>
           ) : null}
 
-          {loading ? (
+          {loadError ? (
+            <section
+              role="alert"
+              className="rounded-lg border border-rose-200 bg-rose-50 px-5 py-10 text-center dark:border-rose-500/30 dark:bg-rose-500/10"
+            >
+              <h3 className="text-lg font-black text-rose-800 dark:text-rose-100">角色列表加载失败</h3>
+              <p className="mt-2 break-words text-sm font-semibold leading-6 text-rose-700 dark:text-rose-200">
+                {loadError}
+              </p>
+              <button
+                type="button"
+                onClick={onRetryLoad}
+                className="mt-5 h-10 rounded-lg bg-rose-600 px-4 text-sm font-black text-white transition hover:bg-rose-700"
+              >
+                重试加载角色
+              </button>
+            </section>
+          ) : loading ? (
             <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
               <h3 className="text-lg font-black text-slate-950 dark:text-slate-100">正在加载可扮演角色</h3>
               <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
@@ -355,6 +386,9 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [rpModulesDialogOpen, setRPModulesDialogOpen] = useState(false)
   const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
   const [workspacePanel, setWorkspacePanel] = useState<SessionWorkspaceState>(null)
+  const [activatedPanels, setActivatedPanels] = useState<Set<SessionOptionalPanel>>(
+    () => new Set(),
+  )
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteRedirecting, setDeleteRedirecting] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -364,6 +398,15 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setToastMessage(message)
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     toastTimerRef.current = setTimeout(() => setToastMessage(''), 2200)
+  }, [])
+
+  const activatePanel = useCallback((panel: SessionOptionalPanel) => {
+    setActivatedPanels((current) => {
+      if (current.has(panel)) return current
+      const next = new Set(current)
+      next.add(panel)
+      return next
+    })
   }, [])
 
   useEffect(() => {
@@ -583,6 +626,38 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     action?.()
   }
 
+  const coreRecoveryState = resolveSessionCoreRecovery({
+    session: {
+      available: Boolean(data.session),
+      isError: data.sessionQuery.isError,
+      error: data.sessionQuery.error,
+    },
+    history: {
+      available: Boolean(data.historyPage),
+      isError: data.historyQuery.isError,
+      error: data.historyQuery.error,
+    },
+  })
+
+  if (coreRecoveryState.kind !== 'ready') {
+    const retrying = coreRecoveryState.source === 'session'
+      ? data.sessionQuery.isFetching
+      : data.historyQuery.isFetching
+    return (
+      <SessionCoreRecovery
+        state={coreRecoveryState}
+        retrying={retrying}
+        onRetry={() => {
+          if (coreRecoveryState.source === 'session') {
+            void data.sessionQuery.refetch()
+            return
+          }
+          void data.historyQuery.refetch()
+        }}
+      />
+    )
+  }
+
   return (
     <main
       data-workspace={data.session?.workspace ?? ''}
@@ -622,6 +697,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               type="button"
               onClick={() => {
                 layout.setSettingsOpen(false)
+                activatePanel('world')
                 setWorkspacePanel({ kind: 'world', tab: 'characters' })
               }}
               className={cn(
@@ -639,6 +715,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               type="button"
               onClick={() => {
                 layout.setSettingsOpen(false)
+                activatePanel('plot')
                 setWorkspacePanel({ kind: 'plot' })
               }}
               className={cn(
@@ -656,6 +733,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               type="button"
               onClick={() => {
                 layout.setSettingsOpen(false)
+                activatePanel('story')
                 setWorkspacePanel({ kind: 'story', tab: 'summaries' })
               }}
               className={cn(
@@ -673,7 +751,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             <NotificationCenter />
             <button
               type="button"
-              onClick={() => setMediaGalleryOpen(true)}
+              onClick={() => {
+                activatePanel('media')
+                setMediaGalleryOpen(true)
+              }}
               className="flex h-10 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
               aria-label="打开 Session 图像工作室"
             >
@@ -724,7 +805,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           sceneTables={data.sceneTablesQuery.data ?? []}
           pinnedTables={pinnedStatus.pinnedTables}
           panelOpen={workspacePanel !== null}
-          onOpenStatusPanel={(tableId) => setWorkspacePanel({ kind: 'world', tab: 'status', focusTableId: tableId })}
+          onOpenStatusPanel={(tableId) => {
+            activatePanel('world')
+            setWorkspacePanel({ kind: 'world', tab: 'status', focusTableId: tableId })
+          }}
         />
 
         <SessionTimeline
@@ -808,7 +892,9 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         </div>
       </section>
 
-      <SessionWorldPanel
+      <LazySessionWorldPanel
+        activated={activatedPanels.has('world')}
+        panelSessionId={sessionId}
         open={workspacePanel?.kind === 'world'}
         activeTab={workspacePanel?.kind === 'world' ? workspacePanel.tab : 'characters'}
         focusTableId={workspacePanel?.kind === 'world' ? workspacePanel.focusTableId : undefined}
@@ -825,7 +911,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         onTabChange={(tab, focusTableId) => setWorkspacePanel({ kind: 'world', tab, focusTableId })}
         onClose={() => setWorkspacePanel(null)}
       />
-      <SessionStoryPanel
+      <LazySessionStoryPanel
+        activated={activatedPanels.has('story')}
         sessionId={sessionId}
         open={workspacePanel?.kind === 'story'}
         activeTab={workspacePanel?.kind === 'story' ? workspacePanel.tab : 'summaries'}
@@ -837,7 +924,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           router.push(buildDreamPageHref(sessionId, returnTo))
         }}
       />
-      <SessionPlotStoryPanel
+      <LazySessionPlotPanel
+        activated={activatedPanels.has('plot')}
         sessionId={sessionId}
         open={workspacePanel?.kind === 'plot'}
         onClose={() => setWorkspacePanel(null)}
@@ -905,9 +993,19 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         selectedCharacterId={role.selectedRoleCharacterId}
         pending={role.bindingRole}
         error={role.roleBindError}
+        loadError={data.characters.length
+          ? null
+          : data.charactersQuery.error instanceof Error
+            ? data.charactersQuery.error.message
+            : data.charactersQuery.isError
+              ? '角色列表暂时无法读取。'
+              : null}
         onSelect={role.setSelectedRoleCharacterId}
         onSubmit={role.submitRoleDialog}
         onClose={role.closeRoleDialog}
+        onRetryLoad={() => {
+          void data.charactersQuery.refetch()
+        }}
       />
       <SessionOpeningDialog
         open={role.openingDialogOpen}
@@ -926,7 +1024,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         onClose={() => setRPModulesDialogOpen(false)}
         showToast={showToast}
       />
-      <SessionMediaGallery
+      <LazySessionMediaPanel
+        activated={activatedPanels.has('media')}
         open={mediaGalleryOpen}
         sessionId={sessionId}
         media={media}

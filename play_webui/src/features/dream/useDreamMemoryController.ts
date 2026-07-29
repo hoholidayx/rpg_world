@@ -22,6 +22,7 @@ import type {
   DreamProposalItemPatch,
   DreamScope,
 } from '@/types/dream'
+import { firstDreamRefreshError } from './dreamRefreshResults'
 
 function proposalKey(sessionId: string, proposalId: string) {
   return ['play-session-dream-proposal', sessionId, proposalId] as const
@@ -369,9 +370,18 @@ export function useDreamMemoryController(sessionId: string) {
     if (evidenceHistoryQuery.data !== undefined) {
       tasks.push(evidenceHistoryQuery.refetch())
     }
-    await Promise.all(tasks)
-    if (refreshGenerationRef.current === refreshGeneration) {
+    try {
+      const results = await Promise.all(tasks)
+      if (refreshGenerationRef.current !== refreshGeneration) return
+      const refreshError = firstDreamRefreshError(results)
+      if (refreshError) {
+        setOperationError(operationErrorMessage(refreshError))
+        return
+      }
       setNotice('状态已刷新。')
+    } catch (error) {
+      if (refreshGenerationRef.current !== refreshGeneration) return
+      setOperationError(operationErrorMessage(error))
     }
   }, [evidenceHistoryQuery, memoriesQuery, proposalId, proposalQuery, proposalsQuery])
 

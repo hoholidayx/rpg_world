@@ -33,6 +33,28 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误'
 }
 
+function QueryRetryButton({
+  loading,
+  label = '重试',
+  onClick,
+}: {
+  loading: boolean
+  label?: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={loading}
+      onClick={onClick}
+      className="inline-flex h-9 items-center gap-2 rounded-lg border border-current/20 px-3 text-xs font-black disabled:cursor-wait disabled:opacity-60"
+    >
+      <RefreshCcw size={13} className={loading ? 'animate-spin' : ''} />
+      {label}
+    </button>
+  )
+}
+
 function statusLabel(status: MediaJob['status']) {
   return {
     queued: '排队中',
@@ -290,9 +312,26 @@ export function SessionMediaGallery({
             </div>
 
             {media.providersQuery.isError || media.sourceTurnsQuery.isError ? (
-              <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs font-bold leading-5 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
-                媒体服务暂不可用：{errorMessage(media.providersQuery.error ?? media.sourceTurnsQuery.error)}。聊天与会话功能不受影响。
-              </p>
+              <div
+                role="alert"
+                className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs font-bold leading-5 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200"
+              >
+                <p>
+                  媒体服务暂不可用：{errorMessage(media.providersQuery.error ?? media.sourceTurnsQuery.error)}。聊天与会话功能不受影响。
+                </p>
+                <div className="mt-3">
+                  <QueryRetryButton
+                    loading={media.providersQuery.isFetching || media.sourceTurnsQuery.isFetching}
+                    label="重试媒体依赖"
+                    onClick={() => {
+                      void Promise.all([
+                        media.providersQuery.refetch(),
+                        media.sourceTurnsQuery.refetch(),
+                      ])
+                    }}
+                  />
+                </div>
+              </div>
             ) : null}
 
             <section className="mt-5">
@@ -351,12 +390,39 @@ export function SessionMediaGallery({
           </aside>
 
           <section className="min-h-0 overflow-y-auto px-5 py-5 sm:px-6">
+            {media.backgroundQuery.isError ? (
+              <div
+                role="alert"
+                className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200"
+              >
+                <span>当前背景状态加载失败：{errorMessage(media.backgroundQuery.error)}</span>
+                <QueryRetryButton
+                  loading={media.backgroundQuery.isFetching}
+                  onClick={() => {
+                    void media.backgroundQuery.refetch()
+                  }}
+                />
+              </div>
+            ) : null}
             <section className="mb-6 border-b border-slate-200 pb-6 dark:border-slate-800">
               <div>
                 <h3 className="flex items-center gap-2 text-base font-black text-slate-950 dark:text-slate-100"><Wallpaper size={18} />Story 背景库</h3>
                 <p className="mt-1 text-xs font-semibold text-slate-400">展示当前 Story 的会话生成与离线导入素材；Workspace fallback 仅供自动匹配 Agent 使用。</p>
               </div>
-              {media.storyLibraryQuery.isError ? <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">Story 背景加载失败：{errorMessage(media.storyLibraryQuery.error)}</p> : null}
+              {media.storyLibraryQuery.isError ? (
+                <div
+                  role="alert"
+                  className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200"
+                >
+                  <span>Story 背景加载失败：{errorMessage(media.storyLibraryQuery.error)}</span>
+                  <QueryRetryButton
+                    loading={media.storyLibraryQuery.isFetching}
+                    onClick={() => {
+                      void media.storyLibraryQuery.refetch()
+                    }}
+                  />
+                </div>
+              ) : null}
               {media.storyLibraryQuery.isLoading ? <div className="py-8 text-center text-xs font-bold text-slate-400"><Loader2 size={17} className="mx-auto mb-2 animate-spin" />正在加载 Story 背景</div> : null}
               {media.storyLibraryQuery.data?.items.length ? (
                 <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -406,7 +472,18 @@ export function SessionMediaGallery({
             ) : null}
 
             {media.galleryQuery.isError ? (
-              <p className="mt-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-4 text-sm font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">画廊加载失败：{errorMessage(media.galleryQuery.error)}</p>
+              <div
+                role="alert"
+                className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-4 text-sm font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200"
+              >
+                <span>画廊加载失败：{errorMessage(media.galleryQuery.error)}</span>
+                <QueryRetryButton
+                  loading={media.galleryQuery.isFetching}
+                  onClick={() => {
+                    void media.galleryQuery.refetch()
+                  }}
+                />
+              </div>
             ) : media.galleryQuery.isLoading ? (
               <div className="py-16 text-center text-sm font-bold text-slate-400"><Loader2 size={20} className="mx-auto mb-3 animate-spin" />正在加载 Session Gallery</div>
             ) : gallery?.items.length ? (

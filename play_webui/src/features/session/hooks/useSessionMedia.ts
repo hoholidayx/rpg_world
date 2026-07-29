@@ -101,6 +101,9 @@ export function useSessionMedia({
 
   const refreshGallery = () => queryClient.invalidateQueries({ queryKey: galleryKey })
   const refreshBackground = () => queryClient.invalidateQueries({ queryKey: backgroundKey })
+  const showMutationError = (label: string, error: unknown) => {
+    showToast(`${label}：${error instanceof Error ? error.message : '未知错误'}`)
+  }
 
   const requestBackgroundEvaluation = useCallback((observedTurnId: number, force = false) => {
     if (
@@ -157,6 +160,7 @@ export function useSessionMedia({
     mutationFn: (range: { startTurnId: number; endTurnId: number }) => (
       createMediaBrief(sessionId, range)
     ),
+    onError: (error) => showMutationError('生成简报失败', error),
   })
   const createJobMutation = useMutation({
     mutationFn: (input: Parameters<typeof createMediaJob>[1]) => createMediaJob(sessionId, input),
@@ -164,6 +168,7 @@ export function useSessionMedia({
       void refreshGallery()
       showToast('生图任务已加入队列')
     },
+    onError: (error) => showMutationError('提交生图任务失败', error),
   })
   const cancelJobMutation = useMutation({
     mutationFn: (jobId: string) => cancelMediaJob(sessionId, jobId),
@@ -171,6 +176,7 @@ export function useSessionMedia({
       void refreshGallery()
       showToast('已请求取消生图任务')
     },
+    onError: (error) => showMutationError('取消生图任务失败', error),
   })
   const retryJobMutation = useMutation({
     mutationFn: (jobId: string) => retryMediaJob(sessionId, jobId),
@@ -179,7 +185,7 @@ export function useSessionMedia({
       showToast('已创建新的直接重抽任务')
     },
     onError: (error) => {
-      showToast(`重抽失败：${error instanceof Error ? error.message : '未知错误'}`)
+      showMutationError('重抽失败', error)
     },
   })
   const editRetryJobMutation = useMutation({
@@ -191,7 +197,7 @@ export function useSessionMedia({
       showToast('已创建编辑后的重抽任务')
     },
     onError: (error) => {
-      showToast(`编辑重抽失败：${error instanceof Error ? error.message : '未知错误'}`)
+      showMutationError('编辑重抽失败', error)
     },
   })
   const setBackgroundMutation = useMutation({
@@ -200,6 +206,7 @@ export function useSessionMedia({
       void refreshBackground()
       showToast('会话背景已更新')
     },
+    onError: (error) => showMutationError('设置会话背景失败', error),
   })
   const clearBackgroundMutation = useMutation({
     mutationFn: () => clearMediaBackground(sessionId),
@@ -207,6 +214,7 @@ export function useSessionMedia({
       void refreshBackground()
       showToast('会话背景已清除')
     },
+    onError: (error) => showMutationError('清除会话背景失败', error),
   })
   const deleteAssetMutation = useMutation({
     mutationFn: (assetId: string) => deleteMediaAsset(sessionId, assetId),
@@ -215,6 +223,7 @@ export function useSessionMedia({
       void refreshBackground()
       showToast('图片资产已删除')
     },
+    onError: (error) => showMutationError('删除图片资产失败', error),
   })
 
   return {
