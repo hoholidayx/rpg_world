@@ -264,6 +264,7 @@ export function SessionComposer({
   const activePointerIdRef = useRef<number | null>(null)
   const longPressTriggeredRef = useRef(false)
   const suppressClickRef = useRef(false)
+  const restoreActionFocusAfterStopRef = useRef(false)
   const lastPointerPositionRef = useRef({ x: 0, y: 0 })
   const [quickReplyOpen, setQuickReplyOpen] = useState(false)
   const [highlightedReplyId, setHighlightedReplyId] = useState<number | null>(null)
@@ -422,6 +423,23 @@ export function SessionComposer({
     }
   }, [])
 
+  useEffect(() => {
+    if (stopping || !restoreActionFocusAfterStopRef.current) return
+    restoreActionFocusAfterStopRef.current = false
+    requestAnimationFrame(() => {
+      const button = sendButtonRef.current
+      const active = document.activeElement
+      if (
+        !button
+        || button.disabled
+        || (active !== document.body && active !== button)
+      ) {
+        return
+      }
+      button.focus({ preventScroll: true })
+    })
+  }, [sending, stopping])
+
   return (
     <section className="shrink-0 border-t border-slate-200 bg-white px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 dark:border-slate-800 dark:bg-slate-950/95 sm:px-6 sm:py-4">
       <div className="mx-auto max-w-6xl overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
@@ -505,8 +523,12 @@ export function SessionComposer({
                   event.preventDefault()
                   return
                 }
-                if (sending) onStop()
-                else onSend()
+                if (sending) {
+                  restoreActionFocusAfterStopRef.current = true
+                  onStop()
+                } else {
+                  onSend()
+                }
               }}
               disabled={actionDisabled}
               aria-label={actionStopping ? '停止中' : sending ? '停止' : '发送'}

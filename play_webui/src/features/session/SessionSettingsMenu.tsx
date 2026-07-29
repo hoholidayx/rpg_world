@@ -1,5 +1,8 @@
-import type { ReactNode } from 'react'
-import { Boxes, Brain, CaseSensitive, CloudMoon, Settings, Trash2, UserRound, Wrench } from 'lucide-react'
+'use client'
+
+import React, { type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { Boxes, Brain, CaseSensitive, CloudMoon, Settings, Trash2, UserRound, Wrench, X } from 'lucide-react'
+import { ModalFocusScope, ModalPortal } from '@/components/common/ModalFocusScope'
 import { cn } from '@/lib/utils/cn'
 import {
   SESSION_FONT_SCALE_DEFAULT,
@@ -72,26 +75,66 @@ export function SessionSettingsMenu({
   onOpenDreamMemory: () => void
   onDeleteSession: () => void
 }) {
-  return (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-label="设置"
-        title="设置"
-        onClick={onToggleOpen}
-        className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 sm:h-10 sm:w-10"
-      >
-        <Settings size={18} />
-      </button>
+  const [mobile, setMobile] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const titleId = useId()
 
-      {open ? (
-        <section className="absolute right-0 top-full z-30 mt-2 max-h-[calc(100dvh-6rem)] w-72 overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-200/80 [overflow-wrap:anywhere] dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40" aria-label="会话设置菜单">
-          <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-            <strong className="block text-sm font-black text-slate-950 dark:text-slate-100">会话设置</strong>
-            <span className="mt-1 block text-xs font-semibold text-slate-400 dark:text-slate-300">布局与输入偏好</span>
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const mediaQuery = window.matchMedia('(max-width: 639px)')
+    const sync = () => setMobile(mediaQuery.matches)
+    sync()
+    mediaQuery.addEventListener('change', sync)
+    return () => mediaQuery.removeEventListener('change', sync)
+  }, [])
+
+  useEffect(() => {
+    if (!open || mobile) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onToggleOpen()
+      requestAnimationFrame(() => triggerRef.current?.focus())
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [mobile, onToggleOpen, open])
+
+  const settingsPanel = (
+    <section
+      ref={panelRef}
+      role={mobile ? 'dialog' : undefined}
+      aria-modal={mobile ? 'true' : undefined}
+      aria-labelledby={titleId}
+      tabIndex={mobile ? -1 : undefined}
+      className={cn(
+        'border border-slate-200 bg-white shadow-2xl [overflow-wrap:anywhere] dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40',
+        mobile
+          ? 'flex max-h-[min(82dvh,calc(100dvh-1rem))] w-full flex-col overflow-hidden rounded-t-2xl outline-none'
+          : 'absolute right-0 top-full z-30 mt-2 max-h-[calc(100dvh-6rem)] w-72 overflow-y-auto overscroll-contain rounded-lg shadow-slate-200/80',
+      )}
+      aria-label="会话设置菜单"
+    >
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+            <div>
+              <strong id={titleId} className="block text-sm font-black text-slate-950 dark:text-slate-100">会话设置</strong>
+              <span className="mt-1 block text-xs font-semibold text-slate-400 dark:text-slate-300">布局与输入偏好</span>
+            </div>
+            {mobile ? (
+              <button
+                ref={closeButtonRef}
+                type="button"
+                onClick={onToggleOpen}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50"
+                aria-label="关闭会话设置"
+              >
+                <X size={18} />
+              </button>
+            ) : null}
           </div>
-          <div className="p-2">
+          <div className={cn('p-2', mobile ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(0.5rem,env(safe-area-inset-bottom))]' : '')}>
             <button
               type="button"
               onClick={onOpenRoleDialog}
@@ -178,7 +221,7 @@ export function SessionSettingsMenu({
                   type="button"
                   onClick={onResetFontScale}
                   disabled={fontScale === SESSION_FONT_SCALE_DEFAULT}
-                  className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:text-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200 dark:disabled:text-slate-600"
+                  className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:text-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200 dark:disabled:text-slate-600 sm:h-8"
                 >
                   默认
                 </button>
@@ -228,7 +271,43 @@ export function SessionSettingsMenu({
               </span>
             </button>
           </div>
-        </section>
+    </section>
+  )
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-expanded={open}
+        aria-haspopup={mobile ? 'dialog' : 'menu'}
+        aria-label="设置"
+        title="设置"
+        onClick={onToggleOpen}
+        className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 sm:h-10 sm:w-10"
+      >
+        <Settings size={18} />
+      </button>
+
+      {open && !mobile ? settingsPanel : null}
+      {open && mobile ? (
+        <ModalPortal>
+          <ModalFocusScope
+            containerRef={panelRef}
+            dismissible
+            initialFocusRef={closeButtonRef}
+            onDismiss={onToggleOpen}
+          >
+            <div
+              className="fixed inset-0 z-[70] flex items-end bg-slate-950/45 pt-8 backdrop-blur-sm"
+              onMouseDown={(event) => {
+                if (event.currentTarget === event.target) onToggleOpen()
+              }}
+            >
+              {settingsPanel}
+            </div>
+          </ModalFocusScope>
+        </ModalPortal>
       ) : null}
     </div>
   )

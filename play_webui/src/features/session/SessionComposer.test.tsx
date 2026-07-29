@@ -124,8 +124,15 @@ describe('SessionComposer', () => {
   })
 
   it('keeps focus on the same action button after a pointer stop', () => {
+    let finishStop = () => undefined
+
     function Harness() {
       const [sending, setSending] = useState(true)
+      const [stopping, setStopping] = useState(false)
+      finishStop = () => {
+        setSending(false)
+        setStopping(false)
+      }
       return (
         <SessionComposer
           sessionId="session_1"
@@ -136,6 +143,7 @@ describe('SessionComposer', () => {
           turnModes={[{ mode: 'neutral', shortName: '默认', sortOrder: 0 }]}
           quickReplies={[]}
           sending={sending}
+          stopping={stopping}
           contextInputBlockThresholdRatio={0.9}
           onTextChange={vi.fn()}
           onModeChange={vi.fn()}
@@ -143,7 +151,7 @@ describe('SessionComposer', () => {
           onMainLLMChange={vi.fn()}
           onSend={vi.fn()}
           onQuickReply={vi.fn()}
-          onStop={() => setSending(false)}
+          onStop={() => setStopping(true)}
         />
       )
     }
@@ -152,6 +160,11 @@ describe('SessionComposer', () => {
     const stopButton = screen.getByRole('button', { name: '停止' })
     stopButton.focus()
     fireEvent.click(stopButton)
+
+    const stoppingButton = screen.getByRole('button', { name: '停止中' })
+    expect((stoppingButton as HTMLButtonElement).disabled).toBe(true)
+    stoppingButton.blur()
+    act(() => finishStop())
 
     const sendButton = screen.getByRole('button', { name: '发送' })
     expect(document.activeElement).toBe(sendButton)

@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import React, { useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, BookOpenText, RefreshCw, X } from 'lucide-react'
+import { ModalFocusScope, ModalPortal } from '@/components/common/ModalFocusScope'
 import { getSessionTurn } from '@/lib/api/sessions'
 import { cn } from '@/lib/utils/cn'
 import { HISTORY_MESSAGE_ROLE, type HistoryMessageRole } from '@/types/session'
@@ -56,8 +57,8 @@ export function SessionTurnEvidencePreview({
   reference: SessionEvidenceReference
   onClose: () => void
 }) {
+  const dialogRef = useRef<HTMLElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
-  const returnFocusRef = useRef<HTMLElement | null>(null)
   const query = useQuery({
     queryKey: ['play-session-turn-preview', sessionId, reference.turnId],
     queryFn: () => getSessionTurn(sessionId, reference.turnId),
@@ -67,46 +68,33 @@ export function SessionTurnEvidencePreview({
     refetchOnReconnect: false,
   })
 
-  useEffect(() => {
-    returnFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-    closeButtonRef.current?.focus()
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      event.stopImmediatePropagation()
-      onClose()
-    }
-    document.addEventListener('keydown', handleKeyDown, true)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown, true)
-      const target = returnFocusRef.current
-      window.requestAnimationFrame(() => {
-        if (target?.isConnected) target.focus()
-      })
-    }
-  }, [onClose])
-
   const citedMessagePresent = Boolean(
     query.data?.messages.some((message) => message.messageId === reference.messageId),
   )
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/20 p-3 backdrop-blur-[1px] sm:p-6"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.currentTarget === event.target) onClose()
-      }}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="turn-evidence-preview-title"
-        className="flex max-h-[min(760px,calc(100vh-32px))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-[#f7f8fc] shadow-2xl shadow-slate-950/30 dark:border-slate-700 dark:bg-[#0b1020] dark:shadow-black/70"
+    <ModalPortal>
+      <ModalFocusScope
+        containerRef={dialogRef}
+        dismissible
+        initialFocusRef={closeButtonRef}
+        onDismiss={onClose}
       >
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/20 p-3 backdrop-blur-[1px] sm:p-6"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) onClose()
+          }}
+        >
+          <section
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="turn-evidence-preview-title"
+            tabIndex={-1}
+            className="flex max-h-[min(760px,calc(100dvh-32px))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-[#f7f8fc] shadow-2xl shadow-slate-950/30 outline-none dark:border-slate-700 dark:bg-[#0b1020] dark:shadow-black/70"
+          >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-950 sm:px-6">
           <div className="min-w-0">
             <span className="text-[10px] font-black uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">Evidence turn preview</span>
@@ -121,7 +109,7 @@ export function SessionTurnEvidencePreview({
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 sm:h-9 sm:w-9"
             aria-label="关闭 Turn 消息预览"
           >
             <X size={17} />
@@ -200,7 +188,9 @@ export function SessionTurnEvidencePreview({
             </div>
           ) : null}
         </div>
-      </section>
-    </div>
+          </section>
+        </div>
+      </ModalFocusScope>
+    </ModalPortal>
   )
 }

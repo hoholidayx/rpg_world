@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, Command, Loader2, Search, X } from 'lucide-react'
+import { ModalFocusScope, ModalPortal } from '@/components/common/ModalFocusScope'
 import { listCommands } from '@/lib/api/commands'
 import { cn } from '@/lib/utils/cn'
 import type { PlayCommand } from '@/types/command'
@@ -70,6 +71,8 @@ export function CommandPaletteDialog({
   const [search, setSearch] = useState('')
   const [systemOpen, setSystemOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const dialogRef = useRef<HTMLElement | null>(null)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const titleId = `command-palette-title-${sessionId}`
@@ -80,33 +83,29 @@ export function CommandPaletteDialog({
     enabled: mounted && !disabled,
   })
 
-  const finishClose = useCallback((returnFocus: boolean) => {
+  const finishClose = useCallback(() => {
     setMounted(false)
-    if (returnFocus) requestAnimationFrame(() => triggerRef.current?.focus())
   }, [])
 
-  const closeDialog = useCallback(({ returnFocus = true }: { returnFocus?: boolean } = {}) => {
+  const closeDialog = useCallback(() => {
     if (openFrameRef.current !== null) {
       cancelAnimationFrame(openFrameRef.current)
       openFrameRef.current = null
     }
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
     setOpen(false)
+    if (
+      typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      finishClose()
+      return
+    }
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null
-      finishClose(returnFocus)
+      finishClose()
     }, DIALOG_TRANSITION_MS)
   }, [finishClose])
-
-  useEffect(() => {
-    if (!mounted) return
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      closeDialog()
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [closeDialog, mounted])
 
   useEffect(() => {
     if (!disabled || !mounted) return
@@ -137,6 +136,13 @@ export function CommandPaletteDialog({
     setSystemOpen(false)
     setOpen(false)
     setMounted(true)
+    if (
+      typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      setOpen(true)
+      return
+    }
     openFrameRef.current = requestAnimationFrame(() => {
       openFrameRef.current = requestAnimationFrame(() => {
         openFrameRef.current = null
@@ -147,7 +153,7 @@ export function CommandPaletteDialog({
 
   const selectCommand = (command: string) => {
     onSelectCommand(command)
-    closeDialog({ returnFocus: false })
+    closeDialog()
   }
 
   return (
@@ -161,7 +167,7 @@ export function CommandPaletteDialog({
         aria-expanded={open}
         aria-haspopup="dialog"
         className={cn(
-          'flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:shadow-black/30 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-100',
+          'flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:shadow-black/30 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-100 sm:h-9',
           disabled ? 'cursor-not-allowed opacity-60' : '',
         )}
       >
@@ -170,25 +176,37 @@ export function CommandPaletteDialog({
       </button>
 
       {mounted ? (
-        <div
-          className={cn(
-            'fixed inset-0 z-50 flex items-end justify-center bg-slate-950/35 px-3 py-4 transition-opacity duration-200 ease-out motion-reduce:transition-none sm:items-center sm:px-4',
-            open ? 'opacity-100' : 'pointer-events-none opacity-0',
-          )}
-          onClick={() => closeDialog()}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            aria-describedby={descriptionId}
-            data-session-id={sessionId}
-            onClick={(event) => event.stopPropagation()}
-            className={cn(
-              'flex max-h-[min(78vh,680px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 transition duration-200 ease-out motion-reduce:transition-none dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50',
-              open ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-4 scale-[0.98] opacity-0',
-            )}
+        <ModalPortal>
+          <ModalFocusScope
+            containerRef={dialogRef}
+            dismissible
+            suspended={!open}
+            initialFocusRef={searchInputRef}
+            onDismiss={closeDialog}
           >
+            <div
+              className={cn(
+                'fixed inset-0 z-50 flex items-end justify-center bg-slate-950/35 px-3 py-4 transition-opacity duration-200 ease-out motion-reduce:transition-none sm:items-center sm:px-4',
+                open ? 'opacity-100' : 'pointer-events-none opacity-0',
+              )}
+              onClick={() => {
+                if (open) closeDialog()
+              }}
+            >
+              <section
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
+                aria-describedby={descriptionId}
+                data-session-id={sessionId}
+                tabIndex={-1}
+                onClick={(event) => event.stopPropagation()}
+                className={cn(
+                  'flex max-h-[min(78dvh,680px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 outline-none transition duration-200 ease-out motion-reduce:transition-none dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50',
+                  open ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-4 scale-[0.98] opacity-0',
+                )}
+              >
             <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
               <div>
                 <h2 id={titleId} className="text-lg font-black text-slate-950 dark:text-slate-100">命令</h2>
@@ -199,7 +217,7 @@ export function CommandPaletteDialog({
               <button
                 type="button"
                 onClick={() => closeDialog()}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100 sm:h-8 sm:w-8"
                 aria-label="关闭命令面板"
               >
                 <X size={17} />
@@ -210,7 +228,7 @@ export function CommandPaletteDialog({
               <div className="flex h-10 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 focus-within:border-violet-300 focus-within:bg-white dark:border-slate-700 dark:bg-slate-900 dark:focus-within:border-violet-500 dark:focus-within:bg-slate-950">
                 <Search size={15} className="shrink-0 text-slate-400" />
                 <input
-                  autoFocus
+                  ref={searchInputRef}
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
@@ -307,8 +325,10 @@ export function CommandPaletteDialog({
                 </div>
               )}
             </div>
-          </section>
-        </div>
+              </section>
+            </div>
+          </ModalFocusScope>
+        </ModalPortal>
       ) : null}
     </>
   )

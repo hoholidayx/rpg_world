@@ -1,11 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { BookOpenText, Images, LogOut, Route, UsersRound } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
+import { ModalFocusScope, ModalPortal } from '@/components/common/ModalFocusScope'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { buildDreamPageHref } from '@/features/dream/dreamNavigation'
 import { NotificationCenter } from '@/features/notifications/NotificationCenter'
@@ -115,148 +116,173 @@ function PlayerCharacterDialog({
   onClose: () => void
   onRetryLoad: () => void
 }) {
+  const dialogRef = useRef<HTMLElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const initialCharacterRef = useRef<HTMLButtonElement>(null)
+  const currentCharacterId = currentPlayer?.characterId ?? null
+  const initialCharacterId = currentCharacterId ?? characters[0]?.id ?? null
+  const canSubmit = Boolean(selectedCharacterId) && (required || selectedCharacterId !== currentCharacterId) && !pending
+  const canDismiss = !required && !pending
+
   if (!open) return null
 
-  const currentCharacterId = currentPlayer?.characterId ?? null
-  const canSubmit = Boolean(selectedCharacterId) && (required || selectedCharacterId !== currentCharacterId) && !pending
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-8 backdrop-blur-sm">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="player-character-title"
-        className="flex max-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50"
+    <ModalPortal>
+      <ModalFocusScope
+        containerRef={dialogRef}
+        dismissible={canDismiss}
+        initialFocusRef={required ? initialCharacterRef : closeButtonRef}
+        onDismiss={onClose}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5 dark:border-slate-800 dark:bg-slate-900">
-          <div>
-            <h2 id="player-character-title" className="text-xl font-black text-slate-950 dark:text-slate-100">
-              {required ? '选择你要扮演的角色' : '切换扮演角色'}
-            </h2>
-            <p className="mt-1 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
-              角色选择会影响后续 user 消息的头像、名称和后续 prompt 语义，不重写已有历史。
-            </p>
-          </div>
-          {!required ? (
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50"
-              aria-label="关闭"
-            >
-              ×
-            </button>
-          ) : null}
-        </header>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-8 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (canDismiss && event.currentTarget === event.target) onClose()
+          }}
+        >
+          <section
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="player-character-title"
+            tabIndex={-1}
+            className="flex max-h-[calc(100dvh-4rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 outline-none dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5 dark:border-slate-800 dark:bg-slate-900">
+              <div>
+                <h2 id="player-character-title" className="text-xl font-black text-slate-950 dark:text-slate-100">
+                  {required ? '选择你要扮演的角色' : '切换扮演角色'}
+                </h2>
+                <p className="mt-1 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+                  角色选择会影响后续 user 消息的头像、名称和后续 prompt 语义，不重写已有历史。
+                </p>
+              </div>
+              {!required ? (
+                <button
+                  ref={closeButtonRef}
+                  type="button"
+                  onClick={onClose}
+                  disabled={pending}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50 sm:h-9 sm:w-9"
+                  aria-label="关闭"
+                >
+                  ×
+                </button>
+              ) : null}
+            </header>
 
-        <div className="overflow-y-auto px-6 py-5">
-          {error ? (
-            <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
-              {error}
-            </p>
-          ) : null}
+            <div className="overflow-y-auto px-6 py-5">
+              {error ? (
+                <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 [overflow-wrap:anywhere] dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                  {error}
+                </p>
+              ) : null}
 
-          {loadError ? (
-            <section
-              role="alert"
-              className="rounded-lg border border-rose-200 bg-rose-50 px-5 py-10 text-center dark:border-rose-500/30 dark:bg-rose-500/10"
-            >
-              <h3 className="text-lg font-black text-rose-800 dark:text-rose-100">角色列表加载失败</h3>
-              <p className="mt-2 break-words text-sm font-semibold leading-6 text-rose-700 dark:text-rose-200">
-                {loadError}
-              </p>
-              <button
-                type="button"
-                onClick={onRetryLoad}
-                className="mt-5 h-10 rounded-lg bg-rose-600 px-4 text-sm font-black text-white transition hover:bg-rose-700"
-              >
-                重试加载角色
-              </button>
-            </section>
-          ) : loading ? (
-            <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
-              <h3 className="text-lg font-black text-slate-950 dark:text-slate-100">正在加载可扮演角色</h3>
-              <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
-                角色列表加载完成后即可选择。绑定完成前本会话不能发送消息。
-              </p>
-            </section>
-          ) : characters.length ? (
-            <div className="grid gap-3 md:grid-cols-3">
-              {characters.map((character) => {
-                const avatarUrl = getCharacterAvatarUrl(character)
-                const selected = selectedCharacterId === character.id
-                const current = currentCharacterId === character.id
-                return (
+              {loadError ? (
+                <section
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-5 py-10 text-center dark:border-rose-500/30 dark:bg-rose-500/10"
+                >
+                  <h3 className="text-lg font-black text-rose-800 dark:text-rose-100">角色列表加载失败</h3>
+                  <p className="mt-2 break-words text-sm font-semibold leading-6 text-rose-700 dark:text-rose-200">
+                    {loadError}
+                  </p>
                   <button
-                    key={character.id}
                     type="button"
-                    onClick={() => onSelect(character.id)}
-                    className={cn(
-                      'grid min-h-44 gap-3 rounded-lg border p-4 text-left transition',
-                      selected
-                        ? 'border-violet-400 bg-violet-50 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.18)] dark:border-violet-500/60 dark:bg-violet-500/15'
-                        : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/40 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10',
-                    )}
+                    onClick={onRetryLoad}
+                    className="mt-5 h-11 rounded-lg bg-rose-600 px-4 text-sm font-black text-white transition hover:bg-rose-700 sm:h-10"
                   >
-                    <span className="flex items-center justify-between gap-3">
-                      {avatarUrl ? (
-                        <img src={avatarUrl} alt="" className="h-11 w-11 rounded-full object-cover" />
-                      ) : (
-                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-teal-50 text-base font-black text-teal-700 dark:bg-teal-500/15 dark:text-teal-200">
-                          {firstLetter(character.name)}
-                        </span>
-                      )}
-                      <span className={cn('h-5 w-5 rounded-full border-2', selected ? 'border-[6px] border-violet-600' : 'border-slate-300 dark:border-slate-600')} />
-                    </span>
-                    <span className="min-w-0">
-                      <strong className="block truncate text-base font-black text-slate-950 dark:text-slate-100">{character.name}</strong>
-                      <span className="mt-1 line-clamp-3 block text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
-                        {characterSummary(character)}
-                      </span>
-                    </span>
-                    <span className={cn('w-fit rounded-full px-2.5 py-1 text-xs font-black', current ? 'bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300')}>
-                      {current ? '当前绑定' : '可选择'}
-                    </span>
+                    重试加载角色
                   </button>
-                )
-              })}
+                </section>
+              ) : loading ? (
+                <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
+                  <h3 className="text-lg font-black text-slate-950 dark:text-slate-100">正在加载可扮演角色</h3>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+                    角色列表加载完成后即可选择。绑定完成前本会话不能发送消息。
+                  </p>
+                </section>
+              ) : characters.length ? (
+                <div className="grid gap-3 md:grid-cols-3">
+                  {characters.map((character) => {
+                    const avatarUrl = getCharacterAvatarUrl(character)
+                    const selected = selectedCharacterId === character.id
+                    const current = currentCharacterId === character.id
+                    return (
+                      <button
+                        key={character.id}
+                        ref={character.id === initialCharacterId ? initialCharacterRef : undefined}
+                        type="button"
+                        onClick={() => onSelect(character.id)}
+                        className={cn(
+                          'grid min-h-44 gap-3 rounded-lg border p-4 text-left transition',
+                          selected
+                            ? 'border-violet-400 bg-violet-50 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.18)] dark:border-violet-500/60 dark:bg-violet-500/15'
+                            : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/40 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10',
+                        )}
+                      >
+                        <span className="flex items-center justify-between gap-3">
+                          {avatarUrl ? (
+                            <img src={avatarUrl} alt="" className="h-11 w-11 rounded-full object-cover" />
+                          ) : (
+                            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-teal-50 text-base font-black text-teal-700 dark:bg-teal-500/15 dark:text-teal-200">
+                              {firstLetter(character.name)}
+                            </span>
+                          )}
+                          <span className={cn('h-5 w-5 rounded-full border-2', selected ? 'border-[6px] border-violet-600' : 'border-slate-300 dark:border-slate-600')} />
+                        </span>
+                        <span className="min-w-0">
+                          <strong className="block truncate text-base font-black text-slate-950 dark:text-slate-100">{character.name}</strong>
+                          <span className="mt-1 line-clamp-3 block text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+                            {characterSummary(character)}
+                          </span>
+                        </span>
+                        <span className={cn('w-fit rounded-full px-2.5 py-1 text-xs font-black', current ? 'bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300')}>
+                          {current ? '当前绑定' : '可选择'}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
+                  <h3 className="text-lg font-black text-slate-950 dark:text-slate-100">当前故事还没有可扮演角色</h3>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+                    请先到角色库为当前 Story 创建角色。绑定完成前本会话不能发送消息。
+                  </p>
+                </section>
+              )}
             </div>
-          ) : (
-            <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
-              <h3 className="text-lg font-black text-slate-950 dark:text-slate-100">当前故事还没有可扮演角色</h3>
-              <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
-                请先到角色库为当前 Story 创建角色。绑定完成前本会话不能发送消息。
-              </p>
-            </section>
-          )}
-        </div>
 
-        <footer className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-xs font-semibold text-slate-400 dark:text-slate-300">
-            {required ? '必须选择角色后才能开始。' : '切换只影响后续消息。'}
-          </p>
-          <div className="flex items-center gap-2">
-            {!required ? (
-              <button
-                type="button"
-                onClick={onClose}
-                className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-200 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200"
-              >
-                取消
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={onSubmit}
-              disabled={!canSubmit}
-              className="h-10 rounded-lg bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none dark:shadow-violet-950/40 dark:disabled:bg-slate-700"
-            >
-              {pending ? '处理中...' : required ? '继续' : '切换角色'}
-            </button>
-          </div>
-        </footer>
-      </section>
-    </div>
+            <footer className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
+              <p className="text-xs font-semibold text-slate-400 dark:text-slate-300">
+                {required ? '必须选择角色后才能开始。' : '切换只影响后续消息。'}
+              </p>
+              <div className="flex items-center gap-2">
+                {!required ? (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    disabled={pending}
+                    className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200 sm:h-10"
+                  >
+                    取消
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={onSubmit}
+                  disabled={!canSubmit}
+                  className="h-11 rounded-lg bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none dark:shadow-violet-950/40 dark:disabled:bg-slate-700 sm:h-10"
+                >
+                  {pending ? '处理中...' : required ? '继续' : '切换角色'}
+                </button>
+              </div>
+            </footer>
+          </section>
+        </div>
+      </ModalFocusScope>
+    </ModalPortal>
   )
 }
 
@@ -281,96 +307,112 @@ function SessionOpeningDialog({
   onSubmit: () => void
   onBack: () => void
 }) {
+  const dialogRef = useRef<HTMLElement>(null)
+  const initialOpeningRef = useRef<HTMLButtonElement>(null)
+  const initialOpeningId = selectedOpeningId ?? options[0]?.id ?? null
+
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="session-opening-title"
-        className="flex max-h-[calc(100vh-4rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50"
+    <ModalPortal>
+      <ModalFocusScope
+        containerRef={dialogRef}
+        dismissible={false}
+        initialFocusRef={initialOpeningRef}
+        onDismiss={onBack}
       >
-        <header className="border-b border-slate-200 bg-slate-50 px-6 py-5 dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-600 dark:text-violet-300">第 2 步 · 会话开局</p>
-              <h2 id="session-opening-title" className="mt-1 text-xl font-black text-slate-950 dark:text-slate-100">
-                选择故事的起点
-              </h2>
-              <p className="mt-1 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
-                你将扮演「{characterName || '所选角色'}」。开局只决定本 Session 的第一条故事消息，之后仍是自由推演。
-              </p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
+          <section
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="session-opening-title"
+            tabIndex={-1}
+            className="flex max-h-[calc(100dvh-4rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 outline-none dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50"
+          >
+            <header className="border-b border-slate-200 bg-slate-50 px-6 py-5 dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-600 dark:text-violet-300">第 2 步 · 会话开局</p>
+                  <h2 id="session-opening-title" className="mt-1 text-xl font-black text-slate-950 dark:text-slate-100">
+                    选择故事的起点
+                  </h2>
+                  <p className="mt-1 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+                    你将扮演「{characterName || '所选角色'}」。开局只决定本 Session 的第一条故事消息，之后仍是自由推演。
+                  </p>
+                </div>
+                <span className="rounded-full bg-violet-100 px-3 py-1.5 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+                  {options.length} 个可选起点
+                </span>
+              </div>
+            </header>
+
+            <div className="overflow-y-auto px-6 py-5">
+              {error ? (
+                <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 [overflow-wrap:anywhere] dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                  {error}
+                </p>
+              ) : null}
+              <div className="grid gap-3">
+                {options.map((option, index) => {
+                  const selected = selectedOpeningId === option.id
+                  return (
+                    <button
+                      key={option.id}
+                      ref={option.id === initialOpeningId ? initialOpeningRef : undefined}
+                      type="button"
+                      onClick={() => onSelect(option.id)}
+                      disabled={pending}
+                      className={cn(
+                        'rounded-lg border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-70',
+                        selected
+                          ? 'border-violet-400 bg-violet-50 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.16)] dark:border-violet-500/60 dark:bg-violet-500/15'
+                          : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/40 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10',
+                      )}
+                    >
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="mr-2 text-xs font-black uppercase tracking-wider text-slate-400">Opening {index + 1}</span>
+                          <strong className="text-base font-black text-slate-950 dark:text-slate-100">{option.title}</strong>
+                        </span>
+                        <span className={cn('h-5 w-5 shrink-0 rounded-full border-2', selected ? 'border-[6px] border-violet-600' : 'border-slate-300 dark:border-slate-600')} />
+                      </span>
+                      <span className="mt-3 block whitespace-pre-wrap text-sm font-semibold leading-7 text-slate-600 [overflow-wrap:anywhere] dark:text-slate-300">
+                        {option.renderedMessage}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-            <span className="rounded-full bg-violet-100 px-3 py-1.5 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
-              {options.length} 个可选起点
-            </span>
-          </div>
-        </header>
 
-        <div className="overflow-y-auto px-6 py-5">
-          {error ? (
-            <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
-              {error}
-            </p>
-          ) : null}
-          <div className="grid gap-3">
-            {options.map((option, index) => {
-              const selected = selectedOpeningId === option.id
-              return (
+            <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
+              <p className="text-xs font-semibold text-slate-400 dark:text-slate-300">
+                未选择时默认使用第一条；确认后角色与开局会一起提交。
+              </p>
+              <div className="flex items-center gap-2">
                 <button
-                  key={option.id}
                   type="button"
-                  onClick={() => onSelect(option.id)}
+                  onClick={onBack}
                   disabled={pending}
-                  className={cn(
-                    'rounded-lg border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-70',
-                    selected
-                      ? 'border-violet-400 bg-violet-50 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.16)] dark:border-violet-500/60 dark:bg-violet-500/15'
-                      : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/40 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10',
-                  )}
+                  className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200 sm:h-10"
                 >
-                  <span className="flex items-center justify-between gap-3">
-                    <span className="min-w-0">
-                      <span className="mr-2 text-xs font-black uppercase tracking-wider text-slate-400">Opening {index + 1}</span>
-                      <strong className="text-base font-black text-slate-950 dark:text-slate-100">{option.title}</strong>
-                    </span>
-                    <span className={cn('h-5 w-5 shrink-0 rounded-full border-2', selected ? 'border-[6px] border-violet-600' : 'border-slate-300 dark:border-slate-600')} />
-                  </span>
-                  <span className="mt-3 block whitespace-pre-wrap text-sm font-semibold leading-7 text-slate-600 dark:text-slate-300">
-                    {option.renderedMessage}
-                  </span>
+                  返回选择角色
                 </button>
-              )
-            })}
-          </div>
+                <button
+                  type="button"
+                  onClick={onSubmit}
+                  disabled={!selectedOpeningId || pending}
+                  className="h-11 rounded-lg bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none dark:shadow-violet-950/40 dark:disabled:bg-slate-700 sm:h-10"
+                >
+                  {pending ? '正在开始...' : '从这里开始'}
+                </button>
+              </div>
+            </footer>
+          </section>
         </div>
-
-        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-xs font-semibold text-slate-400 dark:text-slate-300">
-            未选择时默认使用第一条；确认后角色与开局会一起提交。
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onBack}
-              disabled={pending}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200"
-            >
-              返回选择角色
-            </button>
-            <button
-              type="button"
-              onClick={onSubmit}
-              disabled={!selectedOpeningId || pending}
-              className="h-10 rounded-lg bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none dark:shadow-violet-950/40 dark:disabled:bg-slate-700"
-            >
-              {pending ? '正在开始...' : '从这里开始'}
-            </button>
-          </div>
-        </footer>
-      </section>
-    </div>
+      </ModalFocusScope>
+    </ModalPortal>
   )
 }
 

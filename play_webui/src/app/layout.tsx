@@ -12,6 +12,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="zh-CN" suppressHydrationWarning>
       <body>
         <Providers>{children}</Providers>
+        <div id="modal-root" />
       </body>
     </html>
   )
