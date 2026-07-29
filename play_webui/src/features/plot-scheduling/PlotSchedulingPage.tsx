@@ -206,7 +206,9 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
   const nodeItem = target.kind === 'node' ? target.item : undefined
   const [name, setName] = useState(poolItem?.name ?? outlineItem?.name ?? '')
   const [description, setDescription] = useState(poolItem?.description ?? outlineItem?.description ?? eventItem?.description ?? '')
-  const [priority, setPriority] = useState(poolItem?.priority ?? outlineItem?.priority ?? 0)
+  const [priority, setPriority] = useState(outlineItem?.priority ?? 0)
+  const [poolSelectionWeight, setPoolSelectionWeight] = useState(poolItem?.selectionWeight ?? 1)
+  const [candidateBatchSize, setCandidateBatchSize] = useState(poolItem?.candidateBatchSize ?? 3)
   const [enabled, setEnabled] = useState(poolItem?.enabled ?? outlineItem?.enabled ?? eventItem?.enabled ?? nodeItem?.enabled ?? true)
   const [poolMode, setPoolMode] = useState(poolItem?.selectionMode ?? PLOT_POOL_MODE.RANDOM)
   const [poolCooldown, setPoolCooldown] = useState(poolItem?.cooldownMinutes ?? 0)
@@ -221,6 +223,7 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
   const [deadlineTime, setDeadlineTime] = useState(eventItem?.deadlineTime ?? DEFAULT_TIME)
   const [allowRepeat, setAllowRepeat] = useState(eventItem?.allowRepeat ?? false)
   const [cooldown, setCooldown] = useState(eventItem?.repeatCooldownMinutes || 60)
+  const [eventSelectionWeight, setEventSelectionWeight] = useState(eventItem?.selectionWeight ?? 1)
   const [eventId, setEventId] = useState(nodeItem?.eventId ?? schedule.events[0]?.id ?? 0)
 
   const titleText = target.kind === 'pool'
@@ -236,7 +239,8 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
       onSave({ kind: 'pool', input: {
         name,
         description,
-        priority,
+        selectionWeight: poolSelectionWeight,
+        candidateBatchSize,
         cooldownMinutes: poolCooldown,
         enabled,
         selectionMode: poolMode,
@@ -246,6 +250,7 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
         poolId, title, directive, description, suitabilityHint, dispatchMode,
         scheduledTime: hasTime ? scheduledTime : null, enabled, allowRepeat,
         deadlineTime: hasDeadline ? deadlineTime : null,
+        selectionWeight: eventSelectionWeight,
         repeatCooldownMinutes: allowRepeat ? cooldown : 0,
       } })
     } else if (target.kind === 'outline') {
@@ -259,6 +264,11 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
     ? name.trim().length > 0
       && Number.isInteger(poolCooldown)
       && poolCooldown >= 0
+      && Number.isInteger(poolSelectionWeight)
+      && poolSelectionWeight > 0
+      && Number.isInteger(candidateBatchSize)
+      && candidateBatchSize >= 1
+      && candidateBatchSize <= 5
     : target.kind === 'outline'
       ? name.trim().length > 0
     : target.kind === 'event'
@@ -268,6 +278,8 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
         && (!hasTime || isValidSceneTime(scheduledTime))
         && (!hasDeadline || isValidSceneTime(deadlineTime))
         && (!hasTime || !hasDeadline || compareSceneTime(scheduledTime, deadlineTime) < 0)
+        && Number.isInteger(eventSelectionWeight)
+        && eventSelectionWeight > 0
         && (!allowRepeat || (Number.isInteger(cooldown) && cooldown > 0))
       : eventId > 0 && isValidSceneTime(scheduledTime)
 
@@ -288,11 +300,17 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
               <Field label={target.kind === 'pool' ? '事件池名称' : '大纲名称'}><input value={name} onChange={(event) => setName(event.target.value)} className={inputClass} autoFocus /></Field>
               <Field label="说明" hint="仅用于管理"><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} className={textareaClass} /></Field>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="优先级" hint="数值越高越先调度"><input type="number" value={priority} onChange={(event) => setPriority(Number(event.target.value))} className={inputClass} /></Field>
+                {target.kind === 'pool'
+                  ? <Field label="抽取权重" hint="控制可用池之间的相对概率"><input type="number" min={1} step={1} value={poolSelectionWeight} onChange={(event) => setPoolSelectionWeight(Number(event.target.value))} className={inputClass} /></Field>
+                  : <Field label="优先级" hint="数值越高越先调度"><input type="number" value={priority} onChange={(event) => setPriority(Number(event.target.value))} className={inputClass} /></Field>}
                 {target.kind === 'pool' ? <Field label="池内模式"><select value={poolMode} onChange={(event) => setPoolMode(event.target.value as typeof poolMode)} className={inputClass}><option value="random">随机</option><option value="sequential">顺序</option></select></Field> : <div className="flex items-end pb-2"><Toggle checked={enabled} label="启用此大纲" onChange={setEnabled} /></div>}
               </div>
               {target.kind === 'pool' ? (
                 <>
+                  <Field label="候选批次大小" hint="1–5；仅 random 池的 soft 主候选使用">
+                    <input type="number" min={1} max={5} step={1} value={candidateBatchSize} onChange={(event) => setCandidateBatchSize(Number(event.target.value))} className={inputClass} />
+                  </Field>
+                  <p className="-mt-3 text-sm font-semibold leading-6 text-slate-500">{poolMode === PLOT_POOL_MODE.RANDOM ? '按事件权重无放回召回候选，再由一次适宜性判断选出当前最合适事件。' : '顺序池忽略批次大小与事件召回权重，仍严格按 position 推进。'}</p>
                   <Field label="池级冷却分钟" hint="0 表示关闭">
                     <input type="number" min={0} step={1} value={poolCooldown} onChange={(event) => setPoolCooldown(Number(event.target.value))} className={inputClass} />
                   </Field>
@@ -305,9 +323,10 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
 
           {target.kind === 'event' ? (
             <>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-3">
                 <Field label="所属事件池"><select value={poolId} onChange={(event) => setPoolId(Number(event.target.value))} className={inputClass}>{schedule.pools.map((pool) => <option key={pool.id} value={pool.id}>{pool.name}</option>)}</select></Field>
                 <Field label="调度约束"><select value={dispatchMode} onChange={(event) => setDispatchMode(event.target.value as typeof dispatchMode)} className={inputClass}><option value="soft">软约束 · 先判断适宜性</option><option value="forced">强制 · 到时直接注入</option></select></Field>
+                <Field label="随机召回权重" hint="所属池为 random 时生效"><input type="number" min={1} step={1} value={eventSelectionWeight} onChange={(event) => setEventSelectionWeight(Number(event.target.value))} className={inputClass} /></Field>
               </div>
               <Field label="事件标题"><input value={title} onChange={(event) => setTitle(event.target.value)} className={inputClass} autoFocus /></Field>
               <Field label="事件说明" hint="供策划阅读"><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} className={textareaClass} /></Field>
@@ -375,7 +394,7 @@ function PoolsView({ schedule, busy, onEdit, onDelete, onMove }: {
   const referenceCounts = outlineReferenceCounts(schedule)
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3"><div><h2 className="text-2xl font-black text-slate-950">剧情事件池</h2><p className="mt-1 text-base font-medium text-slate-500">多池按优先级仲裁；池内可随机或严格顺序选择。被大纲引用的事件只走大纲调度，不占池内额度。</p></div><button type="button" onClick={() => onEdit({ kind: 'pool' })} className={primaryButton}><Plus size={17} />新建事件池</button></div>
+      <div className="flex items-center justify-between gap-3"><div><h2 className="text-2xl font-black text-slate-950">剧情事件池</h2><p className="mt-1 text-base font-medium text-slate-500">可用池按权重稳定抽取；random 池加权召回小批候选后由一次适宜性判断重排。被大纲引用的事件不占池内额度。</p></div><button type="button" onClick={() => onEdit({ kind: 'pool' })} className={primaryButton}><Plus size={17} />新建事件池</button></div>
       {!schedule.pools.length ? <Empty>暂无事件池。先创建一个池，再添加可复用的剧情事件。</Empty> : schedule.pools.map((pool) => {
         const events = schedule.events.filter((event) => event.poolId === pool.id).sort((a, b) => a.position - b.position || a.id - b.id)
         const outlineBoundCount = events.filter((event) => (referenceCounts.get(event.id) ?? 0) > 0).length
@@ -383,7 +402,7 @@ function PoolsView({ schedule, busy, onEdit, onDelete, onMove }: {
         return (
           <section key={pool.id} className={`${panelClass} overflow-hidden`}>
             <header className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
-              <div><div className="flex flex-wrap items-center gap-2"><h3 className="text-xl font-black text-slate-950">{pool.name}</h3><Tag tone={pool.selectionMode === 'random' ? 'violet' : 'amber'}>{pool.selectionMode === 'random' ? '随机池' : '顺序池'}</Tag><Tag>优先级 {pool.priority}</Tag><Tag tone={pool.cooldownMinutes > 0 ? 'amber' : 'slate'}>{pool.cooldownMinutes > 0 ? `池冷却 ${formatMinutes(pool.cooldownMinutes)}` : '无池级冷却'}</Tag>{!pool.enabled ? <Tag tone="rose">已停用</Tag> : null}</div><p className="mt-2 text-sm font-semibold text-slate-500">{pool.description || '未填写事件池说明。'}</p><p className="mt-2 text-xs font-bold text-slate-400">共 {events.length} 个事件 · 自动池候选 {poolLaneCount} 个 · 大纲专用 {outlineBoundCount} 个</p></div>
+              <div><div className="flex flex-wrap items-center gap-2"><h3 className="text-xl font-black text-slate-950">{pool.name}</h3><Tag tone={pool.selectionMode === 'random' ? 'violet' : 'amber'}>{pool.selectionMode === 'random' ? '随机池' : '顺序池'}</Tag><Tag>池权重 {pool.selectionWeight}</Tag>{pool.selectionMode === 'random' ? <Tag>候选批次 {pool.candidateBatchSize}</Tag> : null}<Tag tone={pool.cooldownMinutes > 0 ? 'amber' : 'slate'}>{pool.cooldownMinutes > 0 ? `池冷却 ${formatMinutes(pool.cooldownMinutes)}` : '无池级冷却'}</Tag>{!pool.enabled ? <Tag tone="rose">已停用</Tag> : null}</div><p className="mt-2 text-sm font-semibold text-slate-500">{pool.description || '未填写事件池说明。'}</p><p className="mt-2 text-xs font-bold text-slate-400">共 {events.length} 个事件 · 自动池候选 {poolLaneCount} 个 · 大纲专用 {outlineBoundCount} 个</p></div>
               <div className="flex flex-wrap gap-2"><button type="button" onClick={() => onEdit({ kind: 'event', poolId: pool.id })} className={primaryButton}><Plus size={16} />添加事件</button><button type="button" onClick={() => onEdit({ kind: 'pool', item: pool })} className={quietButton}><Pencil size={15} />编辑</button><button type="button" disabled={busy || events.length > 0} onClick={() => onDelete('pool', pool.id)} className={quietButton}><Trash2 size={15} />删除</button></div>
             </header>
             <div className="divide-y divide-slate-100">
@@ -391,7 +410,7 @@ function PoolsView({ schedule, busy, onEdit, onDelete, onMove }: {
                 const outlineNodeCount = referenceCounts.get(event.id) ?? 0
                 return (
                 <article key={event.id} className="grid gap-4 px-6 py-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
-                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-xs font-black text-slate-500">{index + 1}</span><h4 className="text-lg font-black text-slate-900">{event.title}</h4><Tag tone={event.dispatchMode === 'forced' ? 'rose' : 'emerald'}>{event.dispatchMode === 'forced' ? '强制' : '软约束'}</Tag>{outlineNodeCount > 0 ? <Tag tone="violet">大纲专用 · {outlineNodeCount} 个节点</Tag> : <Tag>池内候选</Tag>}{event.allowRepeat ? <Tag tone="amber">可重复 · {event.repeatCooldownMinutes} 分钟</Tag> : null}{!event.enabled ? <Tag tone="rose">池内已停用</Tag> : null}</div><p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-slate-600">{event.directive}</p><p className="mt-2 flex items-center gap-2 text-xs font-bold text-slate-400"><Clock3 size={14} />{event.scheduledTime ? `首次：${formatSceneTime(event.scheduledTime)}` : '无起始时间 · 立即候选'}{event.deadlineTime ? ` · 截止：${formatSceneTime(event.deadlineTime)}` : ''}</p>{outlineNodeCount > 0 ? <p className="mt-2 text-xs font-bold text-violet-600">结构绑定期间不参与自动事件池抽取；删除全部节点引用后恢复。</p> : null}</div>
+                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-xs font-black text-slate-500">{index + 1}</span><h4 className="text-lg font-black text-slate-900">{event.title}</h4><Tag tone={event.dispatchMode === 'forced' ? 'rose' : 'emerald'}>{event.dispatchMode === 'forced' ? '强制' : '软约束'}</Tag>{pool.selectionMode === 'random' ? <Tag>召回权重 {event.selectionWeight}</Tag> : null}{outlineNodeCount > 0 ? <Tag tone="violet">大纲专用 · {outlineNodeCount} 个节点</Tag> : <Tag>池内候选</Tag>}{event.allowRepeat ? <Tag tone="amber">可重复 · {event.repeatCooldownMinutes} 分钟</Tag> : null}{!event.enabled ? <Tag tone="rose">池内已停用</Tag> : null}</div><p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-slate-600">{event.directive}</p><p className="mt-2 flex items-center gap-2 text-xs font-bold text-slate-400"><Clock3 size={14} />{event.scheduledTime ? `首次：${formatSceneTime(event.scheduledTime)}` : '无起始时间 · 立即候选'}{event.deadlineTime ? ` · 截止：${formatSceneTime(event.deadlineTime)}` : ''}</p>{outlineNodeCount > 0 ? <p className="mt-2 text-xs font-bold text-violet-600">结构绑定期间不参与自动事件池抽取；删除全部节点引用后恢复。</p> : null}</div>
                   <div className="flex flex-wrap gap-2"><button type="button" disabled={index === 0 || busy} onClick={() => onMove(pool, event, -1)} className={quietButton} aria-label="上移"><ArrowUp size={15} /></button><button type="button" disabled={index === events.length - 1 || busy} onClick={() => onMove(pool, event, 1)} className={quietButton} aria-label="下移"><ArrowDown size={15} /></button><button type="button" onClick={() => onEdit({ kind: 'event', poolId: pool.id, item: event })} className={quietButton}><Pencil size={15} />编辑</button><button type="button" disabled={busy} onClick={() => onDelete('event', event.id)} className={quietButton}><Trash2 size={15} /></button></div>
                 </article>
                 )

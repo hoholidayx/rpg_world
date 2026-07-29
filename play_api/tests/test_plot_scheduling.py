@@ -34,19 +34,40 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
                 "name": "主事件池",
                 "description": "测试池",
                 "selectionMode": "sequential",
-                "priority": 10,
+                "selectionWeight": 2,
+                "candidateBatchSize": 4,
                 "cooldownMinutes": 120,
                 "enabled": True,
             },
         )
         assert pool.status_code == 201
+        assert pool.json()["selectionWeight"] == 2
+        assert pool.json()["candidateBatchSize"] == 4
         assert pool.json()["cooldownMinutes"] == 120
         pool_id = pool.json()["id"]
+        assert client.post(
+            f"{story_path}/pools",
+            json={"name": "旧契约池", "priority": 10},
+        ).status_code == 422
+        assert client.post(
+            f"{story_path}/pools",
+            json={"name": "非法权重池", "selectionWeight": 0},
+        ).status_code == 422
+        assert client.post(
+            f"{story_path}/pools",
+            json={"name": "非法批次池", "candidateBatchSize": 6},
+        ).status_code == 422
         updated_pool = client.patch(
             f"{story_path}/pools/{pool_id}",
-            json={"cooldownMinutes": 180},
+            json={
+                "selectionWeight": 5,
+                "candidateBatchSize": 3,
+                "cooldownMinutes": 180,
+            },
         )
         assert updated_pool.status_code == 200
+        assert updated_pool.json()["selectionWeight"] == 5
+        assert updated_pool.json()["candidateBatchSize"] == 3
         assert updated_pool.json()["cooldownMinutes"] == 180
         assert client.patch(
             f"{story_path}/pools/{pool_id}",
@@ -60,6 +81,7 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
                 "title": "雨夜来信",
                 "directive": "让信使送来一封被雨打湿的信。",
                 "dispatchMode": "soft",
+                "selectionWeight": 3,
                 "scheduledTime": None,
                 "deadlineTime": {
                     "year": 1,
@@ -73,7 +95,12 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
             },
         )
         assert event.status_code == 201
+        assert event.json()["selectionWeight"] == 3
         event_id = event.json()["id"]
+        assert client.patch(
+            f"{story_path}/events/{event_id}",
+            json={"selectionWeight": 0},
+        ).status_code == 422
 
         scheduled_event = client.patch(
             f"{story_path}/events/{event_id}",

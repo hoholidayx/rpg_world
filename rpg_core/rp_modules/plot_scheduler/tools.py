@@ -150,10 +150,7 @@ class PlotSandboxReadTool(_PlotSandboxTool):
                 },
                 "poolCooldowns": [
                     _pool_cooldown_payload(cooldowns[pool.id])
-                    for pool in sorted(
-                        story.pools,
-                        key=lambda item: (-item.priority, item.id),
-                    )
+                    for pool in sorted(story.pools, key=lambda item: item.id)
                 ],
                 "disabledEventIds": sorted(
                     self._snapshot.overrides.disabled_event_ids
@@ -164,7 +161,7 @@ class PlotSandboxReadTool(_PlotSandboxTool):
                 "pendingInjection": _pending_payload(self._effective_pending()),
             }
         if resource == "pool":
-            values = sorted(story.pools, key=lambda item: (-item.priority, item.id))
+            values = sorted(story.pools, key=lambda item: item.id)
             if item_id is None:
                 page, info = _page(values, offset, limit)
                 return {
@@ -577,7 +574,8 @@ def _pool_summary(  # noqa: ANN001
         "storyId": value.story_id,
         "name": value.name,
         "selectionMode": value.selection_mode,
-        "priority": value.priority,
+        "selectionWeight": value.selection_weight,
+        "candidateBatchSize": value.candidate_batch_size,
         "cooldownMinutes": value.cooldown_minutes,
         "enabled": value.enabled,
         "eventCount": len(pool_events),
@@ -598,6 +596,7 @@ def _event_summary(  # noqa: ANN001
         "poolId": value.pool_id,
         "title": value.title,
         "position": value.position,
+        "selectionWeight": value.selection_weight,
         "dispatchMode": value.dispatch_mode,
         "enabled": value.enabled,
     }

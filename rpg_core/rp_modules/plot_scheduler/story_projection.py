@@ -155,10 +155,7 @@ class PlotStoryProjectionService:
         for event in schedule.events:
             events_by_pool.setdefault(event.pool_id, []).append(event)
         pools: list[PlotStoryLine] = []
-        for pool in sorted(
-            schedule.pools,
-            key=lambda item: (-item.priority, item.id),
-        ):
+        for pool in sorted(schedule.pools, key=lambda item: item.id):
             nodes = [
                 _project_node(
                     line_kind=PLOT_STORY_LINE_POOL,

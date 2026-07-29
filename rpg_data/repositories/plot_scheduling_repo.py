@@ -32,10 +32,7 @@ class PlotSchedulingRepository:
         rows = (
             StoryPlotEventPoolRecord.select()
             .where(StoryPlotEventPoolRecord.story == int(story_id))
-            .order_by(
-                StoryPlotEventPoolRecord.priority.desc(),
-                StoryPlotEventPoolRecord.id,
-            )
+            .order_by(StoryPlotEventPoolRecord.id)
         )
         return [_to_pool(row) for row in rows]
 
@@ -52,7 +49,8 @@ class PlotSchedulingRepository:
         name: str,
         description: str,
         selection_mode: str,
-        priority: int,
+        selection_weight: int,
+        candidate_batch_size: int,
         cooldown_minutes: int,
         enabled: bool,
     ) -> models.StoryPlotEventPool:
@@ -61,7 +59,8 @@ class PlotSchedulingRepository:
             name=name,
             description=description,
             selection_mode=selection_mode,
-            priority=int(priority),
+            selection_weight=int(selection_weight),
+            candidate_batch_size=int(candidate_batch_size),
             cooldown_minutes=int(cooldown_minutes),
             enabled=bool(enabled),
         )
@@ -74,7 +73,8 @@ class PlotSchedulingRepository:
         name: str,
         description: str,
         selection_mode: str,
-        priority: int,
+        selection_weight: int,
+        candidate_batch_size: int,
         cooldown_minutes: int,
         enabled: bool,
     ) -> models.StoryPlotEventPool | None:
@@ -83,7 +83,8 @@ class PlotSchedulingRepository:
                 name=name,
                 description=description,
                 selection_mode=selection_mode,
-                priority=int(priority),
+                selection_weight=int(selection_weight),
+                candidate_batch_size=int(candidate_batch_size),
                 cooldown_minutes=int(cooldown_minutes),
                 enabled=bool(enabled),
                 version=StoryPlotEventPoolRecord.version + 1,
@@ -138,6 +139,7 @@ class PlotSchedulingRepository:
         scheduled_time: SceneTime | None,
         deadline_time: SceneTime | None,
         position: int,
+        selection_weight: int,
         enabled: bool,
         allow_repeat: bool,
         repeat_cooldown_minutes: int,
@@ -153,6 +155,7 @@ class PlotSchedulingRepository:
             scheduled_time_json=_serialize_time(scheduled_time),
             deadline_time_json=_serialize_time(deadline_time),
             position=int(position),
+            selection_weight=int(selection_weight),
             enabled=bool(enabled),
             allow_repeat=bool(allow_repeat),
             repeat_cooldown_minutes=int(repeat_cooldown_minutes),
@@ -172,6 +175,7 @@ class PlotSchedulingRepository:
         scheduled_time: SceneTime | None,
         deadline_time: SceneTime | None,
         position: int,
+        selection_weight: int,
         enabled: bool,
         allow_repeat: bool,
         repeat_cooldown_minutes: int,
@@ -187,6 +191,7 @@ class PlotSchedulingRepository:
                 scheduled_time_json=_serialize_time(scheduled_time),
                 deadline_time_json=_serialize_time(deadline_time),
                 position=int(position),
+                selection_weight=int(selection_weight),
                 enabled=bool(enabled),
                 allow_repeat=bool(allow_repeat),
                 repeat_cooldown_minutes=int(repeat_cooldown_minutes),
@@ -1128,7 +1133,8 @@ def _to_pool(row: StoryPlotEventPoolRecord) -> models.StoryPlotEventPool:
         name=str(row.name),
         description=str(row.description or ""),
         selection_mode=str(row.selection_mode),
-        priority=int(row.priority),
+        selection_weight=int(row.selection_weight),
+        candidate_batch_size=int(row.candidate_batch_size),
         cooldown_minutes=int(row.cooldown_minutes),
         enabled=bool(row.enabled),
         version=int(row.version),
@@ -1150,6 +1156,7 @@ def _to_event(row: StoryPlotEventRecord) -> models.StoryPlotEvent:
         scheduled_time=_parse_time(row.scheduled_time_json, required=False),
         deadline_time=_parse_time(row.deadline_time_json, required=False),
         position=int(row.position),
+        selection_weight=int(row.selection_weight),
         enabled=bool(row.enabled),
         allow_repeat=bool(row.allow_repeat),
         repeat_cooldown_minutes=int(row.repeat_cooldown_minutes),

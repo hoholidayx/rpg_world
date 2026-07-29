@@ -1,7 +1,7 @@
 # Story design contract
 
-> authoringRulesVersion=1.3 ·
-> catalogDigest=340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431
+> authoringRulesVersion=1.4 ·
+> catalogDigest=12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413
 
 ## Contract and ownership
 
@@ -85,6 +85,13 @@ change the import contract.
   scheduler-origin, triggered pool decision. Any pool event starts the same
   cooldown; manual, outline, deferred, and error decisions neither start nor
   clear it. The current pool setting applies to an existing anchor.
+- Select among deterministically eligible pools by positive
+  `selectionWeight` with a stable Session/turn seed. In a random pool, use
+  event `selectionWeight` for weighted recall. A soft primary may recall up to
+  `candidateBatchSize` soft events (default 3, maximum 5) for one suitability
+  rerank; only the selected event produces a decision. Sequential pools
+  ignore event weight and batch size, and a forced primary bypasses rerank.
+  Weights are probability controls, not finite-turn fairness guarantees.
 - Treat Plot `triggered` as selected-and-injected, not as semantic
   verification, completion, or resolution.
 - Keep `plot_event_mark_next` outside Story Design and Story Pack schemas. It

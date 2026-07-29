@@ -44,7 +44,8 @@ class StoryPlotEventPool:
     name: str
     description: str = ""
     selection_mode: str = PLOT_POOL_RANDOM
-    priority: int = 0
+    selection_weight: int = 1
+    candidate_batch_size: int = 3
     cooldown_minutes: int = 0
     enabled: bool = True
     version: int = 1
@@ -65,6 +66,7 @@ class StoryPlotEvent:
     scheduled_time: SceneTime | None = None
     deadline_time: SceneTime | None = None
     position: int = 0
+    selection_weight: int = 1
     enabled: bool = True
     allow_repeat: bool = False
     repeat_cooldown_minutes: int = 0

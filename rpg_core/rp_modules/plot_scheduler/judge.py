@@ -25,13 +25,18 @@ PLOT_SUITABILITY_SCHEMA: dict[str, object] = {
     "type": "function",
     "function": {
         "name": PLOT_SUITABILITY_TOOL_NAME,
-        "description": "判断候选剧情事件此刻是否适合开始。",
+        "description": "从候选批次选择当前最合适的剧情事件，并判断其是否能合理开始。",
         "parameters": {
             "type": "object",
             "properties": {
                 "suitable": {
                     "type": "boolean",
-                    "description": "当前 Scene、人物位置与状态是否允许事件合理开始。",
+                    "description": "被选事件当前是否能从 Scene 合理开始。",
+                },
+                "selectedEventId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "候选批次中当前最适合开始的事件 ID。",
                 },
                 "reason": {
                     "type": "string",
@@ -39,7 +44,7 @@ PLOT_SUITABILITY_SCHEMA: dict[str, object] = {
                     "description": "简短说明判断所依据的当前事实。",
                 },
             },
-            "required": ["suitable", "reason"],
+            "required": ["selectedEventId", "suitable", "reason"],
             "additionalProperties": False,
         },
     },
@@ -111,8 +116,17 @@ class PlotScheduleJudge:
                 "plot scheduler must return exactly one plot_schedule_decision"
             )
         arguments = matches[0]
+        selected_event_id = arguments.get("selectedEventId")
         suitable = arguments.get("suitable")
         reason = arguments.get("reason")
+        if (
+            isinstance(selected_event_id, bool)
+            or not isinstance(selected_event_id, int)
+            or selected_event_id <= 0
+        ):
+            raise PlotScheduleJudgeResponseError(
+                "selectedEventId must be a positive integer"
+            )
         if not isinstance(suitable, bool):
             raise PlotScheduleJudgeResponseError("suitable must be a boolean")
         if not isinstance(reason, str) or not reason.strip():
@@ -122,14 +136,31 @@ class PlotScheduleJudge:
             raise PlotScheduleJudgeResponseError(
                 "reason exceeds the plot scheduler length limit"
             )
-        return PlotSuitabilityDecision(suitable=suitable, reason=normalized_reason)
+        return PlotSuitabilityDecision(
+            selected_event_id=selected_event_id,
+            suitable=suitable,
+            reason=normalized_reason,
+        )
 
 
 def build_plot_judge_prompt(
-    candidate: PlotScheduleCandidate,
+    candidates: PlotScheduleCandidate | Sequence[PlotScheduleCandidate],
     *,
+    primary_event_id: int | None = None,
     accepted_injections: Sequence[PlotScheduleInjection] = (),
 ) -> str:
+    normalized_candidates = (
+        (candidates,)
+        if isinstance(candidates, PlotScheduleCandidate)
+        else tuple(candidates)
+    )
+    if not normalized_candidates:
+        raise ValueError("plot judge requires at least one candidate")
+    primary_id = (
+        int(primary_event_id)
+        if primary_event_id is not None
+        else normalized_candidates[0].event.id
+    )
     prior = [
         {
             "source": injection.source_kind,
@@ -139,27 +170,40 @@ def build_plot_judge_prompt(
         for injection in accepted_injections
     ]
     payload = {
-        "candidate": {
-            "source": candidate.source_kind,
-            "container": candidate.container_name,
-            "event": candidate.event.title,
-            "description": candidate.event.description,
-            "suitabilityHint": candidate.event.suitability_hint,
-            "scheduledTime": (
-                candidate.scheduled_time.format()
-                if candidate.scheduled_time is not None
-                else None
-            ),
-            "directive": candidate.event.directive,
-        },
+        "primaryEventId": primary_id,
+        "candidates": [
+            {
+                "eventId": candidate.event.id,
+                "source": candidate.source_kind,
+                "container": candidate.container_name,
+                "event": candidate.event.title,
+                "description": candidate.event.description,
+                "suitabilityHint": candidate.event.suitability_hint,
+                "scheduledTime": (
+                    candidate.scheduled_time.format()
+                    if candidate.scheduled_time is not None
+                    else None
+                ),
+                "deadlineTime": (
+                    candidate.event.deadline_time.format()
+                    if candidate.event.deadline_time is not None
+                    else None
+                ),
+                "directive": candidate.event.directive,
+            }
+            for candidate in normalized_candidates
+        ],
         "alreadyAcceptedThisTurn": prior,
     }
     return (
-        "你是剧情调度的软约束判定器。只判断候选事件能否从当前 Scene 合理开始，"
+        "你是剧情调度的软约束候选重排器。比较候选事件并选择当前最适合开始的一项，"
         "不得续写、改写或执行剧情。完整考虑当前地点、在场人物、状态表、最近对话和玩家本轮输入；"
-        "若关键角色明确在别处、当前行动不可中断、事实条件冲突，判定为不适合。"
+        "优先选择与当前事实、人物位置、行动节奏和玩家本轮输入兼容的候选。"
+        "若所有候选都因关键角色在别处、当前行动不可中断或事实条件冲突而不适合，"
+        "仍返回其中最接近的一项，但 suitable=false。"
         "若本轮已有另一条调度，还必须判断两者能否兼容地同时开始。"
-        "不要因为事件戏剧性强或尚未被对话提及就拒绝。必须且只能调用一次 "
+        "不要因为事件戏剧性强或尚未被对话提及就拒绝。selectedEventId 必须来自候选列表。"
+        "必须且只能调用一次 "
         f"{PLOT_SUITABILITY_TOOL_NAME}，不得输出普通正文。\n\n"
         + json.dumps(payload, ensure_ascii=False, indent=2)
     )

@@ -1693,7 +1693,7 @@ function resolvePlotResource(index, stableId) {
 
 function renderPlotDirectory(plot, plotIndex) {
   const outlines = sortedResources(plotIndex.outlines.all, "priority");
-  const pools = sortedResources(plotIndex.pools.all, "priority");
+  const pools = plotIndex.pools.all;
   const events = plotIndex.events.all;
   if (!outlines.length && !pools.length && !events.length) {
     return emptyResult(
@@ -1722,7 +1722,7 @@ function renderPlotDirectory(plot, plotIndex) {
         ${renderPlotDirectorySection(
           "EVENT POOLS",
           "事件池",
-          "进入事件池查看池级冷却、自动池候选与大纲专用事件。",
+          "进入事件池查看稳定抽取权重、soft 候选批次、池级冷却与大纲专用事件。",
           pools.length,
           pools.length
             ? `<div class="resource-grid">${pools.map((pool, index) => (
@@ -1816,6 +1816,10 @@ function renderPlotPoolSummary(pool, plotIndex, index) {
       </div>
       <span class="plot-card-pills">
         ${statusPill(pool.selectionMode || "random", "is-accent")}
+        ${statusPill(`权重 ${pool.selectionWeight ?? 1}`)}
+        ${pool.selectionMode === "sequential"
+          ? statusPill("严格顺序")
+          : statusPill(`soft batch ${pool.candidateBatchSize ?? 3}`)}
         ${statusPill(
           Number(pool.cooldownMinutes || 0) > 0
             ? `冷却 ${pool.cooldownMinutes} 分钟`
@@ -1830,7 +1834,13 @@ function renderPlotPoolSummary(pool, plotIndex, index) {
     </div>
     <p class="card-copy">${escapeHtml(pool.description || "暂无事件池说明。")}</p>
     ${metaGrid([
-      ["优先级", pool.priority ?? 0],
+      ["稳定抽取权重", pool.selectionWeight ?? 1],
+      [
+        "soft 候选批次",
+        pool.selectionMode === "sequential"
+          ? `${pool.candidateBatchSize ?? 3}（顺序池忽略）`
+          : pool.candidateBatchSize ?? 3,
+      ],
       ["事件数", events.length],
       ["自动池候选", events.length - outlineBoundCount],
       ["大纲专用", outlineBoundCount],
@@ -2059,6 +2069,10 @@ function renderPlotPoolDetail(entry, plotIndex) {
             </div>
             <span class="plot-card-pills">
               ${statusPill(pool.selectionMode || "random", "is-accent")}
+              ${statusPill(`权重 ${pool.selectionWeight ?? 1}`)}
+              ${pool.selectionMode === "sequential"
+                ? statusPill("严格顺序")
+                : statusPill(`soft batch ${pool.candidateBatchSize ?? 3}`)}
               ${statusPill(
                 Number(pool.cooldownMinutes || 0) > 0
                   ? `冷却 ${pool.cooldownMinutes} 分钟`
@@ -2073,7 +2087,13 @@ function renderPlotPoolDetail(entry, plotIndex) {
           </div>
           <p class="card-copy">${escapeHtml(pool.description || "暂无事件池说明。")}</p>
           ${metaGrid([
-            ["优先级", pool.priority ?? 0],
+            ["稳定抽取权重", pool.selectionWeight ?? 1],
+            [
+              "soft 候选批次",
+              pool.selectionMode === "sequential"
+                ? `${pool.candidateBatchSize ?? 3}（顺序池忽略）`
+                : pool.candidateBatchSize ?? 3,
+            ],
             ["事件数", events.length],
             ["自动池候选", events.length - outlineBoundCount],
             ["大纲专用", outlineBoundCount],
@@ -2085,7 +2105,7 @@ function renderPlotPoolDetail(entry, plotIndex) {
             <div>
               <p class="card-eyebrow">POOL EVENTS</p>
               <h3>池内事件</h3>
-              <p>事件按 position 排列；被任意大纲节点引用的事件只走大纲 lane，不参与自动池抽取。</p>
+              <p>random 池按事件权重无放回召回 soft batch，再由一次适宜性判断选出一项；sequential 池仍按 position 严格推进。大纲绑定事件不参与自动池抽取。</p>
             </div>
             <span class="plot-section-count">${escapeHtml(events.length)}</span>
           </header>
@@ -2129,6 +2149,7 @@ function renderPlotEventSummary(event, plotIndex, index) {
     </div>
     <p class="card-copy">${escapeHtml(event.description || "暂无事件摘要。")}</p>
     ${metaGrid([
+      ["随机召回权重", event.selectionWeight ?? 1],
       ["计划时间", event.scheduledTime || "可选"],
       ["截止时间", event.deadlineTime || "无限制"],
       ["状态", event.enabled === false ? "停用" : "启用"],
@@ -2232,6 +2253,7 @@ function renderPlotEventDetailCard(event, index, outlineReferenceCount) {
       <p class="prose-block">${escapeHtml(event.directive || "—")}</p>
       ${metaGrid([
         ["事件池", event.poolRef || "—"],
+        ["随机召回权重", event.selectionWeight ?? 1],
         ["计划时间", event.scheduledTime || "可选"],
         ["截止时间", event.deadlineTime || "无限制"],
         ["允许重复", event.allowRepeat ? "是" : "否"],
@@ -2279,7 +2301,7 @@ function renderPlotPoolReference(poolRef, resolution) {
       href="${escapeHtml(plotDetailHref("pool", pool.stableId))}"
     >
       <strong>${escapeHtml(pool.name || pool.stableId)}</strong>
-      <p>${escapeHtml(pool.selectionMode || "random")} · 优先级 ${escapeHtml(pool.priority ?? 0)} · 池级冷却 ${escapeHtml(pool.cooldownMinutes ?? 0)} 分钟</p>
+      <p>${escapeHtml(pool.selectionMode || "random")} · 权重 ${escapeHtml(pool.selectionWeight ?? 1)} · soft batch ${escapeHtml(pool.candidateBatchSize ?? 3)} · 池级冷却 ${escapeHtml(pool.cooldownMinutes ?? 0)} 分钟</p>
       <span>${escapeHtml(pool.stableId)}</span>
     </a>
   `;

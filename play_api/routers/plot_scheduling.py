@@ -59,7 +59,13 @@ class PlotPoolInput(BaseModel):
     name: str
     description: str = ""
     selection_mode: str = Field(default=models.PLOT_POOL_RANDOM, alias="selectionMode")
-    priority: int = 0
+    selection_weight: int = Field(default=1, alias="selectionWeight", gt=0)
+    candidate_batch_size: int = Field(
+        default=3,
+        alias="candidateBatchSize",
+        ge=1,
+        le=5,
+    )
     cooldown_minutes: int = Field(default=0, alias="cooldownMinutes", ge=0)
     enabled: bool = True
 
@@ -70,7 +76,17 @@ class PlotPoolPatch(BaseModel):
     name: str | None = None
     description: str | None = None
     selection_mode: str | None = Field(default=None, alias="selectionMode")
-    priority: int | None = None
+    selection_weight: int | None = Field(
+        default=None,
+        alias="selectionWeight",
+        gt=0,
+    )
+    candidate_batch_size: int | None = Field(
+        default=None,
+        alias="candidateBatchSize",
+        ge=1,
+        le=5,
+    )
     cooldown_minutes: int | None = Field(
         default=None,
         alias="cooldownMinutes",
@@ -87,7 +103,8 @@ class PlotPoolResponse(BaseModel):
     name: str
     description: str
     selection_mode: str = Field(alias="selectionMode")
-    priority: int
+    selection_weight: int = Field(alias="selectionWeight")
+    candidate_batch_size: int = Field(alias="candidateBatchSize")
     cooldown_minutes: int = Field(alias="cooldownMinutes")
     enabled: bool
     version: int
@@ -107,6 +124,7 @@ class PlotEventInput(BaseModel):
     scheduled_time: SceneTimePayload | None = Field(default=None, alias="scheduledTime")
     deadline_time: SceneTimePayload | None = Field(default=None, alias="deadlineTime")
     position: int | None = Field(default=None, ge=0)
+    selection_weight: int = Field(default=1, alias="selectionWeight", gt=0)
     enabled: bool = True
     allow_repeat: bool = Field(default=False, alias="allowRepeat")
     repeat_cooldown_minutes: int = Field(
@@ -128,6 +146,11 @@ class PlotEventPatch(BaseModel):
     scheduled_time: SceneTimePayload | None = Field(default=None, alias="scheduledTime")
     deadline_time: SceneTimePayload | None = Field(default=None, alias="deadlineTime")
     position: int | None = Field(default=None, ge=0)
+    selection_weight: int | None = Field(
+        default=None,
+        alias="selectionWeight",
+        gt=0,
+    )
     enabled: bool | None = None
     allow_repeat: bool | None = Field(default=None, alias="allowRepeat")
     repeat_cooldown_minutes: int | None = Field(
@@ -151,6 +174,7 @@ class PlotEventResponse(BaseModel):
     scheduled_time: SceneTimePayload | None = Field(alias="scheduledTime")
     deadline_time: SceneTimePayload | None = Field(alias="deadlineTime")
     position: int
+    selection_weight: int = Field(alias="selectionWeight")
     enabled: bool
     allow_repeat: bool = Field(alias="allowRepeat")
     repeat_cooldown_minutes: int = Field(alias="repeatCooldownMinutes")
@@ -425,7 +449,8 @@ def _pool_response(value: models.StoryPlotEventPool) -> PlotPoolResponse:
         name=value.name,
         description=value.description,
         selectionMode=value.selection_mode,
-        priority=value.priority,
+        selectionWeight=value.selection_weight,
+        candidateBatchSize=value.candidate_batch_size,
         cooldownMinutes=value.cooldown_minutes,
         enabled=value.enabled,
         version=value.version,
@@ -447,6 +472,7 @@ def _event_response(value: models.StoryPlotEvent) -> PlotEventResponse:
         scheduledTime=_time_response(value.scheduled_time),
         deadlineTime=_time_response(value.deadline_time),
         position=value.position,
+        selectionWeight=value.selection_weight,
         enabled=value.enabled,
         allowRepeat=value.allow_repeat,
         repeatCooldownMinutes=value.repeat_cooldown_minutes,
@@ -683,7 +709,16 @@ def _pool_update_command(
             "selection_mode",
             payload.selection_mode,
         ),
-        priority=_required_patch_value(payload, "priority", payload.priority),
+        selection_weight=_required_patch_value(
+            payload,
+            "selection_weight",
+            payload.selection_weight,
+        ),
+        candidate_batch_size=_required_patch_value(
+            payload,
+            "candidate_batch_size",
+            payload.candidate_batch_size,
+        ),
         cooldown_minutes=_required_patch_value(
             payload,
             "cooldown_minutes",
@@ -724,6 +759,11 @@ def _event_update_command(
         scheduled_time=_event_time_patch(payload),
         deadline_time=_event_deadline_time_patch(payload),
         position=_required_patch_value(payload, "position", payload.position),
+        selection_weight=_required_patch_value(
+            payload,
+            "selection_weight",
+            payload.selection_weight,
+        ),
         enabled=_required_patch_value(payload, "enabled", payload.enabled),
         allow_repeat=_required_patch_value(
             payload,
@@ -821,7 +861,8 @@ async def create_plot_pool(
                 name=payload.name,
                 description=payload.description,
                 selection_mode=payload.selection_mode,
-                priority=payload.priority,
+                selection_weight=payload.selection_weight,
+                candidate_batch_size=payload.candidate_batch_size,
                 cooldown_minutes=payload.cooldown_minutes,
                 enabled=payload.enabled,
             )
@@ -899,6 +940,7 @@ async def create_plot_event(
                     else None
                 ),
                 position=payload.position,
+                selection_weight=payload.selection_weight,
                 enabled=payload.enabled,
                 allow_repeat=payload.allow_repeat,
                 repeat_cooldown_minutes=payload.repeat_cooldown_minutes,

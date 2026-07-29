@@ -82,7 +82,7 @@ async def test_contract_error_discards_all_staged_turn_state(
             story_id=session.story_id,
             name="契约回滚测试池",
             selection_mode=models.PLOT_POOL_SEQUENTIAL,
-            priority=100,
+            selection_weight=1,
         )
     )
     event = management.create_event(
@@ -529,7 +529,7 @@ async def test_plot_scheduler_consumes_only_prior_committed_scene_change(
             story_id=session.story_id,
             name="Scene 机会测试池",
             selection_mode=models.PLOT_POOL_SEQUENTIAL,
-            priority=100,
+            selection_weight=100,
             cooldown_minutes=60,
         )
     )
@@ -561,7 +561,7 @@ async def test_plot_scheduler_consumes_only_prior_committed_scene_change(
             story_id=session.story_id,
             name="低优先级备用池",
             selection_mode=models.PLOT_POOL_SEQUENTIAL,
-            priority=10,
+            selection_weight=1,
         )
     )
     low_event = management.create_event(
@@ -638,7 +638,10 @@ async def test_plot_scheduler_consumes_only_prior_committed_scene_change(
             model="plot-scheduler-model",
             tool_calls=[tool_call(
                 PLOT_SUITABILITY_TOOL_NAME,
-                '{"suitable":true,"reason":"信使可以进入当前大厅。"}',
+                (
+                    f'{{"selectedEventId":{event.id},"suitable":true,'
+                    '"reason":"信使可以进入当前大厅。"}'
+                ),
             )],
         )
     )
@@ -690,7 +693,10 @@ async def test_plot_scheduler_consumes_only_prior_committed_scene_change(
             model="plot-scheduler-model",
             tool_calls=[tool_call(
                 PLOT_SUITABILITY_TOOL_NAME,
-                '{"suitable":true,"reason":"信使已经抵达大厅门口。"}',
+                (
+                    f'{{"selectedEventId":{event.id},"suitable":true,'
+                    '"reason":"信使已经抵达大厅门口。"}'
+                ),
             )],
         )
     )

@@ -74,3 +74,47 @@ def test_message_mode_module_has_no_story_pack_configuration() -> None:
                 ]
             }
         })
+
+
+def test_plot_weight_and_batch_contract_defaults_reject_legacy_pool_priority() -> None:
+    document = StoryDesignDocument.model_validate({
+        "resources": {
+            "plotSchedule": {
+                "pools": [
+                    {
+                        "stableId": "pool-daily",
+                        "name": "日常扰动",
+                    }
+                ],
+                "events": [
+                    {
+                        "stableId": "event-rain",
+                        "poolRef": "pool-daily",
+                        "title": "骤雨",
+                        "directive": "让窗外开始下雨。",
+                    }
+                ],
+            }
+        }
+    })
+
+    pool = document.resources.plot_schedule.pools[0]
+    event = document.resources.plot_schedule.events[0]
+    assert pool.selection_weight == 1
+    assert pool.candidate_batch_size == 3
+    assert event.selection_weight == 1
+
+    with pytest.raises(ValidationError):
+        StoryDesignDocument.model_validate({
+            "resources": {
+                "plotSchedule": {
+                    "pools": [
+                        {
+                            "stableId": "pool-legacy",
+                            "name": "旧池",
+                            "priority": 10,
+                        }
+                    ]
+                }
+            }
+        })

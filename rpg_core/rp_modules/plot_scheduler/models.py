@@ -36,11 +36,36 @@ class PlotScheduleCandidate:
     container_name: str
     dispatch_mode: str
     scheduled_time: SceneTime | None
-    priority: int
+    container_priority: int | None = None
+    container_selection_weight: int | None = None
+    event_selection_weight: int = 1
+    pool_selection_mode: str | None = None
+
+
+@dataclass(frozen=True)
+class PlotScheduleCandidateBatch:
+    """One weighted primary candidate plus soft recall candidates for rerank."""
+
+    primary: PlotScheduleCandidate
+    candidates: tuple[PlotScheduleCandidate, ...]
+    configured_size: int
+
+    @property
+    def source_kind(self) -> str:
+        return self.primary.source_kind
+
+    @property
+    def source_id(self) -> int:
+        return self.primary.source_id
+
+    @property
+    def event(self) -> data_models.StoryPlotEvent:
+        return self.primary.event
 
 
 @dataclass(frozen=True)
 class PlotSuitabilityDecision:
+    selected_event_id: int
     suitable: bool
     reason: str
 

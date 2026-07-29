@@ -32,10 +32,13 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             name="日常事件",
             description="显式持久化参数",
             selection_mode=models.PLOT_POOL_SEQUENTIAL,
-            priority=20,
+            selection_weight=2,
+            candidate_batch_size=3,
             cooldown_minutes=180,
             enabled=True,
         )
+        assert pool.selection_weight == 2
+        assert pool.candidate_batch_size == 3
         assert pool.cooldown_minutes == 180
         first = service.create_event(
             story_id=story.id,
@@ -63,6 +66,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             scheduled_time=SceneTime(1, 1, 1, 8),
             deadline_time=SceneTime(1, 1, 1, 10),
             position=9,
+            selection_weight=4,
             enabled=True,
             allow_repeat=True,
             repeat_cooldown_minutes=60,
@@ -89,7 +93,8 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             name="日常事件池",
             description="更新后的描述",
             selection_mode=models.PLOT_POOL_RANDOM,
-            priority=30,
+            selection_weight=3,
+            candidate_batch_size=5,
             cooldown_minutes=360,
             enabled=False,
         )
@@ -104,6 +109,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             scheduled_time=SceneTime(1, 1, 1, 7),
             deadline_time=SceneTime(1, 1, 1, 12),
             position=2,
+            selection_weight=6,
             enabled=True,
             allow_repeat=False,
             repeat_cooldown_minutes=0,
@@ -125,9 +131,13 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
         )
 
         assert updated_pool is not None and updated_pool.name == "日常事件池"
+        assert updated_pool.selection_weight == 3
+        assert updated_pool.candidate_batch_size == 5
         assert updated_pool.cooldown_minutes == 360
         assert updated_event is not None and updated_event.position == 2
+        assert updated_event.selection_weight == 6
         assert updated_event.deadline_time == SceneTime(1, 1, 1, 12)
+        assert second.selection_weight == 4
         assert updated_outline is not None and updated_outline.name == "主线 A"
         assert updated_node is not None and updated_node.event_id == second.id
         assert service.get_pool(999, pool.id) is None
@@ -185,7 +195,7 @@ def test_pending_plot_injection_snapshot_uses_cas_and_survives_event_delete() ->
             name="临时池",
             description="",
             selection_mode=models.PLOT_POOL_RANDOM,
-            priority=0,
+            selection_weight=1,
             enabled=True,
         )
         assert pool.cooldown_minutes == 0
@@ -196,7 +206,7 @@ def test_pending_plot_injection_snapshot_uses_cas_and_survives_event_delete() ->
                 name="非法冷却池",
                 description="",
                 selection_mode=models.PLOT_POOL_RANDOM,
-                priority=0,
+                selection_weight=1,
                 cooldown_minutes=-1,
                 enabled=True,
             )
@@ -519,9 +529,27 @@ def test_plot_data_constraints_and_transaction_rollback() -> None:
             name="约束池",
             description="",
             selection_mode=models.PLOT_POOL_RANDOM,
-            priority=0,
+            selection_weight=1,
             enabled=True,
         )
+        with pytest.raises(PlotScheduleDataIntegrityError):
+            service.create_pool(
+                story_id=story.id,
+                name="零权重池",
+                description="",
+                selection_mode=models.PLOT_POOL_RANDOM,
+                selection_weight=0,
+                enabled=True,
+            )
+        with pytest.raises(PlotScheduleDataIntegrityError):
+            service.create_pool(
+                story_id=story.id,
+                name="超大批次池",
+                description="",
+                selection_mode=models.PLOT_POOL_RANDOM,
+                candidate_batch_size=6,
+                enabled=True,
+            )
 
         with pytest.raises(PlotScheduleDataIntegrityError):
             service.create_event(
@@ -537,6 +565,23 @@ def test_plot_data_constraints_and_transaction_rollback() -> None:
                 position=0,
                 enabled=True,
                 allow_repeat=True,
+                repeat_cooldown_minutes=0,
+            )
+        with pytest.raises(PlotScheduleDataIntegrityError):
+            service.create_event(
+                story_id=story.id,
+                pool_id=pool.id,
+                title="零权重事件",
+                directive="不会保存。",
+                description="",
+                suitability_hint="",
+                dispatch_mode=models.PLOT_DISPATCH_SOFT,
+                scheduled_time=None,
+                deadline_time=None,
+                position=0,
+                selection_weight=0,
+                enabled=True,
+                allow_repeat=False,
                 repeat_cooldown_minutes=0,
             )
         assert service.list_events(1, pool_id=pool.id) == []
@@ -611,7 +656,7 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy(
             name="账本池",
             description="",
             selection_mode=models.PLOT_POOL_RANDOM,
-            priority=0,
+            selection_weight=1,
             enabled=True,
         )
         event = service.create_event(

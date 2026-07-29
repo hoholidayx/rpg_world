@@ -460,7 +460,7 @@ RP Modules 采用上下文分层策略：
 模块的业务 owner 是 `rpg_core/rp_modules/plot_scheduler`：默认位置、跨池移动、重复/冷却、时间线顺序、完整重排、删除占用、turn 决策批次以及派生/清理策略都由 Core 的类型化 application service 与 ledger policy 决定。`rpg_data` 只提供 Plot 定义、Session 覆盖和决策账本的类型化 CRUD、只读投影、调用方指定的复制条件与事务边界；Play API 也必须经 Core 管理入口写入定义。
 
 - 大纲节点引用一个 Story 事件，并保存严格的 `SceneTime`、节点顺序与 `forced | soft` 调度模式。每条启用大纲只检查第一个尚未触发且未被 Session 禁用的节点；同轮所有大纲最多仲裁出一个到期节点。
-- 每个事件归属一个池，池按显式 priority 仲裁，池内使用 `random`（默认）或 `sequential`。无首次时间的事件立即可候选；有时间时只有达到或超过该时间才首次候选。池的 `cooldownMinutes` 为默认 `0` 的非负 SceneTime 分钟：池内任意事件由自动 pool lane 成功注入后，整个池在到期前都不参与候选，调度器可继续回退到下一可用池。
+- 每个事件归属一个池。通过确定性资格规则的池按正整数 `selectionWeight`（默认 `1`）和稳定 Session/turn seed 加权抽取；这是长期概率分布，不是严格优先级或有限轮次保底。`random` 池先按事件 `selectionWeight`（默认 `1`）抽主候选；soft 主候选再按池 `candidateBatchSize`（默认 `3`、范围 `1–5`）加权无放回补齐 soft batch，由一次 Judge 选择至多一个当前最适宜事件。事件权重只控制 batch 召回概率，不承诺最终注入频率。forced 主候选不进入 batch，直接注入；`sequential` 池仍严格按 position 推进并忽略事件权重与 batch。无首次时间的事件立即可候选；有时间时只有达到或超过该时间才首次候选。池的 `cooldownMinutes` 为默认 `0` 的非负 SceneTime 分钟：池内任意事件由自动 pool lane 成功注入后，整个池在到期前都不参与候选，调度器继续从其余可用池中加权抽取。
 - 冷却档位是创作建议而非硬默认：日常现实扰动可用半天到一天，人际、信息与工作压力可用数天，真正会改变关系结构的戏剧性巧合可用十天到数周，并只在已有关系、信息或利益张力时通过 `suitabilityHint` 放行。
 - 大纲节点永不重复；池事件可选择重复，重复时必须配置正数世界内分钟的事件级冷却。池 lane 以稳定 `event_id` 记录已触发、延期与事件级冷却，事件移池不会重置这些状态。池级冷却只认最新已提交 `sourceKind=pool`、`selectionOrigin=scheduler`、`decisionStatus=triggered` 决策，并以当时的 `containerId` 归属池；当前池配置立即作用于已有锚点。
 - 只要事件仍被任意大纲节点引用，就不参与自动 pool lane，无论对应大纲/节点或 Session 覆盖当前是否启用；删除全部引用后才回池。大纲 lane 继续按节点独立调度，因此绑定事件不会重复占用池额度。Session 事件禁用只影响未绑定事件的自动 pool lane，节点禁用只影响该大纲位置，均不修改 Story 定义；手动标记可绕过这些规则。
@@ -482,7 +482,7 @@ Context gate
   → post-commit hooks
 ```
 
-有 Scene 调度机会时，强制候选达到时间后直接暂存为 `triggered` 并进入当前 user message 的最终运行时 Plot suffix。软候选使用独立 `agent.plot_scheduler` LLM 业务路由判断当前是否适合开始；输入包含完整 fixed layer（Story Prompt、世界书、角色卡等）、当前 Scene、全部普通状态表、最近默认 5 个完整原始可推进世界 turn 和当前玩家输入，不读取 Summary、Story Memory、Persistent Memory 或 Recall 投影。Judge 理由有硬长度上限；主 Context 门禁仅在存在自动机会或手动快照时按最长两条 directive、事件/容器名称和有界元数据保守预留。适合时注入，不适合记录 `deferred`，Provider/结构化响应失败记录 `error`；后二者都不会中断主 turn，并至少跳过一个完整已提交可推进世界 turn 后才重试。同轮若大纲已接受，池事件判断会同时看到该指令并检查兼容性。
+有 Scene 调度机会时，forced 主候选达到时间后直接暂存为 `triggered` 并进入当前 user message 的最终运行时 Plot suffix。单 soft 候选或 random soft batch 使用独立 `agent.plot_scheduler` LLM 业务路由判断：batch 只调用一次 Judge，并通过结构化 `selectedEventId` 选择至多一项；若所有候选都不适宜，仍选择最接近的一项并返回 `suitable=false`。最终只对选中事件注入或记录一条 `deferred`，未选候选不产生 retry/冷却状态；非法选择或 Judge 失败只在加权主候选记录 `error`。输入包含完整 fixed layer（Story Prompt、世界书、角色卡等）、当前 Scene、全部普通状态表、最近默认 5 个完整原始可推进世界 turn 和当前玩家输入，不读取 Summary、Story Memory、Persistent Memory 或 Recall 投影。Judge 理由有硬长度上限；主 Context 门禁仅在存在自动机会或手动快照时按最长两条 directive、事件/容器名称和有界元数据保守预留。后二者都不会中断主 turn，并至少跳过一个完整已提交可推进世界 turn 后才重试。同轮若大纲已接受，池事件判断会同时看到该指令并检查兼容性。
 
 每个机会 turn 最多原子记录一条 `outline` 和一条 `pool` 决策。手动快照在下一次 neutral/IC/GM 回合优先占用 pool lane，即使 SceneTime 缺失也强制注入；只有目标回合成功提交才消费，账本以 `selectionOrigin=manual` 区分且允许 SceneTime 为空，且不会成为池级冷却锚点。主 runner 取消、Provider 失败、流缺失 DONE 或 commit 失败时，自动机会消费、判断、注入与沙盘 mark/clear 都随 scratch 一起丢弃；主历史编辑、删除、截断和重试会同步删除对应决策及受影响 turn 生成的 Scene 机会，并在标记请求 turn 受影响时清除待注入快照。`/clear` 清空判断/触发账本、Scene 机会和待注入快照但保留 Session 禁用覆盖；Session 派生复制分支点以前的 `triggered` 记录和全部禁用覆盖，不复制 Scene 机会、`deferred / error` 或待注入快照。
 

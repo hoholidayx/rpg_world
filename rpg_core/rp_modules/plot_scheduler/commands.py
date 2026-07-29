@@ -25,7 +25,8 @@ class CreatePlotPoolCommand:
     name: str
     description: str = ""
     selection_mode: str = data_models.PLOT_POOL_RANDOM
-    priority: int = 0
+    selection_weight: int = 1
+    candidate_batch_size: int = 3
     cooldown_minutes: int = 0
     enabled: bool = True
 
@@ -38,7 +39,8 @@ class UpdatePlotPoolCommand:
     name: str | PlotPatchUnset = PLOT_PATCH_UNSET
     description: str | PlotPatchUnset = PLOT_PATCH_UNSET
     selection_mode: str | PlotPatchUnset = PLOT_PATCH_UNSET
-    priority: int | PlotPatchUnset = PLOT_PATCH_UNSET
+    selection_weight: int | PlotPatchUnset = PLOT_PATCH_UNSET
+    candidate_batch_size: int | PlotPatchUnset = PLOT_PATCH_UNSET
     cooldown_minutes: int | PlotPatchUnset = PLOT_PATCH_UNSET
     enabled: bool | PlotPatchUnset = PLOT_PATCH_UNSET
 
@@ -56,6 +58,7 @@ class CreatePlotEventCommand:
     scheduled_time: SceneTime | None = None
     deadline_time: SceneTime | None = None
     position: int | None = None
+    selection_weight: int = 1
     enabled: bool = True
     allow_repeat: bool = False
     repeat_cooldown_minutes: int = 0
@@ -75,6 +78,7 @@ class UpdatePlotEventCommand:
     scheduled_time: SceneTime | None | PlotPatchUnset = PLOT_PATCH_UNSET
     deadline_time: SceneTime | None | PlotPatchUnset = PLOT_PATCH_UNSET
     position: int | PlotPatchUnset = PLOT_PATCH_UNSET
+    selection_weight: int | PlotPatchUnset = PLOT_PATCH_UNSET
     enabled: bool | PlotPatchUnset = PLOT_PATCH_UNSET
     allow_repeat: bool | PlotPatchUnset = PLOT_PATCH_UNSET
     repeat_cooldown_minutes: int | PlotPatchUnset = PLOT_PATCH_UNSET

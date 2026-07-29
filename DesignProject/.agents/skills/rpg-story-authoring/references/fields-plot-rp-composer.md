@@ -1,6 +1,6 @@
 # 剧情调度、RP Module 与 Composer 字段
 
-> authoringRulesVersion=1.3 · catalogDigest=340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431
+> authoringRulesVersion=1.4 · catalogDigest=12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413
 
 本文由 RPG World 字段语义单一真源生成；不要手工修改。
 
@@ -23,6 +23,12 @@ message_mode 只声明启用且 config 为空；neutral/ic/ooc/gm 的标签和 P
 只要剧情事件仍被任意大纲节点引用，就永久从自动 pool lane 候选中排除，不受大纲、节点或 Session 覆盖当前是否启用影响。删除该事件的全部节点引用后，它才重新成为池内候选。
 
 运行时影响：大纲 lane 仍按自身节点独立调度；结构绑定避免同一事件同时消耗大纲和事件池额度。Session 手动标记仍可绕过该结构隔离。
+
+### 事件池使用稳定加权召回与单次重排
+
+自动 pool lane 先在通过确定性资格规则的池之间按 selectionWeight 稳定加权选池。random 池再按事件 selectionWeight 抽取主候选；soft 主候选可按 candidateBatchSize 加权无放回补充 soft 候选，并通过一次 Judge 选择当前最适合的一项。池权重表达选池概率，事件权重只表达进入候选批次的召回概率，都不提供有限轮次保底。
+
+运行时影响：相同 Session、turn、定义和决策快照得到相同选择。forced 主候选直接注入且不构造批次；sequential 池忽略事件权重和批次大小。未被重排选中的候选不写决策、不启动 retry 或冷却，最终仍最多注入一个 pool directive。
 
 ### 事件池共享自动注入冷却
 
@@ -66,6 +72,7 @@ Plot 的 triggered 只表示事件或大纲节点已被选择并把 directive �
 | `PlotEventSpec` | `/resources/plotSchedule/events/*/position` | 同一容器内的稳定顺序位置。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotEventSpec` | `/resources/plotSchedule/events/*/repeatCooldownMinutes` | 重复事件两次自动触发之间的 SceneTime 分钟冷却；手动标记忽略冷却，且无 SceneTime 的手动注入会解除该事件已有的事件级冷却锚点，但不影响池级冷却。 | 不要把冷却写成现实时间、turn 数或手动注入限制。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotEventSpec` | `/resources/plotSchedule/events/*/scheduledTime` | 仅在 Scene 调度机会存在时作为自动候选最早资格门槛的 SceneTime；不是定时器。 | 不要把时间门槛解释成后台定时器或每 turn 轮询触发器。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
+| `PlotEventSpec` | `/resources/plotSchedule/events/*/selectionWeight` | random 池在结构性可用事件中选择主候选和补充 soft 候选时使用的正整数召回权重；默认 1。最终注入仍由场景适宜性重排决定，不承诺同等最终频率。sequential 池和大纲 lane 忽略此字段。 | 不要把召回权重解释成最终注入概率、严格优先级或有限轮次保底。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotEventSpec` | `/resources/plotSchedule/events/*/stableId` | 跨 revision、分包和运行时绑定保持稳定的文本 ID。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotEventSpec` | `/resources/plotSchedule/events/*/suitabilityHint` | 只说明自动 soft 候选何时适合开始，包括阶段、地点、在场角色、前置事实和安全边界；不重复 directive，手动标记不会执行该判断。 | 不要把它当确定性 DSL、手动注入条件或重复剧情正文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotEventSpec` | `/resources/plotSchedule/events/*/title` | 面向作者、玩家或管理界面的短标题。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
@@ -81,12 +88,13 @@ Plot 的 triggered 只表示事件或大纲节点已被选择并把 directive �
 | `PlotOutlineSpec` | `/resources/plotSchedule/outlines/*/nodes` | 该大纲按 position 排列的节点。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotOutlineSpec` | `/resources/plotSchedule/outlines/*/priority` | 一次 Scene 调度机会内，同类候选之间的相对优先级。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotOutlineSpec` | `/resources/plotSchedule/outlines/*/stableId` | 跨 revision、分包和运行时绑定保持稳定的文本 ID。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
+| `PlotPoolSpec` | `/resources/plotSchedule/pools/*/candidateBatchSize` | random 池按事件权重抽到 soft 主候选后，本轮最多召回多少个 soft 事件交给一次 LLM 适宜性重排；范围 1–5、默认 3，1 表示单候选。sequential 池忽略此字段。 | 不要把批次大小解释成多次 Judge 调用或一轮注入多个池事件。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotPoolSpec` | `/resources/plotSchedule/pools/*/cooldownMinutes` | 池内任意事件最近一次以 scheduler 来源在 pool lane 成功注入后，整个池需等待的 SceneTime 分钟；0 表示关闭。手动标记、大纲注入、延期和错误都不启动、刷新或清除池级冷却。创作时可按强度分池：日常现实扰动建议半天到一天，人际/信息/工作压力建议数天，改变关系结构的戏剧性巧合建议十天到数周；这些只是调参建议，不是 schema 默认值。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotPoolSpec` | `/resources/plotSchedule/pools/*/description` | 说明池的主题、用途、自动候选边界和建议冷却档位，不写单个事件指令。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotPoolSpec` | `/resources/plotSchedule/pools/*/enabled` | 是否允许该池参与有 Scene 调度机会的自动候选；手动标记忽略此字段。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotPoolSpec` | `/resources/plotSchedule/pools/*/name` | 面向作者和管理界面的名称。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
-| `PlotPoolSpec` | `/resources/plotSchedule/pools/*/priority` | 一次 Scene 调度机会内，同类候选之间的相对优先级。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotPoolSpec` | `/resources/plotSchedule/pools/*/selectionMode` | 有 Scene 调度机会时，池内候选的 random 或 sequential 抽取方式。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
+| `PlotPoolSpec` | `/resources/plotSchedule/pools/*/selectionWeight` | 事件池通过全部确定性资格规则后，在可用池之间稳定加权抽取的相对权重；正整数且默认 1。它表达长期概率，不是严格顺序或有限轮次保底。 | 不要用 0 表示停用；停用使用 enabled，也不要把权重解释成严格优先级。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotPoolSpec` | `/resources/plotSchedule/pools/*/stableId` | 跨 revision、分包和运行时绑定保持稳定的文本 ID。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotScheduleSpec` | `/resources/plotSchedule/events` | 剧情事件定义；每条事件只归一个池。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `PlotScheduleSpec` | `/resources/plotSchedule/outlines` | 顺序大纲定义。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |

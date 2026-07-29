@@ -1,6 +1,6 @@
 {
-  "authoringRulesVersion": "1.3",
-  "catalogDigest": "340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431",
+  "authoringRulesVersion": "1.4",
+  "catalogDigest": "12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413",
   "compatibleContracts": {
     "designProject": "story-design-project/2.0",
     "mcp": "2.0",
@@ -1162,6 +1162,20 @@
       "title": "剧情事件 · scheduledTime"
     },
     {
+      "avoid": "不要把召回权重解释成最终注入概率、严格优先级或有限轮次保底。",
+      "description": "random 池在结构性可用事件中选择主候选和补充 soft 候选时使用的正整数召回权重；默认 1。最终注入仍由场景适宜性重排决定，不承诺同等最终频率。sequential 池和大纲 lane 忽略此字段。",
+      "domain": "plot",
+      "examples": [
+        1
+      ],
+      "field": "selectionWeight",
+      "model": "PlotEventSpec",
+      "pathPattern": "/resources/plotSchedule/events/*/selectionWeight",
+      "ruleId": "field.plot-event.selection-weight",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
+      "title": "剧情事件 · selectionWeight"
+    },
+    {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
       "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
       "domain": "plot",
@@ -1372,6 +1386,20 @@
       "title": "剧情大纲 · stableId"
     },
     {
+      "avoid": "不要把批次大小解释成多次 Judge 调用或一轮注入多个池事件。",
+      "description": "random 池按事件权重抽到 soft 主候选后，本轮最多召回多少个 soft 事件交给一次 LLM 适宜性重排；范围 1–5、默认 3，1 表示单候选。sequential 池忽略此字段。",
+      "domain": "plot",
+      "examples": [
+        3
+      ],
+      "field": "candidateBatchSize",
+      "model": "PlotPoolSpec",
+      "pathPattern": "/resources/plotSchedule/pools/*/candidateBatchSize",
+      "ruleId": "field.plot-pool.candidate-batch-size",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
+      "title": "剧情事件池 · candidateBatchSize"
+    },
+    {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
       "description": "池内任意事件最近一次以 scheduler 来源在 pool lane 成功注入后，整个池需等待的 SceneTime 分钟；0 表示关闭。手动标记、大纲注入、延期和错误都不启动、刷新或清除池级冷却。创作时可按强度分池：日常现实扰动建议半天到一天，人际/信息/工作压力建议数天，改变关系结构的戏剧性巧合建议十天到数周；这些只是调参建议，不是 schema 默认值。",
       "domain": "plot",
@@ -1429,20 +1457,6 @@
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
-      "description": "一次 Scene 调度机会内，同类候选之间的相对优先级。",
-      "domain": "plot",
-      "examples": [
-        10
-      ],
-      "field": "priority",
-      "model": "PlotPoolSpec",
-      "pathPattern": "/resources/plotSchedule/pools/*/priority",
-      "ruleId": "field.plot-pool.priority",
-      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
-      "title": "剧情事件池 · priority"
-    },
-    {
-      "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
       "description": "有 Scene 调度机会时，池内候选的 random 或 sequential 抽取方式。",
       "domain": "plot",
       "examples": [
@@ -1454,6 +1468,20 @@
       "ruleId": "field.plot-pool.selection-mode",
       "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
       "title": "剧情事件池 · selectionMode"
+    },
+    {
+      "avoid": "不要用 0 表示停用；停用使用 enabled，也不要把权重解释成严格优先级。",
+      "description": "事件池通过全部确定性资格规则后，在可用池之间稳定加权抽取的相对权重；正整数且默认 1。它表达长期概率，不是严格顺序或有限轮次保底。",
+      "domain": "plot",
+      "examples": [
+        2
+      ],
+      "field": "selectionWeight",
+      "model": "PlotPoolSpec",
+      "pathPattern": "/resources/plotSchedule/pools/*/selectionWeight",
+      "ruleId": "field.plot-pool.selection-weight",
+      "runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。",
+      "title": "剧情事件池 · selectionWeight"
     },
     {
       "avoid": "不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。",
@@ -2727,6 +2755,13 @@
       "ruleId": "principle.plot-outline-binding-isolates-pool-lane",
       "runtimeEffect": "大纲 lane 仍按自身节点独立调度；结构绑定避免同一事件同时消耗大纲和事件池额度。Session 手动标记仍可绕过该结构隔离。",
       "title": "大纲绑定事件不占事件池调度"
+    },
+    {
+      "description": "自动 pool lane 先在通过确定性资格规则的池之间按 selectionWeight 稳定加权选池。random 池再按事件 selectionWeight 抽取主候选；soft 主候选可按 candidateBatchSize 加权无放回补充 soft 候选，并通过一次 Judge 选择当前最适合的一项。池权重表达选池概率，事件权重只表达进入候选批次的召回概率，都不提供有限轮次保底。",
+      "domain": "plot",
+      "ruleId": "principle.plot-stable-weighted-rerank",
+      "runtimeEffect": "相同 Session、turn、定义和决策快照得到相同选择。forced 主候选直接注入且不构造批次；sequential 池忽略事件权重和批次大小。未被重排选中的候选不写决策、不启动 retry 或冷却，最终仍最多注入一个 pool directive。",
+      "title": "事件池使用稳定加权召回与单次重排"
     },
     {
       "description": "cooldownMinutes 是非负 SceneTime 分钟。池内任意事件最近一次由自动 scheduler 在 pool lane 成功注入后，只要 elapsed 小于当前池配置，整个池都不参与候选；elapsed 大于或等于配置时恢复。高强度巧合还应只在已有关系、信息或利益张力时通过 suitabilityHint 表达适宜性。",

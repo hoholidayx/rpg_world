@@ -5,8 +5,8 @@ description: Persist, resume, revise, inspect, validate, and package a portable 
 
 # RPG Story Authoring
 
-<!-- authoring-rules-version: 1.3 -->
-<!-- authoring-rules-digest: 340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431 -->
+<!-- authoring-rules-version: 1.4 -->
+<!-- authoring-rules-digest: 12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413 -->
 
 Persist the Story design as immutable local revisions and use
 `rpg-world-mcp` as the only runtime boundary. Never rely on conversation
@@ -63,6 +63,14 @@ does not consume pool-lane selection until every node reference is removed.
 `cooldownMinutes` pauses the whole pool after any scheduler-origin pool event
 is successfully injected; manual and outline injections do not change that
 pool-level anchor.
+
+Available pools use positive `selectionWeight` values as a stable probability
+distribution, not strict priority or a finite-turn guarantee. A random pool
+uses event `selectionWeight` for weighted recall. When its weighted primary is
+soft, `candidateBatchSize` (default 3, maximum 5) recalls a small soft batch
+for one suitability rerank; event weight is recall probability, not a promise
+about final injection frequency. Sequential pools ignore event weight and
+batch size. A forced weighted primary still injects directly.
 
 Keep `plot_event_mark_next` state out of Story Design and Story Pack fields.
 It is an OOC/GM Session runtime snapshot for the next non-OOC turn, may

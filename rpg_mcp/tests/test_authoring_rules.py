@@ -79,7 +79,7 @@ def test_rule_catalog_covers_every_generated_schema_field() -> None:
     payload = dict(catalog)
     declared_digest = payload.pop("catalogDigest")
 
-    assert AUTHORING_RULES_VERSION == "1.3"
+    assert AUTHORING_RULES_VERSION == "1.4"
     assert catalog["authoringRulesVersion"] == AUTHORING_RULES_VERSION
     assert digest_json(payload) == declared_digest
     assert len(catalog["fields"]) >= 150
@@ -176,6 +176,15 @@ def test_rule_catalog_uses_model_specific_semantic_examples() -> None:
     assert "改变关系结构的戏剧性巧合建议十天到数周" in (
         rules[("PlotPoolSpec", "cooldownMinutes")]["description"]
     )
+    assert "长期概率" in (
+        rules[("PlotPoolSpec", "selectionWeight")]["description"]
+    )
+    assert "范围 1–5、默认 3" in (
+        rules[("PlotPoolSpec", "candidateBatchSize")]["description"]
+    )
+    assert "最终注入仍由场景适宜性重排决定" in (
+        rules[("PlotEventSpec", "selectionWeight")]["description"]
+    )
     assert "Scene 调度机会" in (
         rules[("PlotOutlineSpec", "enabled")]["description"]
     )
@@ -240,6 +249,27 @@ def test_plot_scheduling_rules_model_scene_opportunities_and_runtime_marks() -> 
         "sameEventMayUseBothLanes": False,
         "outlineReferencedEventsParticipateInPoolLane": False,
         "outlineBindingUsesAllNodeReferences": True,
+        "poolSelection": {
+            "field": "selectionWeight",
+            "default": 1,
+            "minimum": 1,
+            "mode": "stable_weighted",
+            "finiteTurnFairnessGuarantee": False,
+        },
+        "randomPoolEventSelection": {
+            "weightField": "selectionWeight",
+            "weightDefault": 1,
+            "weightMinimum": 1,
+            "weightControls": "batch_recall_probability",
+            "batchSizeField": "candidateBatchSize",
+            "batchSizeDefault": 3,
+            "batchSizeMinimum": 1,
+            "batchSizeMaximum": 5,
+            "sampling": "stable_weighted_without_replacement",
+            "rerankCallsPerOpportunity": 1,
+            "sequentialPoolsIgnoreWeightAndBatch": True,
+            "forcedPrimaryBypassesRerank": True,
+        },
         "poolCooldown": {
             "field": "cooldownMinutes",
             "default": 0,

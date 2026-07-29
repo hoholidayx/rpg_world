@@ -671,7 +671,7 @@ INSERT INTO rpg_story_plot_event_pools (
     name,
     description,
     selection_mode,
-    priority,
+    selection_weight,
     enabled
 )
 SELECT
@@ -679,7 +679,7 @@ SELECT
     pools.name,
     pools.description,
     pools.selection_mode,
-    pools.priority,
+    pools.selection_weight,
     pools.enabled
 FROM rpg_stories AS stories
 JOIN (
@@ -688,28 +688,28 @@ JOIN (
         '北门主线节点库' AS name,
         '仅供北门封印主线大纲引用的事件定义。' AS description,
         'sequential' AS selection_mode,
-        100 AS priority,
+        1 AS selection_weight,
         0 AS enabled
     UNION ALL SELECT
         '北境森林 Demo',
         '石林动态事件池',
         '可在石林调查中按当前场景择机出现的环境事件。',
         'random',
-        50,
+        1,
         1
     UNION ALL SELECT
         '奥术学院 Demo',
         '东塔主线节点库',
         '仅供东塔禁档主线大纲引用的事件定义。',
         'sequential',
-        100,
+        1,
         0
     UNION ALL SELECT
         '奥术学院 Demo',
         '学院调查事件池',
         '可在学院调查期间择机出现的监察与通信事件。',
         'sequential',
-        50,
+        1,
         1
 ) AS pools ON pools.story_title = stories.title
 WHERE stories.workspace_id = 'demo_workspace';

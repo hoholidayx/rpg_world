@@ -50,7 +50,7 @@ def _snapshot(
                     id=7,
                     story_id=1,
                     name="雨夜池",
-                    priority=3,
+                    selection_weight=3,
                     cooldown_minutes=cooldown_minutes,
                 ),
             ),
@@ -130,12 +130,15 @@ async def test_plot_sandbox_read_lists_details_and_pending_snapshot() -> None:
     assert schedule["poolCooldowns"][0]["status"] == "ready"
     assert schedule["pendingInjection"]["sourceEventId"] == 99
     assert event["item"]["directive"] == "原事件指令。"
+    assert event["item"]["selectionWeight"] == 1
     assert event["item"]["pool"]["name"] == "雨夜池"
     assert event["item"]["outlineBound"] is True
     assert event["item"]["outlineNodeReferenceCount"] == 1
     assert event["item"]["poolLaneEligibleByBinding"] is False
     assert event["item"]["outlineNodeRefs"][0]["nodeId"] == 9
     assert pool["item"]["cooldownMinutes"] == 120
+    assert pool["item"]["selectionWeight"] == 3
+    assert pool["item"]["candidateBatchSize"] == 3
     assert pool["item"]["eventCount"] == 1
     assert pool["item"]["outlineBoundEventCount"] == 1
     assert pool["item"]["poolLaneEligibleEventCount"] == 0

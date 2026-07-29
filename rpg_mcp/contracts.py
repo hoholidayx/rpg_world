@@ -446,7 +446,8 @@ class PlotPoolSpec(ContractModel):
     name: str
     description: str = ""
     selection_mode: Literal["random", "sequential"] = "random"
-    priority: int = 0
+    selection_weight: int = Field(default=1, gt=0)
+    candidate_batch_size: int = Field(default=3, ge=1, le=5)
     cooldown_minutes: int = Field(default=0, ge=0)
     enabled: bool = True
 
@@ -472,6 +473,7 @@ class PlotEventSpec(ContractModel):
     scheduled_time: str | None = None
     deadline_time: str | None = None
     position: int = Field(default=0, ge=0)
+    selection_weight: int = Field(default=1, gt=0)
     enabled: bool = True
     allow_repeat: bool = False
     repeat_cooldown_minutes: int = Field(default=0, ge=0)

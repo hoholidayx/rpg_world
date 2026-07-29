@@ -462,7 +462,9 @@ Plot Scheduler 有效时，OOC 与 GM 的主工具 registry 额外提供：
 
 自动 selector 不按每个非 OOC turn 运行：成功 turn 的 active Scene document 最终实际变化时，提交事务留下一个 Scene 调度机会；下一次 `neutral | ic | gm` turn 在 `StatusPreflight` 后消费该机会并使用最新 scratch Scene 抽取候选。消费轮若再次改变 Scene，会留下供再下一轮使用的新机会。OOC、命令、模块禁用、失败或取消不消费也不创建机会；无机会时不调用 selector 或 Judge。任意大纲节点引用的事件都排除自动 pool lane，不看大纲/节点启用或 Session 覆盖；删除全部引用后才恢复。
 
-事件池的 `cooldownMinutes` 默认为 `0`。池内任意事件最近一次已提交的 scheduler-origin pool `triggered` 决策通过 `container_id` 为整个池建立 SceneTime 冷却锚点；`elapsed < cooldownMinutes` 时整池跳过并可回退低优先级池，边界相等即恢复，当前配置作用于已有锚点。manual、outline、`deferred`、`error` 不启动、刷新或清除这个锚点。
+通过资格规则的事件池按正整数 `selectionWeight` 与稳定 Session/turn seed 加权抽取，不提供有限轮次保底。`random` 池按事件 `selectionWeight` 抽主候选；soft 主候选再按 `candidateBatchSize`（默认 3、范围 1–5）加权无放回补齐只含 soft 事件的 batch，并只进行一次 LLM rerank。终止工具返回 batch 内 `selectedEventId`、`suitable` 和 `reason`，最终只对选中事件注入或落一条 deferred；未选候选不产生 retry 或冷却状态。forced 主候选直接注入；`sequential` 池、大纲 priority 和手动语义保持不变。
+
+事件池的 `cooldownMinutes` 默认为 `0`。池内任意事件最近一次已提交的 scheduler-origin pool `triggered` 决策通过 `container_id` 为整个池建立 SceneTime 冷却锚点；`elapsed < cooldownMinutes` 时整池跳过并从其余可用池中继续加权抽取，边界相等即恢复，当前配置作用于已有锚点。manual、outline、`deferred`、`error` 不启动、刷新或清除这个锚点。
 
 每个 Session 只有一个待注入快照，后一次 mark 替换前一次。快照不持有来源 Event/Pool 外键，因而来源编辑、移动或删除都不会改变或级联删除它；Story 与 Session 归属仍受外键约束。OOC 回合只标记而不消费，中间任意数量的 OOC 回合保持快照。下一次 `neutral | ic | gm` preflight 在自动 selector 前将其作为 forced pool lane 注入，即使没有可解析 SceneTime 也执行；显式手动注入不依赖 Scene 调度机会，不受源事件启用、时间窗、大纲绑定、重复与全部冷却规则限制，无 SceneTime 时也可解除目标事件已有的事件级冷却锚点，但永不影响池级冷却锚点。手动注入占用 pool lane，并阻止同一事件在 outline lane 重复。对应 ledger 行使用 `selectionOrigin=manual`，此时 `sceneTime` 与 `sceneTimeOrdinal` 可以为 null。
 

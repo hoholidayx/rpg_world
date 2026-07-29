@@ -127,6 +127,14 @@ judge。`scheduledTime`/`deadlineTime` 只是在已有机会内判断候选资�
 SceneTime 门槛，不是定时器；自动 `forced` 仍需机会与时间窗口，只是跳过
 soft judge。`triggered` 仅表示已选择并注入，不表示模型已落实或剧情已完成。
 
+通过确定性资格规则的池按正整数 `selectionWeight` 与稳定 Session/turn seed
+加权抽取，不提供有限轮次保底。`random` 池按事件 `selectionWeight` 抽取
+主候选；若主候选为 soft，再按 `candidateBatchSize`（默认 3、范围 1–5）
+加权无放回补齐 soft batch，并只调用一次 Judge 选择至多一个适宜事件。
+事件权重只控制 batch 召回，不代表最终注入频率。forced 主候选直接注入；
+`sequential` 池仍按 position 严格推进并忽略事件权重与 batch，大纲
+priority、手动注入和既有冷却语义不变。
+
 被任意大纲节点引用的事件不参与自动 pool lane，不受大纲/节点启用或 Session
 覆盖影响；删除全部节点引用后才重新成为池候选。`PlotPoolSpec.cooldownMinutes`
 是默认 `0` 的非负 SceneTime 分钟：池内任意事件最近一次由 scheduler 在
@@ -145,7 +153,7 @@ pool lane 成功注入后，整个池在到期前跳过。锚点复用已提交�
 
 SceneTime 固定使用无“第”字的 `Y 年 M 月 D 日 H 时 [M 分]`。
 
-`authoringRulesVersion=1.3` 与 Story Pack `contractVersion=2.0` 独立演进。
+`authoringRulesVersion=1.4` 与 Story Pack `contractVersion=2.0` 独立演进。
 日常迭代调用 `story_design_validate(profile="draft")`；准备 checkpoint 或
 构建包时调用 `profile="package"`。`diagnostics` 固定包含
 `ruleId/severity/path/message/suggestion/runtimeEffect`。error 是确定性门禁；

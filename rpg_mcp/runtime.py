@@ -1863,7 +1863,8 @@ class RuntimeApplication:
                     name=spec.name,
                     description=spec.description,
                     selection_mode=spec.selection_mode,
-                    priority=spec.priority,
+                    selection_weight=spec.selection_weight,
+                    candidate_batch_size=spec.candidate_batch_size,
                     cooldown_minutes=spec.cooldown_minutes,
                     enabled=spec.enabled,
                 ))
@@ -1875,7 +1876,8 @@ class RuntimeApplication:
                     name=spec.name,
                     description=spec.description,
                     selection_mode=spec.selection_mode,
-                    priority=spec.priority,
+                    selection_weight=spec.selection_weight,
+                    candidate_batch_size=spec.candidate_batch_size,
                     cooldown_minutes=spec.cooldown_minutes,
                     enabled=spec.enabled,
                 ))
@@ -1930,6 +1932,7 @@ class RuntimeApplication:
                             else None
                         ),
                         position=spec.position,
+                        selection_weight=spec.selection_weight,
                         enabled=spec.enabled,
                         allow_repeat=spec.allow_repeat,
                         repeat_cooldown_minutes=spec.repeat_cooldown_minutes,
@@ -1958,6 +1961,7 @@ class RuntimeApplication:
                             else None
                         ),
                         position=spec.position,
+                        selection_weight=spec.selection_weight,
                         enabled=spec.enabled,
                         allow_repeat=spec.allow_repeat,
                         repeat_cooldown_minutes=spec.repeat_cooldown_minutes,
@@ -2479,13 +2483,14 @@ class RuntimeApplication:
                 "name": item.name,
                 "description": item.description,
                 "selectionMode": item.selection_mode,
-                "priority": item.priority,
+                "selectionWeight": item.selection_weight,
+                "candidateBatchSize": item.candidate_batch_size,
                 "cooldownMinutes": item.cooldown_minutes,
                 "enabled": item.enabled,
             }
             for item in sorted(
                 state.objects[RESOURCE_PLOT_POOL].values(),
-                key=lambda value: (-value.priority, value.id),
+                key=lambda value: value.id,
             )
         ]
         pool_ref_by_id = {
@@ -2512,6 +2517,7 @@ class RuntimeApplication:
                     else None
                 ),
                 "position": item.position,
+                "selectionWeight": item.selection_weight,
                 "enabled": item.enabled,
                 "allowRepeat": item.allow_repeat,
                 "repeatCooldownMinutes": item.repeat_cooldown_minutes,

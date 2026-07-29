@@ -543,6 +543,18 @@
           "x-authoringRuleId": "field.plot-event.scheduled-time",
           "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
+        "selectionWeight": {
+          "default": 1,
+          "description": "random 池在结构性可用事件中选择主候选和补充 soft 候选时使用的正整数召回权重；默认 1。最终注入仍由场景适宜性重排决定，不承诺同等最终频率。sequential 池和大纲 lane 忽略此字段。",
+          "examples": [
+            1
+          ],
+          "exclusiveMinimum": 0,
+          "title": "Selectionweight",
+          "type": "integer",
+          "x-authoringRuleId": "field.plot-event.selection-weight",
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
+        },
         "stableId": {
           "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
           "examples": [
@@ -745,8 +757,21 @@
     },
     "PlotPoolSpec": {
       "additionalProperties": false,
-      "description": "在一次 Scene 调度机会中共享启用、排序、抽取和池级冷却策略的一组剧情事件。",
+      "description": "在一次 Scene 调度机会中共享启用、加权抽取、候选批次和池级冷却策略的一组剧情事件。",
       "properties": {
+        "candidateBatchSize": {
+          "default": 3,
+          "description": "random 池按事件权重抽到 soft 主候选后，本轮最多召回多少个 soft 事件交给一次 LLM 适宜性重排；范围 1–5、默认 3，1 表示单候选。sequential 池忽略此字段。",
+          "examples": [
+            3
+          ],
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Candidatebatchsize",
+          "type": "integer",
+          "x-authoringRuleId": "field.plot-pool.candidate-batch-size",
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
+        },
         "cooldownMinutes": {
           "default": 0,
           "description": "池内任意事件最近一次以 scheduler 来源在 pool lane 成功注入后，整个池需等待的 SceneTime 分钟；0 表示关闭。手动标记、大纲注入、延期和错误都不启动、刷新或清除池级冷却。创作时可按强度分池：日常现实扰动建议半天到一天，人际/信息/工作压力建议数天，改变关系结构的戏剧性巧合建议十天到数周；这些只是调参建议，不是 schema 默认值。",
@@ -791,17 +816,6 @@
           "x-authoringRuleId": "field.plot-pool.name",
           "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
-        "priority": {
-          "default": 0,
-          "description": "一次 Scene 调度机会内，同类候选之间的相对优先级。",
-          "examples": [
-            10
-          ],
-          "title": "Priority",
-          "type": "integer",
-          "x-authoringRuleId": "field.plot-pool.priority",
-          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
-        },
         "selectionMode": {
           "default": "random",
           "description": "有 Scene 调度机会时，池内候选的 random 或 sequential 抽取方式。",
@@ -815,6 +829,18 @@
           "title": "Selectionmode",
           "type": "string",
           "x-authoringRuleId": "field.plot-pool.selection-mode",
+          "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
+        },
+        "selectionWeight": {
+          "default": 1,
+          "description": "事件池通过全部确定性资格规则后，在可用池之间稳定加权抽取的相对权重；正整数且默认 1。它表达长期概率，不是严格顺序或有限轮次保底。",
+          "examples": [
+            2
+          ],
+          "exclusiveMinimum": 0,
+          "title": "Selectionweight",
+          "type": "integer",
+          "x-authoringRuleId": "field.plot-pool.selection-weight",
           "x-runtimeEffect": "影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。"
         },
         "stableId": {
@@ -1827,6 +1853,6 @@
   ],
   "title": "RPG World Story Pack v2",
   "type": "object",
-  "x-authoringRulesDigest": "340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431",
-  "x-authoringRulesVersion": "1.3"
+  "x-authoringRulesDigest": "12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413",
+  "x-authoringRulesVersion": "1.4"
 }

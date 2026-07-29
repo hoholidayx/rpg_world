@@ -36,6 +36,8 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                 cooldown_minutes=120,
             )
         )
+        assert first_pool.selection_weight == 1
+        assert first_pool.candidate_batch_size == 3
         assert first_pool.cooldown_minutes == 120
         second_pool = service.create_pool(
             CreatePlotPoolCommand(
@@ -49,9 +51,13 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                 workspace_id="demo_workspace",
                 story_id=1,
                 pool_id=first_pool.id,
+                selection_weight=4,
+                candidate_batch_size=5,
                 cooldown_minutes=240,
             )
         )
+        assert updated_pool.selection_weight == 4
+        assert updated_pool.candidate_batch_size == 5
         assert updated_pool.cooldown_minutes == 240
         with pytest.raises(ValueError, match="cooldown_minutes"):
             service.update_pool(
@@ -60,6 +66,24 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                     story_id=1,
                     pool_id=first_pool.id,
                     cooldown_minutes=-1,
+                )
+            )
+        with pytest.raises(ValueError, match="selection_weight"):
+            service.update_pool(
+                UpdatePlotPoolCommand(
+                    workspace_id="demo_workspace",
+                    story_id=1,
+                    pool_id=first_pool.id,
+                    selection_weight=0,
+                )
+            )
+        with pytest.raises(ValueError, match="candidate_batch_size"):
+            service.update_pool(
+                UpdatePlotPoolCommand(
+                    workspace_id="demo_workspace",
+                    story_id=1,
+                    pool_id=first_pool.id,
+                    candidate_batch_size=6,
                 )
             )
         scheduled_time = SceneTime(1, 1, 1, 8)
@@ -73,6 +97,7 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                 directive="送来一封信。",
                 scheduled_time=scheduled_time,
                 deadline_time=deadline_time,
+                selection_weight=3,
             )
         )
         second = service.create_event(
@@ -84,6 +109,8 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                 directive="远处响起钟声。",
             )
         )
+        assert first.selection_weight == 3
+        assert second.selection_weight == 1
         assert (first.position, second.position) == (0, 1)
 
         moved = service.update_event(
@@ -92,10 +119,12 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                 story_id=1,
                 event_id=second.id,
                 pool_id=second_pool.id,
+                selection_weight=7,
             )
         )
         assert moved.pool_id == second_pool.id
         assert moved.position == 0
+        assert moved.selection_weight == 7
 
         third = service.create_event(
             CreatePlotEventCommand(
@@ -180,6 +209,17 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                     directive="不会保存。",
                     allow_repeat=True,
                     repeat_cooldown_minutes=0,
+                )
+            )
+        with pytest.raises(ValueError, match="selection_weight"):
+            service.create_event(
+                CreatePlotEventCommand(
+                    workspace_id="demo_workspace",
+                    story_id=1,
+                    pool_id=first_pool.id,
+                    title="非法权重",
+                    directive="不会保存。",
+                    selection_weight=0,
                 )
             )
         repeating = service.create_event(

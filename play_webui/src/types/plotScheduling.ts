@@ -25,7 +25,8 @@ export type PlotEventPool = {
   name: string
   description: string
   selectionMode: PlotPoolMode
-  priority: number
+  selectionWeight: number
+  candidateBatchSize: number
   cooldownMinutes: number
   enabled: boolean
   version: number
@@ -45,6 +46,7 @@ export type PlotEvent = {
   scheduledTime: SceneTimeValue | null
   deadlineTime: SceneTimeValue | null
   position: number
+  selectionWeight: number
   enabled: boolean
   allowRepeat: boolean
   repeatCooldownMinutes: number
@@ -198,7 +200,8 @@ export type PlotPoolInput = {
   name: string
   description: string
   selectionMode: PlotPoolMode
-  priority: number
+  selectionWeight: number
+  candidateBatchSize: number
   cooldownMinutes: number
   enabled: boolean
 }
@@ -212,6 +215,7 @@ export type PlotEventInput = {
   dispatchMode: PlotDispatchMode
   scheduledTime: SceneTimeValue | null
   deadlineTime: SceneTimeValue | null
+  selectionWeight: number
   enabled: boolean
   allowRepeat: boolean
   repeatCooldownMinutes: number

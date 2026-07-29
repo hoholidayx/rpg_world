@@ -19,6 +19,8 @@ from rpg_core.agent.turn.models import (
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.plot_scheduler import (
     PlotPendingInjectionTurnState,
+    PlotScheduleCandidateBatch,
+    PlotScheduleSelector,
     PlotSceneOpportunityTurnState,
     PlotScheduleSnapshot,
     PlotSuitabilityDecision,
@@ -133,10 +135,45 @@ def _scratch(*, with_scene_opportunity: bool = True):  # noqa: ANN201
     )
 
 
+def _batch_plan() -> TurnExecutionPlan:
+    plan = _plan()
+    events = tuple(
+        models.StoryPlotEvent(
+            id=event_id,
+            story_id=1,
+            pool_id=20,
+            title=f"候选事件 {event_id}",
+            directive=f"执行候选事件 {event_id}。",
+            suitability_hint=f"候选 {event_id} 的适宜条件。",
+            dispatch_mode=models.PLOT_DISPATCH_SOFT,
+            selection_weight=event_id - 9,
+        )
+        for event_id in (10, 11, 12)
+    )
+    return replace(
+        plan,
+        plot_schedule=replace(
+            plan.plot_schedule,
+            story=replace(
+                plan.plot_schedule.story,
+                pools=(
+                    models.StoryPlotEventPool(
+                        20,
+                        1,
+                        "候选重排池",
+                        candidate_batch_size=3,
+                    ),
+                ),
+                events=events,
+            ),
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_soft_plot_candidate_stages_trigger_and_dynamic_injection() -> None:
     context = _Context()
-    judge = _Judge(PlotSuitabilityDecision(True, "人物与地点均满足。"))
+    judge = _Judge(PlotSuitabilityDecision(10, True, "人物与地点均满足。"))
     hook = PlotSchedulingPreflightHook(
         context_service=context,
         session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
@@ -163,6 +200,148 @@ async def test_soft_plot_candidate_stages_trigger_and_dynamic_injection() -> Non
     }
     assert scratch.plot_schedule_injections[0].directive == "让信使送来一封信。"
     assert scratch.plot_scene_opportunity.consume_base is True
+
+
+@pytest.mark.asyncio
+async def test_soft_batch_can_rerank_to_non_primary_and_only_stage_selected_event() -> None:
+    plan = _batch_plan()
+    batch = PlotScheduleSelector().select(
+        plan.plot_schedule,
+        scene_time=SceneTime(1, 1, 1, 10),
+        current_turn_id=2,
+        completed_world_turn_ids=(),
+    )[0]
+    assert isinstance(batch, PlotScheduleCandidateBatch)
+    selected = next(
+        candidate
+        for candidate in batch.candidates
+        if candidate.event.id != batch.primary.event.id
+    )
+    context = _Context()
+    judge = _Judge(
+        PlotSuitabilityDecision(
+            selected.event.id,
+            True,
+            "该候选与当前行动最兼容。",
+        )
+    )
+    hook = PlotSchedulingPreflightHook(
+        context_service=context,
+        session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
+        judge=judge,
+    )
+    scratch = _scratch()
+
+    await hook.run(
+        plan=plan,
+        turn_scratch=scratch,
+        turn_stats=TurnStats(),
+    )
+
+    assert judge.calls == 1
+    assert len(context.calls) == 1
+    judge_prompt = str(context.calls[0]["judge_prompt"])
+    assert '"candidates"' in judge_prompt
+    assert all(
+        candidate.event.title in judge_prompt
+        for candidate in batch.candidates
+    )
+    assert [item.event_id for item in scratch.plot_schedule_injections] == [
+        selected.event.id
+    ]
+    assert [item.event_id for item in scratch.plot_schedule_decisions] == [
+        selected.event.id
+    ]
+    snapshot = scratch.plot_schedule_decisions[0].event_snapshot
+    assert snapshot["selectionContext"] == {
+        "method": "weighted_batch_rerank",
+        "primaryEventId": batch.primary.event.id,
+        "configuredBatchSize": 3,
+        "actualBatchSize": 3,
+        "candidates": [
+            {
+                "eventId": candidate.event.id,
+                "eventTitle": candidate.event.title,
+                "selectionWeight": candidate.event_selection_weight,
+            }
+            for candidate in batch.candidates
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_soft_batch_defers_only_the_reranked_event_when_none_are_suitable() -> None:
+    plan = _batch_plan()
+    batch = PlotScheduleSelector().select(
+        plan.plot_schedule,
+        scene_time=SceneTime(1, 1, 1, 10),
+        current_turn_id=2,
+        completed_world_turn_ids=(),
+    )[0]
+    assert isinstance(batch, PlotScheduleCandidateBatch)
+    selected = batch.candidates[-1]
+    hook = PlotSchedulingPreflightHook(
+        context_service=_Context(),
+        session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
+        judge=_Judge(
+            PlotSuitabilityDecision(
+                selected.event.id,
+                False,
+                "所有候选均与当前行动冲突，此项最接近但仍不适合。",
+            )
+        ),
+    )
+    scratch = _scratch()
+
+    await hook.run(
+        plan=plan,
+        turn_scratch=scratch,
+        turn_stats=TurnStats(),
+    )
+
+    assert scratch.plot_schedule_injections == []
+    assert len(scratch.plot_schedule_decisions) == 1
+    assert scratch.plot_schedule_decisions[0].event_id == selected.event.id
+    assert (
+        scratch.plot_schedule_decisions[0].decision_status
+        == models.PLOT_DECISION_DEFERRED
+    )
+    assert all(
+        decision.event_id == selected.event.id
+        for decision in scratch.plot_schedule_decisions
+    )
+
+
+@pytest.mark.asyncio
+async def test_soft_batch_rejects_selected_event_outside_batch_as_primary_error() -> None:
+    plan = _batch_plan()
+    batch = PlotScheduleSelector().select(
+        plan.plot_schedule,
+        scene_time=SceneTime(1, 1, 1, 10),
+        current_turn_id=2,
+        completed_world_turn_ids=(),
+    )[0]
+    assert isinstance(batch, PlotScheduleCandidateBatch)
+    hook = PlotSchedulingPreflightHook(
+        context_service=_Context(),
+        session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
+        judge=_Judge(PlotSuitabilityDecision(999_999, True, "非法候选。")),
+    )
+    scratch = _scratch()
+
+    await hook.run(
+        plan=plan,
+        turn_scratch=scratch,
+        turn_stats=TurnStats(),
+    )
+
+    assert scratch.plot_schedule_injections == []
+    assert len(scratch.plot_schedule_decisions) == 1
+    decision = scratch.plot_schedule_decisions[0]
+    assert decision.event_id == batch.primary.event.id
+    assert decision.decision_status == models.PLOT_DECISION_ERROR
+    assert decision.error_code == "PlotScheduleJudgeResponseError"
+    assert "candidate batch" in decision.error_message
 
 
 @pytest.mark.asyncio
@@ -365,7 +544,7 @@ async def test_manual_pending_injection_bypasses_scene_and_uses_frozen_snapshot(
         scene_time_error="没有 Scene",
     )
     scratch.plot_pending_injection = PlotPendingInjectionTurnState(base=pending)
-    judge = _Judge(PlotSuitabilityDecision(True, "不应调用"))
+    judge = _Judge(PlotSuitabilityDecision(10, True, "不应调用"))
     hook = PlotSchedulingPreflightHook(
         context_service=_Context(),
         session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
@@ -414,7 +593,9 @@ async def test_manual_pending_replaces_pool_lane_and_ooc_does_not_consume() -> N
     )
     scratch = _scratch()
     scratch.plot_pending_injection = PlotPendingInjectionTurnState(base=pending)
-    judge = _Judge(PlotSuitabilityDecision(True, "不应调用自动池 Judge"))
+    judge = _Judge(
+        PlotSuitabilityDecision(10, True, "不应调用自动池 Judge")
+    )
     hook = PlotSchedulingPreflightHook(
         context_service=_Context(),
         session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),

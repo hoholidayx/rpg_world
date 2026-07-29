@@ -21,7 +21,7 @@ from rpg_mcp.contracts import (
     digest_json,
 )
 
-AUTHORING_RULES_VERSION = "1.3"
+AUTHORING_RULES_VERSION = "1.4"
 AUTHORING_RULES_SCHEMA_VERSION = "story-authoring-rules/1.0"
 AUTHORING_RULES_RELATIVE_PATH = (
     "schemas/story-authoring-rules-v1.json"
@@ -151,7 +151,7 @@ _MODEL_INFO: dict[str, dict[str, str]] = {
         "path": "/resources/plotSchedule/pools/*",
         "title": "剧情事件池",
         "description": (
-            "在一次 Scene 调度机会中共享启用、排序、抽取和池级冷却策略的一组"
+            "在一次 Scene 调度机会中共享启用、加权抽取、候选批次和池级冷却策略的一组"
             "剧情事件。"
         ),
     },
@@ -268,6 +268,11 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "outlines": "顺序大纲定义。",
     "selectionMode": "有 Scene 调度机会时，池内候选的 random 或 sequential 抽取方式。",
     "priority": "一次 Scene 调度机会内，同类候选之间的相对优先级。",
+    "selectionWeight": "稳定加权抽取使用的正整数相对权重；默认 1。",
+    "candidateBatchSize": (
+        "random 池的 soft 主候选用于一次适宜性重排的召回批次大小；"
+        "范围 1–5，默认 3。"
+    ),
     "cooldownMinutes": (
         "事件池最近一次由自动调度成功注入任意池内事件后，需要经过的"
         " SceneTime 分钟冷却；0 表示不启用池级冷却。"
@@ -363,6 +368,15 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
     ("PlotPoolSpec", "enabled"): (
         "是否允许该池参与有 Scene 调度机会的自动候选；手动标记忽略此字段。"
     ),
+    ("PlotPoolSpec", "selectionWeight"): (
+        "事件池通过全部确定性资格规则后，在可用池之间稳定加权抽取的相对权重；"
+        "正整数且默认 1。它表达长期概率，不是严格顺序或有限轮次保底。"
+    ),
+    ("PlotPoolSpec", "candidateBatchSize"): (
+        "random 池按事件权重抽到 soft 主候选后，本轮最多召回多少个 soft 事件"
+        "交给一次 LLM 适宜性重排；范围 1–5、默认 3，1 表示单候选。"
+        "sequential 池忽略此字段。"
+    ),
     ("PlotPoolSpec", "cooldownMinutes"): (
         "池内任意事件最近一次以 scheduler 来源在 pool lane 成功注入后，整个池"
         "需等待的 SceneTime 分钟；0 表示关闭。手动标记、大纲注入、延期和错误"
@@ -385,6 +399,11 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
     ("PlotEventSpec", "poolRef"): (
         "该事件所属事件池的 stableId，用于归属、展示及未绑定大纲时的 pool lane"
         "调度；只要仍被任意大纲节点引用，就不参与自动 pool lane。"
+    ),
+    ("PlotEventSpec", "selectionWeight"): (
+        "random 池在结构性可用事件中选择主候选和补充 soft 候选时使用的正整数"
+        "召回权重；默认 1。最终注入仍由场景适宜性重排决定，不承诺同等最终频率。"
+        "sequential 池和大纲 lane 忽略此字段。"
     ),
     ("PlotEventSpec", "allowRepeat"): (
         "事件自动触发后是否可在后续 Scene 调度机会再次候选；手动标记忽略"
@@ -463,6 +482,15 @@ _FIELD_AVOID: dict[tuple[str, str], str] = {
     ("PlotEventSpec", "repeatCooldownMinutes"): (
         "不要把冷却写成现实时间、turn 数或手动注入限制。"
     ),
+    ("PlotEventSpec", "selectionWeight"): (
+        "不要把召回权重解释成最终注入概率、严格优先级或有限轮次保底。"
+    ),
+    ("PlotPoolSpec", "selectionWeight"): (
+        "不要用 0 表示停用；停用使用 enabled，也不要把权重解释成严格优先级。"
+    ),
+    ("PlotPoolSpec", "candidateBatchSize"): (
+        "不要把批次大小解释成多次 Judge 调用或一轮注入多个池事件。"
+    ),
     ("PlotNodeSpec", "dispatchMode"): (
         "不要把 forced 节点理解成定时器；没有 Scene 调度机会时不会因此"
         "自动运行。"
@@ -532,6 +560,8 @@ _EXAMPLES: dict[str, Any] = {
     "outlines": [],
     "selectionMode": "sequential",
     "priority": 10,
+    "selectionWeight": 1,
+    "candidateBatchSize": 3,
     "cooldownMinutes": 1440,
     "poolRef": "pool-main",
     "directive": "让停电警报响起，并由在场 NPC 提出两种可调查方向。",
@@ -645,10 +675,13 @@ _EXAMPLE_OVERRIDES: dict[tuple[str, str], Any] = {
     ("PlotPoolSpec", "stableId"): "pool-main",
     ("PlotPoolSpec", "name"): "主线事件池",
     ("PlotPoolSpec", "description"): "承载推动失踪案调查的主线事件。",
+    ("PlotPoolSpec", "selectionWeight"): 2,
+    ("PlotPoolSpec", "candidateBatchSize"): 3,
     ("PlotPoolSpec", "cooldownMinutes"): 4320,
     ("PlotEventSpec", "stableId"): "event-blackout-warning",
     ("PlotEventSpec", "title"): "停电警报",
     ("PlotEventSpec", "description"): "停电前第一次公开警报，为调查线提供转向机会。",
+    ("PlotEventSpec", "selectionWeight"): 1,
     ("PlotOutlineSpec", "stableId"): "outline-main",
     ("PlotOutlineSpec", "name"): "主线大纲",
     ("PlotOutlineSpec", "description"): "按故事虚拟时间推进失踪案调查。",
@@ -794,6 +827,24 @@ _PRINCIPLES: tuple[dict[str, str], ...] = (
         "runtimeEffect": (
             "大纲 lane 仍按自身节点独立调度；结构绑定避免同一事件同时消耗大纲"
             "和事件池额度。Session 手动标记仍可绕过该结构隔离。"
+        ),
+    },
+    {
+        "ruleId": "principle.plot-stable-weighted-rerank",
+        "domain": "plot",
+        "title": "事件池使用稳定加权召回与单次重排",
+        "description": (
+            "自动 pool lane 先在通过确定性资格规则的池之间按 selectionWeight"
+            " 稳定加权选池。random 池再按事件 selectionWeight 抽取主候选；"
+            "soft 主候选可按 candidateBatchSize 加权无放回补充 soft 候选，并"
+            "通过一次 Judge 选择当前最适合的一项。池权重表达选池概率，事件"
+            "权重只表达进入候选批次的召回概率，都不提供有限轮次保底。"
+        ),
+        "runtimeEffect": (
+            "相同 Session、turn、定义和决策快照得到相同选择。forced 主候选"
+            "直接注入且不构造批次；sequential 池忽略事件权重和批次大小。"
+            "未被重排选中的候选不写决策、不启动 retry 或冷却，最终仍最多注入"
+            "一个 pool directive。"
         ),
     },
     {
@@ -1410,6 +1461,14 @@ does not consume pool-lane selection until every node reference is removed.
 is successfully injected; manual and outline injections do not change that
 pool-level anchor.
 
+Available pools use positive `selectionWeight` values as a stable probability
+distribution, not strict priority or a finite-turn guarantee. A random pool
+uses event `selectionWeight` for weighted recall. When its weighted primary is
+soft, `candidateBatchSize` (default 3, maximum 5) recalls a small soft batch
+for one suitability rerank; event weight is recall probability, not a promise
+about final injection frequency. Sequential pools ignore event weight and
+batch size. A forced weighted primary still injects directly.
+
 Keep `plot_event_mark_next` state out of Story Design and Story Pack fields.
 It is an OOC/GM Session runtime snapshot for the next non-OOC turn, may
 temporarily override `title` and `directive`, and ignores all automatic
@@ -1591,6 +1650,13 @@ change the import contract.
   scheduler-origin, triggered pool decision. Any pool event starts the same
   cooldown; manual, outline, deferred, and error decisions neither start nor
   clear it. The current pool setting applies to an existing anchor.
+- Select among deterministically eligible pools by positive
+  `selectionWeight` with a stable Session/turn seed. In a random pool, use
+  event `selectionWeight` for weighted recall. A soft primary may recall up to
+  `candidateBatchSize` soft events (default 3, maximum 5) for one suitability
+  rerank; only the selected event produces a decision. Sequential pools
+  ignore event weight and batch size, and a forced primary bypasses rerank.
+  Weights are probability controls, not finite-turn fairness guarantees.
 - Treat Plot `triggered` as selected-and-injected, not as semantic
   verification, completion, or resolution.
 - Keep `plot_event_mark_next` outside Story Design and Story Pack schemas. It

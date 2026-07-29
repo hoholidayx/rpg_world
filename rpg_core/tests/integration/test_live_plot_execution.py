@@ -17,7 +17,11 @@ from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.rp_modules.plot_scheduler import (
     CreatePlotEventCommand,
     CreatePlotPoolCommand,
+    PlotScheduleCandidateBatch,
     PlotScheduleManagementService,
+    PlotScheduleSelector,
+    PlotScheduleSnapshot,
+    UpdatePlotEventCommand,
 )
 from rpg_data import models
 from tests.support.backend import (
@@ -73,37 +77,41 @@ async def live_plot_harness(
         await LLMClientManager.areset()
 
 
-def _seed_plot_event(
+def _seed_plot_batch(
     gateway,
     catalog: IntegrationCatalog,
-    *,
-    title: str,
-    directive: str,
-    dispatch_mode: str,
-    suitability_hint: str = "",
-):
+) -> tuple[
+    models.StoryPlotEventPool,
+    tuple[models.StoryPlotEvent, ...],
+]:
     service = PlotScheduleManagementService(gateway.plot_scheduling)
     pool = service.create_pool(
         CreatePlotPoolCommand(
             workspace_id=catalog.workspace_id,
             story_id=catalog.story.id,
-            name=f"{title}测试池",
-            selection_mode=models.PLOT_POOL_SEQUENTIAL,
-            priority=100,
+            name="钟楼适宜性重排测试池",
+            selection_mode=models.PLOT_POOL_RANDOM,
+            selection_weight=1,
+            candidate_batch_size=3,
         )
     )
-    return service.create_event(
-        CreatePlotEventCommand(
-            workspace_id=catalog.workspace_id,
-            story_id=catalog.story.id,
-            pool_id=pool.id,
-            title=title,
-            directive=directive,
-            suitability_hint=suitability_hint,
-            dispatch_mode=dispatch_mode,
-            scheduled_time=SceneTime(2, 3, 4, 5),
+    events = tuple(
+        service.create_event(
+            CreatePlotEventCommand(
+                workspace_id=catalog.workspace_id,
+                story_id=catalog.story.id,
+                pool_id=pool.id,
+                title=f"钟楼候选事件 {label}",
+                directive=f"执行尚未重排的候选事件 {label}。",
+                suitability_hint="等待根据真实 Scene 更新适宜性条件。",
+                dispatch_mode=models.PLOT_DISPATCH_SOFT,
+                scheduled_time=SceneTime(2, 3, 4, 5),
+                selection_weight=1,
+            )
         )
+        for label in ("A", "B", "C")
     )
+    return pool, events
 
 
 def _initial_main_call(calls: list[RecordedLiveCall]) -> RecordedLiveCall:
@@ -130,21 +138,9 @@ async def test_live_scene_change_schedules_soft_plot_for_following_turn(
 ):
     harness = live_plot_harness
     session_id = harness.catalog.session.id
-    directive = (
-        "让一只明确称为“蓝羽机械鸟”的机械鸟从窗外飞入当前大厅，"
-        "当场落下一封带有“七号钟塔”蜡印的信。必须在本轮把事件作为世界事实"
-        "自然开始，不得只讨论可能性；不得替玩家角色发言、行动或决定。"
-    )
-    event = _seed_plot_event(
+    pool, seeded_events = _seed_plot_batch(
         integration_data_gateway,
         harness.catalog,
-        title="蓝羽机械鸟来信",
-        directive=directive,
-        dispatch_mode=models.PLOT_DISPATCH_SOFT,
-        suitability_hint=(
-            "当前地点是有高窗的钟楼前厅，机械鸟无需其它角色到场，"
-            "与玩家观察环境的行动完全兼容。"
-        ),
     )
     integration_data_gateway.rp_modules.upsert_session_override(
         session_id,
@@ -209,6 +205,78 @@ async def test_live_scene_change_schedules_soft_plot_for_following_turn(
     assert first_persisted_user.endswith(change_input)
     assert _PLOT_SUFFIX_OPEN not in first_persisted_user
 
+    schedule, overrides, prior_decisions = (
+        integration_data_gateway.plot_scheduling.get_session_state(session_id)
+    )
+    predicted = PlotScheduleSelector().select(
+        PlotScheduleSnapshot(
+            session_id=session_id,
+            story_id=harness.catalog.story.id,
+            enabled=True,
+            story=schedule,
+            overrides=overrides,
+            decisions=tuple(prior_decisions),
+            scene_opportunity=opportunity,
+        ),
+        scene_time=SceneTime.parse(
+            after_change["集成当前场景"]["时间"]
+        ),
+        current_turn_id=change_reply.committed_turn_id + 1,
+        completed_world_turn_ids=(change_reply.committed_turn_id,),
+    )
+    assert len(predicted) == 1
+    batch = predicted[0]
+    assert isinstance(batch, PlotScheduleCandidateBatch)
+    assert len(batch.candidates) == 3
+    target_id = batch.candidates[1].event.id
+    assert target_id != batch.primary.event.id
+
+    directive = (
+        "让一只明确称为“蓝羽机械鸟”的机械鸟从窗外飞入当前大厅，"
+        "当场落下一封带有“七号钟塔”蜡印的信。必须在本轮把事件作为世界事实"
+        "自然开始，不得只讨论可能性；不得替玩家角色发言、行动或决定。"
+    )
+    decoy_directives = (
+        "让一支沙漠驼队穿过正午沙丘，并升起红色商旗。",
+        "让深海潜艇在舷窗外亮起探照灯，并发出三次声呐。",
+    )
+    decoy_index = 0
+    updated_events: list[models.StoryPlotEvent] = []
+    for seeded in seeded_events:
+        if seeded.id == target_id:
+            title = "蓝羽机械鸟来信"
+            event_directive = directive
+            suitability_hint = (
+                "当前地点正是有高窗的钟楼前厅，机械鸟无需其他角色到场，"
+                "与玩家安静观察环境的行动完全兼容。"
+            )
+        else:
+            title = f"不适用候选 {decoy_index + 1}"
+            event_directive = decoy_directives[decoy_index]
+            suitability_hint = (
+                "仅在"
+                + (
+                    "正午沙漠且玩家正随驼队旅行"
+                    if decoy_index == 0
+                    else "深海潜艇内部且玩家正在执行潜航任务"
+                )
+                + "时适合；钟楼前厅明确不适合。"
+            )
+            decoy_index += 1
+        updated_events.append(
+            schedule_service.update_event(
+                UpdatePlotEventCommand(
+                    workspace_id=harness.catalog.workspace_id,
+                    story_id=harness.catalog.story.id,
+                    event_id=seeded.id,
+                    title=title,
+                    directive=event_directive,
+                    suitability_hint=suitability_hint,
+                )
+            )
+        )
+    event = next(item for item in updated_events if item.id == target_id)
+
     status_before_execution = after_change
     execution_input = (
         "我站在钟楼前厅的高窗旁，没有出声，只留意接下来发生的变化。"
@@ -228,6 +296,22 @@ async def test_live_scene_change_schedules_soft_plot_for_following_turn(
     assert decisions[0].event_id == event.id
     assert decisions[0].turn_id == reply.committed_turn_id
     assert decisions[0].decision_status == models.PLOT_DECISION_TRIGGERED
+    selection_context = decisions[0].event_snapshot["selectionContext"]
+    assert selection_context["method"] == "weighted_batch_rerank"
+    assert selection_context["primaryEventId"] == batch.primary.event.id
+    assert selection_context["primaryEventId"] != event.id
+    assert selection_context["configuredBatchSize"] == 3
+    assert selection_context["actualBatchSize"] == 3
+    assert {
+        item["eventId"]
+        for item in selection_context["candidates"]
+    } == {item.id for item in seeded_events}
+    assert decisions[0].event_snapshot["containerSelectionWeight"] == (
+        pool.selection_weight
+    )
+    assert decisions[0].event_snapshot["eventSelectionWeight"] == (
+        event.selection_weight
+    )
     assert _PLOT_SUFFIX_OPEN not in reply.text
     assert f'<rp-character name="{harness.catalog.character.name}">' not in reply.text
     assert any(
@@ -236,6 +320,32 @@ async def test_live_scene_change_schedules_soft_plot_for_following_turn(
     )
 
     second_calls = harness.calls[second_call_offset:]
+    judge_calls = [
+        call
+        for call in second_calls
+        if call.biz_key == AGENT_PLOT_SCHEDULER_BIZ_KEY
+        and any(
+            schema.get("function", {}).get("name")
+            == "plot_schedule_decision"
+            for schema in call.tools or []
+        )
+    ]
+    assert judge_calls
+    terminal_schema = next(
+        schema["function"]
+        for schema in judge_calls[0].tools or []
+        if schema.get("function", {}).get("name")
+        == "plot_schedule_decision"
+    )
+    terminal_parameters = terminal_schema["parameters"]
+    assert "selectedEventId" in terminal_parameters["required"]
+    assert terminal_parameters["properties"]["selectedEventId"]["type"] == "integer"
+    judge_context = "\n".join(
+        str(message.get("content", ""))
+        for message in judge_calls[0].messages
+    )
+    assert '"primaryEventId"' in judge_context
+    assert all(item.title in judge_context for item in updated_events)
     main_call = _initial_main_call(second_calls)
     current_user = [
         message for message in main_call.messages if message.get("role") == "user"
@@ -246,6 +356,10 @@ async def test_live_scene_change_schedules_soft_plot_for_following_turn(
         _PLOT_SUFFIX_OPEN
     )
     assert directive in current_content
+    assert all(
+        decoy not in current_content
+        for decoy in decoy_directives
+    )
     assert all(
         directive not in str(message.get("content", ""))
         for message in main_call.messages

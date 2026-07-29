@@ -977,7 +977,10 @@ CREATE TABLE rpg_story_plot_event_pools (
     description TEXT NOT NULL DEFAULT '',
     selection_mode TEXT NOT NULL DEFAULT 'random'
         CHECK (selection_mode IN ('random', 'sequential')),
-    priority INTEGER NOT NULL DEFAULT 0,
+    selection_weight INTEGER NOT NULL DEFAULT 1
+        CHECK (selection_weight > 0),
+    candidate_batch_size INTEGER NOT NULL DEFAULT 3
+        CHECK (candidate_batch_size BETWEEN 1 AND 5),
     cooldown_minutes INTEGER NOT NULL DEFAULT 0
         CHECK (cooldown_minutes >= 0),
     enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
@@ -988,7 +991,7 @@ CREATE TABLE rpg_story_plot_event_pools (
 );
 
 CREATE INDEX idx_rpg_story_plot_event_pools_story
-ON rpg_story_plot_event_pools(story_id, priority DESC, id);
+ON rpg_story_plot_event_pools(story_id, id);
 
 CREATE TABLE rpg_story_plot_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1009,6 +1012,8 @@ CREATE TABLE rpg_story_plot_events (
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, deadline_time_json TEXT,
+    selection_weight INTEGER NOT NULL DEFAULT 1
+        CHECK (selection_weight > 0),
     FOREIGN KEY (story_id) REFERENCES rpg_stories(id) ON DELETE CASCADE,
     FOREIGN KEY (pool_id) REFERENCES rpg_story_plot_event_pools(id) ON DELETE RESTRICT,
     CHECK (

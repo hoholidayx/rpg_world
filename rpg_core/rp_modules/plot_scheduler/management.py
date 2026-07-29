@@ -85,7 +85,8 @@ class PlotScheduleManagementDataPort(Protocol):
         name: str,
         description: str,
         selection_mode: str,
-        priority: int,
+        selection_weight: int,
+        candidate_batch_size: int,
         cooldown_minutes: int,
         enabled: bool,
     ) -> data_models.StoryPlotEventPool: ...
@@ -97,7 +98,8 @@ class PlotScheduleManagementDataPort(Protocol):
         name: str,
         description: str,
         selection_mode: str,
-        priority: int,
+        selection_weight: int,
+        candidate_batch_size: int,
         cooldown_minutes: int,
         enabled: bool,
     ) -> data_models.StoryPlotEventPool | None: ...
@@ -117,6 +119,7 @@ class PlotScheduleManagementDataPort(Protocol):
         scheduled_time: SceneTime | None,
         deadline_time: SceneTime | None,
         position: int,
+        selection_weight: int,
         enabled: bool,
         allow_repeat: bool,
         repeat_cooldown_minutes: int,
@@ -135,6 +138,7 @@ class PlotScheduleManagementDataPort(Protocol):
         scheduled_time: SceneTime | None,
         deadline_time: SceneTime | None,
         position: int,
+        selection_weight: int,
         enabled: bool,
         allow_repeat: bool,
         repeat_cooldown_minutes: int,
@@ -295,7 +299,16 @@ class PlotScheduleManagementService:
                 name=_required_text(command.name, "pool name"),
                 description=_text(command.description),
                 selection_mode=_pool_mode(command.selection_mode),
-                priority=_integer(command.priority, "priority"),
+                selection_weight=_positive(
+                    command.selection_weight,
+                    "selection_weight",
+                ),
+                candidate_batch_size=_bounded_integer(
+                    command.candidate_batch_size,
+                    "candidate_batch_size",
+                    minimum=1,
+                    maximum=5,
+                ),
                 cooldown_minutes=_non_negative(
                     command.cooldown_minutes,
                     "cooldown_minutes",
@@ -325,9 +338,21 @@ class PlotScheduleManagementService:
                 selection_mode=_pool_mode(
                     _resolve_patch(command.selection_mode, current.selection_mode)
                 ),
-                priority=_integer(
-                    _resolve_patch(command.priority, current.priority),
-                    "priority",
+                selection_weight=_positive(
+                    _resolve_patch(
+                        command.selection_weight,
+                        current.selection_weight,
+                    ),
+                    "selection_weight",
+                ),
+                candidate_batch_size=_bounded_integer(
+                    _resolve_patch(
+                        command.candidate_batch_size,
+                        current.candidate_batch_size,
+                    ),
+                    "candidate_batch_size",
+                    minimum=1,
+                    maximum=5,
                 ),
                 cooldown_minutes=_non_negative(
                     _resolve_patch(
@@ -392,6 +417,10 @@ class PlotScheduleManagementService:
                 scheduled_time=scheduled_time,
                 deadline_time=deadline_time,
                 position=position,
+                selection_weight=_positive(
+                    command.selection_weight,
+                    "selection_weight",
+                ),
                 enabled=_boolean(command.enabled, "enabled"),
                 allow_repeat=allow_repeat,
                 repeat_cooldown_minutes=cooldown,
@@ -457,6 +486,13 @@ class PlotScheduleManagementService:
                 scheduled_time=scheduled_time,
                 deadline_time=deadline_time,
                 position=position,
+                selection_weight=_positive(
+                    _resolve_patch(
+                        command.selection_weight,
+                        current.selection_weight,
+                    ),
+                    "selection_weight",
+                ),
                 enabled=_boolean(
                     _resolve_patch(command.enabled, current.enabled),
                     "enabled",
@@ -831,6 +867,19 @@ def _positive(value: int, label: str) -> int:
     parsed = _integer(value, label)
     if parsed <= 0:
         raise ValueError(f"{label} must be positive")
+    return parsed
+
+
+def _bounded_integer(
+    value: int,
+    label: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    parsed = _integer(value, label)
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{label} must be between {minimum} and {maximum}")
     return parsed
 
 

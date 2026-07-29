@@ -12,6 +12,7 @@ from rpg_core.rp_modules.constants import (
 from rpg_core.rp_modules.models import ModuleContextRequest
 from rpg_core.rp_modules.plot_scheduler import (
     PLOT_POOL_COOLDOWN_ACTIVE,
+    PlotScheduleCandidateBatch,
     PlotScheduleInjection,
     PlotScheduleSelector,
     PlotScheduleSnapshot,
@@ -31,6 +32,8 @@ def _event(
     deadline_time: SceneTime | None = None,
     repeat: bool = False,
     cooldown: int = 0,
+    dispatch_mode: str = models.PLOT_DISPATCH_SOFT,
+    selection_weight: int = 1,
 ) -> models.StoryPlotEvent:
     return models.StoryPlotEvent(
         id=event_id,
@@ -41,8 +44,10 @@ def _event(
         position=position,
         scheduled_time=scheduled_time,
         deadline_time=deadline_time,
+        dispatch_mode=dispatch_mode,
         allow_repeat=repeat,
         repeat_cooldown_minutes=cooldown,
+        selection_weight=selection_weight,
     )
 
 
@@ -399,6 +404,175 @@ def test_repeat_event_uses_scene_time_cooldown_and_random_is_stable() -> None:
     assert after_a == after_b
 
 
+def test_pool_selection_is_stable_and_tracks_configured_weights() -> None:
+    high_pool = models.StoryPlotEventPool(
+        10,
+        1,
+        "高权重池",
+        selection_weight=9,
+    )
+    low_pool = models.StoryPlotEventPool(
+        20,
+        1,
+        "低权重池",
+        selection_weight=1,
+    )
+    high_event = _event(
+        1,
+        high_pool.id,
+        dispatch_mode=models.PLOT_DISPATCH_FORCED,
+    )
+    low_event = _event(
+        2,
+        low_pool.id,
+        dispatch_mode=models.PLOT_DISPATCH_FORCED,
+    )
+    snapshots = (
+        PlotScheduleSnapshot(
+            session_id="weighted-pools",
+            story_id=1,
+            enabled=True,
+            story=models.StoryPlotSchedule(
+                story_id=1,
+                pools=(high_pool, low_pool),
+                events=(high_event, low_event),
+            ),
+            overrides=models.SessionPlotOverrides("weighted-pools"),
+            decisions=(),
+        ),
+        PlotScheduleSnapshot(
+            session_id="weighted-pools",
+            story_id=1,
+            enabled=True,
+            story=models.StoryPlotSchedule(
+                story_id=1,
+                pools=(low_pool, high_pool),
+                events=(low_event, high_event),
+            ),
+            overrides=models.SessionPlotOverrides("weighted-pools"),
+            decisions=(),
+        ),
+    )
+    selector = PlotScheduleSelector()
+    selected_pool_ids: list[int] = []
+
+    for turn_id in range(1, 1001):
+        forward = selector.select(
+            snapshots[0],
+            scene_time=SceneTime(1, 1, 1, 10),
+            current_turn_id=turn_id,
+            completed_world_turn_ids=(),
+        )
+        reversed_order = selector.select(
+            snapshots[1],
+            scene_time=SceneTime(1, 1, 1, 10),
+            current_turn_id=turn_id,
+            completed_world_turn_ids=(),
+        )
+        assert forward == reversed_order
+        assert not isinstance(forward[0], PlotScheduleCandidateBatch)
+        selected_pool_ids.append(forward[0].container_id)
+
+    high_count = selected_pool_ids.count(high_pool.id)
+    assert 850 <= high_count <= 950
+    assert selected_pool_ids.count(low_pool.id) == 1000 - high_count
+
+
+def test_random_event_weighting_and_soft_batch_are_stable_without_replacement() -> None:
+    pool = models.StoryPlotEventPool(
+        10,
+        1,
+        "加权随机池",
+        selection_weight=1,
+        candidate_batch_size=5,
+    )
+    events = tuple(
+        _event(
+            event_id,
+            pool.id,
+            selection_weight=(9 if event_id == 1 else 1),
+        )
+        for event_id in range(1, 8)
+    )
+    snapshot = PlotScheduleSnapshot(
+        session_id="weighted-events",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(pool,),
+            events=tuple(reversed(events)),
+        ),
+        overrides=models.SessionPlotOverrides("weighted-events"),
+        decisions=(),
+    )
+    selector = PlotScheduleSelector()
+    primary_ids: list[int] = []
+
+    for turn_id in range(1, 1001):
+        selected = selector.select(
+            snapshot,
+            scene_time=SceneTime(1, 1, 1, 10),
+            current_turn_id=turn_id,
+            completed_world_turn_ids=(),
+        )
+        repeated = selector.select(
+            snapshot,
+            scene_time=SceneTime(1, 1, 1, 10),
+            current_turn_id=turn_id,
+            completed_world_turn_ids=(),
+        )
+        assert selected == repeated
+        batch = selected[0]
+        assert isinstance(batch, PlotScheduleCandidateBatch)
+        assert batch.configured_size == 5
+        assert len(batch.candidates) == 5
+        assert batch.candidates[0] == batch.primary
+        assert len({candidate.event.id for candidate in batch.candidates}) == 5
+        primary_ids.append(batch.primary.event.id)
+
+    weighted_primary_count = primary_ids.count(1)
+    assert 530 <= weighted_primary_count <= 670
+
+
+def test_random_forced_primary_bypasses_soft_batch_construction() -> None:
+    event = _event(
+        1,
+        10,
+        dispatch_mode=models.PLOT_DISPATCH_FORCED,
+    )
+    snapshot = PlotScheduleSnapshot(
+        session_id="forced-primary",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(
+                models.StoryPlotEventPool(
+                    10,
+                    1,
+                    "强制池",
+                    candidate_batch_size=5,
+                ),
+            ),
+            events=(event,),
+        ),
+        overrides=models.SessionPlotOverrides("forced-primary"),
+        decisions=(),
+    )
+
+    selected = PlotScheduleSelector().select(
+        snapshot,
+        scene_time=SceneTime(1, 1, 1, 10),
+        current_turn_id=2,
+        completed_world_turn_ids=(1,),
+    )
+
+    assert len(selected) == 1
+    assert not isinstance(selected[0], PlotScheduleCandidateBatch)
+    assert selected[0].event.id == event.id
+
+
 def test_manual_trigger_without_scene_time_overrides_prior_cooldown() -> None:
     event = _event(1, 10, repeat=True, cooldown=60)
     anchored = _decision(
@@ -472,12 +646,17 @@ def test_pool_cooldown_skips_whole_pool_and_reopens_at_boundary() -> None:
                 models.StoryPlotEventPool(
                     10,
                     1,
-                    "高优先级池",
+                    "高权重池",
                     selection_mode=models.PLOT_POOL_SEQUENTIAL,
-                    priority=100,
+                    selection_weight=100,
                     cooldown_minutes=60,
                 ),
-                models.StoryPlotEventPool(20, 1, "低优先级池", priority=1),
+                models.StoryPlotEventPool(
+                    20,
+                    1,
+                    "低权重池",
+                    selection_weight=1,
+                ),
             ),
             events=(anchor_event, next_high_event, low_event),
         ),

@@ -32,7 +32,7 @@ def _seed_plot_events(
             story_id=session.story_id,
             name=f"{session_id} 手动注入池",
             selection_mode=models.PLOT_POOL_SEQUENTIAL,
-            priority=100,
+            selection_weight=1,
             cooldown_minutes=cooldown_minutes,
         )
     )

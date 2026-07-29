@@ -70,7 +70,7 @@ async def test_agent_reset_clears_plot_ledger_and_preserves_overrides(
         name="清理测试池",
         description="",
         selection_mode=models.PLOT_POOL_RANDOM,
-        priority=0,
+        selection_weight=1,
         enabled=True,
     )
     event = gateway.plot_scheduling.create_event(

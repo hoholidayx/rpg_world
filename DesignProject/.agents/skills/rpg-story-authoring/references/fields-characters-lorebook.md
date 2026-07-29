@@ -1,6 +1,6 @@
 # 角色与世界书字段
 
-> authoringRulesVersion=1.3 · catalogDigest=340c9ac89c0854acee8f39bf0badd0e49c1171d21a497ef009431a680df9d431
+> authoringRulesVersion=1.4 · catalogDigest=12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413
 
 本文由 RPG World 字段语义单一真源生成；不要手工修改。
 

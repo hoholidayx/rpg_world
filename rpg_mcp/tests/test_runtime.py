@@ -185,7 +185,8 @@ def _pack() -> dict:
                         "name": "主线素材",
                         "description": "",
                         "selectionMode": "sequential",
-                        "priority": 10,
+                        "selectionWeight": 1,
+                        "candidateBatchSize": 3,
                         "cooldownMinutes": 4320,
                         "enabled": False,
                     }
@@ -202,6 +203,7 @@ def _pack() -> dict:
                         "scheduledTime": None,
                         "deadlineTime": None,
                         "position": 0,
+                        "selectionWeight": 1,
                         "enabled": True,
                         "allowRepeat": False,
                         "repeatCooldownMinutes": 0,
@@ -257,18 +259,23 @@ def test_checked_in_story_pack_schema_accepts_runtime_fixture() -> None:
     Draft202012Validator(schema).validate(_pack())
 
 
-def test_legacy_story_pack_defaults_missing_pool_cooldown_to_zero() -> None:
+def test_story_pack_defaults_missing_plot_weight_batch_and_cooldown() -> None:
     legacy = _pack()
-    legacy["resources"]["plotSchedule"]["pools"][0].pop(
-        "cooldownMinutes"
-    )
+    pool = legacy["resources"]["plotSchedule"]["pools"][0]
+    event = legacy["resources"]["plotSchedule"]["events"][0]
+    pool.pop("selectionWeight")
+    pool.pop("candidateBatchSize")
+    pool.pop("cooldownMinutes")
+    event.pop("selectionWeight")
 
     parsed = StoryPack.model_validate(legacy)
 
-    assert (
-        parsed.resources.plot_schedule.pools[0].cooldown_minutes
-        == 0
-    )
+    parsed_pool = parsed.resources.plot_schedule.pools[0]
+    parsed_event = parsed.resources.plot_schedule.events[0]
+    assert parsed_pool.selection_weight == 1
+    assert parsed_pool.candidate_batch_size == 3
+    assert parsed_pool.cooldown_minutes == 0
+    assert parsed_event.selection_weight == 1
 
 
 def test_story_pack_validation_catches_runtime_owned_text_and_removed_status_fields(
@@ -341,6 +348,21 @@ def test_story_pack_preview_apply_and_idempotency(tmp_path) -> None:
             document["resources"]["plotSchedule"]["pools"][0]
             ["cooldownMinutes"]
             == 4320
+        )
+        assert (
+            document["resources"]["plotSchedule"]["pools"][0]
+            ["selectionWeight"]
+            == 1
+        )
+        assert (
+            document["resources"]["plotSchedule"]["pools"][0]
+            ["candidateBatchSize"]
+            == 3
+        )
+        assert (
+            document["resources"]["plotSchedule"]["events"][0]
+            ["selectionWeight"]
+            == 1
         )
 
         no_base = deepcopy(pack)

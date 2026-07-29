@@ -41,7 +41,10 @@ async def test_plot_judge_requires_and_parses_structured_tool_result() -> None:
             "id": "call_1",
             "function": {
                 "name": "plot_schedule_decision",
-                "arguments": '{"suitable":true,"reason":"地点一致"}',
+                "arguments": (
+                    '{"selectedEventId":1,"suitable":true,'
+                    '"reason":"地点一致"}'
+                ),
             },
         }],
         finish_reason="tool_calls",
@@ -53,8 +56,43 @@ async def test_plot_judge_requires_and_parses_structured_tool_result() -> None:
     ).judge([Message(Role.USER, "行动")], turn_stats=TurnStats())
 
     assert decision.suitable is True
+    assert decision.selected_event_id == 1
     assert decision.reason == "地点一致"
     assert provider.calls[0][1][0]["function"]["name"] == "plot_schedule_decision"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        '{"suitable":true,"reason":"地点一致"}',
+        '{"selectedEventId":true,"suitable":true,"reason":"地点一致"}',
+        '{"selectedEventId":0,"suitable":true,"reason":"地点一致"}',
+        '{"selectedEventId":"1","suitable":true,"reason":"地点一致"}',
+    ),
+)
+async def test_plot_judge_rejects_invalid_selected_event_id(
+    arguments: str,
+) -> None:
+    provider = _Provider(LLMResponse(
+        content="",
+        tool_calls=[{
+            "id": "call_1",
+            "function": {
+                "name": "plot_schedule_decision",
+                "arguments": arguments,
+            },
+        }],
+        finish_reason="tool_calls",
+    ))
+
+    with pytest.raises(
+        PlotScheduleJudgeResponseError,
+        match="selectedEventId",
+    ):
+        await PlotScheduleJudge(
+            provider_factory=lambda: _provider_result(provider)
+        ).judge([Message(Role.USER, "行动")], turn_stats=TurnStats())
 
 
 @pytest.mark.asyncio
@@ -93,7 +131,7 @@ async def test_plot_judge_rejects_unbounded_reason() -> None:
             "function": {
                 "name": "plot_schedule_decision",
                 "arguments": (
-                    '{"suitable":true,"reason":"'
+                    '{"selectedEventId":1,"suitable":true,"reason":"'
                     + "x" * (PLOT_SUITABILITY_REASON_MAX_CHARS + 1)
                     + '"}'
                 ),
@@ -155,7 +193,8 @@ async def test_plot_judge_can_read_committed_history_before_deciding() -> None:
                         "function": {
                             "name": "plot_schedule_decision",
                             "arguments": (
-                                '{"suitable":true,"reason":"已提交历史确认信使在场"}'
+                                '{"selectedEventId":1,"suitable":true,'
+                                '"reason":"已提交历史确认信使在场"}'
                             ),
                         },
                     }],

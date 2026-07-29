@@ -48,6 +48,7 @@ from rpg_core.rp_modules.plot_scheduler.scene_opportunity import (
 )
 from rpg_core.rp_modules.plot_scheduler.models import (
     PlotScheduleCandidate,
+    PlotScheduleCandidateBatch,
     PlotScheduleInjection,
     PlotScheduleSnapshot,
     PlotSuitabilityDecision,
@@ -89,6 +90,7 @@ __all__ = [
     "PlotSceneOpportunityCommitService",
     "PlotSceneOpportunityTurnState",
     "PlotScheduleCandidate",
+    "PlotScheduleCandidateBatch",
     "PlotScheduleConflictError",
     "PlotScheduleDerivationCopyPolicy",
     "PlotScheduleInjection",
