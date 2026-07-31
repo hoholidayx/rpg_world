@@ -1,6 +1,11 @@
 {% if status_tables %}
-{% set writable_tables = status_tables | selectattr('has_rows') | list %}
-以下是本轮回复前的普通状态表快照，遵循核心状态同步协议。{% if writable_tables %}需要更新时调用 status_table_set_values，并使用对应的运行时表 ID。{% endif %}只能修改已有键的值，不得新增、删除或重命名键；不确定时保持原值。
+{% set value_writable_tables = status_tables | selectattr('value_writable') | list %}
+{% set structure_writable_tables = status_tables | selectattr('structure_writable') | list %}
+以下是本轮回复前的普通状态表快照，遵循核心状态同步协议。
+{% if value_writable_tables %}本轮实际提供 status_table_set_values，可用对应的运行时表 ID 修改已有字段的 value。{% endif %}
+{% if structure_writable_tables %}本轮实际提供 status_table_edit_fields，可在已有普通表内新增、重命名或删除字段；不能创建、删除或重命名整张表。新字段只用于真实、持久且无法由现有字段表达的当前事实。{% endif %}
+{% if not value_writable_tables and not structure_writable_tables %}本轮未提供普通状态写入工具，本段仅供读取；不得假设可以修改 value 或字段结构。{% endif %}
+runtimeKeyLocked 只保护字段结构：锁定字段不能重命名或删除，但在实际提供 value 工具时仍可更新 value。LLM 不得修改 runtimeKeyLocked、updateRule 或 metadata。不确定时保持原值与结构。
 
 默认更新语义：只在本轮事实已经明确且值实际变化时同步。字段存在“更新规则”时，还必须满足该字段的额外语义条件；规则为空时使用默认语义。
 
@@ -15,10 +20,10 @@
 
 用途与更新规则：{{ table.context_description }}
 
-| {{ table.headers[0] }} | {{ table.headers[1] }} | 更新规则 |
-| --- | --- | --- |
+| {{ table.headers[0] }} | {{ table.headers[1] }} | Key 结构 | 更新规则 |
+| --- | --- | --- | --- |
 {% for row in table.context_rows %}
-| {{ row.key }} | {{ row.value }} | {{ row.update_rule }} |
+| {{ row.key }} | {{ row.value }} | {% if row.runtime_key_locked %}锁定{% else %}可编辑{% endif %} | {{ row.update_rule }} |
 {% endfor %}
 
 {% endfor %}
@@ -39,10 +44,10 @@
 
 用途与更新规则：{{ table.context_description }}
 
-| {{ table.headers[0] }} | {{ table.headers[1] }} | 更新规则 |
-| --- | --- | --- |
+| {{ table.headers[0] }} | {{ table.headers[1] }} | Key 结构 | 更新规则 |
+| --- | --- | --- | --- |
 {% for row in table.context_rows %}
-| {{ row.key }} | {{ row.value }} | {{ row.update_rule }} |
+| {{ row.key }} | {{ row.value }} | {% if row.runtime_key_locked %}锁定{% else %}可编辑{% endif %} | {{ row.update_rule }} |
 {% endfor %}
 
 {% endfor %}

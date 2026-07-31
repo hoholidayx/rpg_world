@@ -15,7 +15,12 @@ from rpg_data.model.status import (
     serialize_status_document,
 )
 from rpg_core.scene.status import SceneStatusService
-from rpg_core.status.manager import StatusValueUpdateResult, collect_value_changes
+from rpg_core.status.manager import (
+    StatusFieldEditResult,
+    StatusValueUpdateResult,
+    apply_status_field_edits,
+    collect_value_changes,
+)
 
 if TYPE_CHECKING:
     from rpg_core.status.manager import StatusManager
@@ -213,6 +218,31 @@ class StatusDocumentScratch:
             changes=changes,
         )
 
+    def runtime_edit_fields(
+        self,
+        table_id: int,
+        *,
+        creates: list[tuple[str, str]],
+        renames: list[tuple[str, str]],
+        deletes: list[str],
+    ) -> StatusFieldEditResult:
+        table_id = int(table_id)
+        table = self._base_table(table_id)
+        if str(table.get("status_kind", "")) != STATUS_KIND_NORMAL:
+            raise PermissionError(
+                "Generic status field edits only support normal tables"
+            )
+        updated, result = apply_status_field_edits(
+            self._current_document(table_id),
+            table_id=table_id,
+            table_name=str(table.get("name", "")),
+            creates=creates,
+            renames=renames,
+            deletes=deletes,
+        )
+        self._stage_document(table_id, updated)
+        return result
+
     def commit(self, real_status_mgr: "StatusManager | None" = None) -> list[StatusDocumentChange]:
         mgr = real_status_mgr or self._real_status_mgr
         if mgr is None:
@@ -345,6 +375,21 @@ class ScratchStatusManager:
         updates: list[tuple[str, str]],
     ) -> StatusValueUpdateResult:
         return self._scratch.runtime_set_existing_values(table_id, updates)
+
+    def runtime_edit_fields(
+        self,
+        table_id: int,
+        *,
+        creates: list[tuple[str, str]],
+        renames: list[tuple[str, str]],
+        deletes: list[str],
+    ) -> StatusFieldEditResult:
+        return self._scratch.runtime_edit_fields(
+            table_id,
+            creates=creates,
+            renames=renames,
+            deletes=deletes,
+        )
 
     set_key_value = runtime_set_key_value
     delete_key_value = runtime_delete_key_value

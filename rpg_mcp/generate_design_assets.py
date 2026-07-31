@@ -203,6 +203,45 @@ def build_managed_authoring_assets() -> dict[str, str]:
             "promptsAreCodeOwned": True,
             "workspaceConfiguration": False,
         },
+        "statusTables": {
+            "documentSchemaVersion": 2,
+            "worldAdvancingModes": ["neutral", "ic", "gm"],
+            "oocAndCommandsAreReadOnly": True,
+            "readSource": "current_turn_context",
+            "normal": {
+                "scope": "existing_session_tables",
+                "tableCrud": False,
+                "fieldCrud": [
+                    "create",
+                    "read",
+                    "update",
+                    "rename",
+                    "delete",
+                ],
+                "valueTool": "status_table_set_values",
+                "structureTool": "status_table_edit_fields",
+                "emptyTableCanCreateFirstField": True,
+                "newFieldDefaults": {
+                    "runtimeKeyLocked": False,
+                    "updateRule": "",
+                    "metadata": {},
+                },
+                "runtimeKeyLocked": {
+                    "blocks": ["rename", "delete"],
+                    "allowsValueUpdate": True,
+                    "allowsOtherFieldCreation": True,
+                },
+                "authorPolicyFieldsMutableByLlm": False,
+            },
+            "scene": {
+                "usesNormalStatusTools": False,
+                "structurePolicySetting": (
+                    "agent.scene.allow_runtime_key_changes"
+                ),
+                "defaultAllowsExistingValueUpdatesOnly": True,
+                "runtimeKeyLockedBlocks": ["rename", "delete"],
+            },
+        },
         "plotScheduling": {
             "sceneTimeFormat": "Y 年 M 月 D 日 H 时 [M 分]",
             "sceneTimeUsesOrdinalPrefix": False,

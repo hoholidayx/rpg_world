@@ -23,6 +23,7 @@ from rpg_core.rp_modules.plot_scheduler.tools import PlotSandboxToolProvider
 from rpg_core.scene import SCENE_TOOL_NAMES
 from rpg_core.settings import settings
 from rpg_core.status.tools import (
+    STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
     STATUS_TABLE_SET_VALUES_TOOL_NAME,
 )
 from rpg_core.tooling.base import BaseTool
@@ -124,7 +125,10 @@ class AgentToolService:
             for tool in self._base_registry:
                 if (
                     tool.name in SCENE_TOOL_NAMES
-                    or tool.name == STATUS_TABLE_SET_VALUES_TOOL_NAME
+                    or tool.name in {
+                        STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+                        STATUS_TABLE_SET_VALUES_TOOL_NAME,
+                    }
                 ):
                     continue
                 if not policy.expose_state_tools and isinstance(tool, WriteFileTool):

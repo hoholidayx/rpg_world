@@ -1,6 +1,6 @@
 {
-  "authoringRulesVersion": "1.4",
-  "catalogDigest": "12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413",
+  "authoringRulesVersion": "1.5",
+  "catalogDigest": "da18005df6206dc24ecd2e38e0db4a22ebfb644eaf898a651b70d17d2005db35",
   "compatibleContracts": {
     "designProject": "story-design-project/2.0",
     "mcp": "2.0",
@@ -320,7 +320,7 @@
     },
     {
       "id": "status",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
     },
     {
       "id": "composer",
@@ -1841,7 +1841,7 @@
       "model": "StoryResources",
       "pathPattern": "/resources/statusTables",
       "ruleId": "field.resources.status-tables",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "Story 资源集合 · statusTables"
     },
     {
@@ -1981,7 +1981,7 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/key",
       "ruleId": "field.status-row.key",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态字段 · key"
     },
     {
@@ -1995,12 +1995,12 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/metadata",
       "ruleId": "field.status-row.metadata",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态字段 · metadata"
     },
     {
-      "avoid": "不要把它理解为 value 只读。",
-      "description": "只保护 key 不被运行时增删或改名，不锁定 value。",
+      "avoid": "不要把它理解为 value 只读，也不要理解成禁止同表新增其他字段。",
+      "description": "为 true 时只保护该字段不被运行时删除或重命名；仍允许更新 value，也不妨碍同表新增其他未锁字段。",
       "domain": "status",
       "examples": [
         true
@@ -2009,7 +2009,7 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/runtimeKeyLocked",
       "ruleId": "field.status-row.runtime-key-locked",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态字段 · runtimeKeyLocked"
     },
     {
@@ -2023,7 +2023,7 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/updateRule",
       "ruleId": "field.status-row.update-rule",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态字段 · updateRule"
     },
     {
@@ -2037,7 +2037,7 @@
       "model": "StatusRowSpec",
       "pathPattern": "/resources/statusTables/*/rows/*/value",
       "ruleId": "field.status-row.value",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态字段 · value"
     },
     {
@@ -2051,12 +2051,12 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/characterRef",
       "ruleId": "field.status-table.character-ref",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态表 · characterRef"
     },
     {
-      "avoid": "不要逐字段复制相同规则，也不要把表当作无限追加的历史流水。当前事实、承诺、联系或事件状态可以成为字段；按时间累积的叙事历史更适合 Memory。",
-      "description": "说明该表追踪什么，并集中写整表共同语义、value 格式和即时更新规则；字段专属条件写入 row.updateRule。",
+      "avoid": "不要逐字段复制相同规则，也不要把表当作无限追加的历史流水。当前事实、承诺、联系或事件状态可以成为字段；按时间累积的叙事历史更适合 Memory。normal 表需要动态字段时，不要省略可创建字段的领域、格式与删除边界。",
+      "description": "说明该表追踪什么，并集中写整表共同语义、value 格式和即时更新规则；字段专属条件写入 row.updateRule。normal 表若存在无法预先穷举的字段，还应说明动态 key 的业务域、命名与 value 格式，以及创建、改名和删除条件；无需预定义全部未来字段。",
       "domain": "status",
       "examples": [
         "追踪当前 Session 的时间、位置与在场人物。"
@@ -2065,7 +2065,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/description",
       "ruleId": "field.status-table.description",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态表 · description"
     },
     {
@@ -2079,7 +2079,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/metadata",
       "ruleId": "field.status-table.metadata",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态表 · metadata"
     },
     {
@@ -2093,7 +2093,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/name",
       "ruleId": "field.status-table.name",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态表 · name"
     },
     {
@@ -2129,7 +2129,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/rows",
       "ruleId": "field.status-table.rows",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态表 · rows"
     },
     {
@@ -2143,7 +2143,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/sortOrder",
       "ruleId": "field.status-table.sort-order",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态表 · sortOrder"
     },
     {
@@ -2157,7 +2157,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/stableId",
       "ruleId": "field.status-table.stable-id",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态表 · stableId"
     },
     {
@@ -2171,7 +2171,7 @@
       "model": "StatusTableSpec",
       "pathPattern": "/resources/statusTables/*/statusKind",
       "ruleId": "field.status-table.status-kind",
-      "runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。",
+      "runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。",
       "title": "状态表 · statusKind"
     },
     {
@@ -2734,6 +2734,13 @@
       "ruleId": "principle.status-immediate",
       "runtimeEffect": "StatusSubAgent 在 neutral、ic 或 gm 正文 turn 按目标即时处理状态；OOC 与命令不推进状态事实。",
       "title": "状态值即时判断"
+    },
+    {
+      "description": "neutral、ic 或 gm 正文 turn 可在已有 normal Session 状态表内按明确事实创建、读取、更新、改名和删除字段，但不能创建、删除或重命名整张表。读取来自每轮完整状态 Context；结构变化只用于当前事实模型，不把状态表变成历史流水。OOC 与命令只读。",
+      "domain": "status",
+      "ruleId": "principle.status-normal-field-crud",
+      "runtimeEffect": "已有字段 value 使用 status_table_set_values；字段新增、改名或删除使用 status_table_edit_fields，并与消息一起在 turn 事务中提交。runtimeKeyLocked=true 只禁止该字段改名和删除，不限制 value 更新或同表新增其他字段。Scene 不继承 normal 权限，仍遵循 agent.scene.allow_runtime_key_changes。",
+      "title": "普通状态表允许字段级运行时 CRUD"
     },
     {
       "description": "message_mode 只声明启用且 config 为空；neutral/ic/ooc/gm 的标签和 Prompt 不属于设计数据。",

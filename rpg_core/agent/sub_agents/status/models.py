@@ -47,6 +47,7 @@ class StatusBootstrapResult:
 class StatusRouteTarget:
     table_id: int
     keys: tuple[str, ...] = ()
+    structure: bool = False
     reason: str = ""
 
 

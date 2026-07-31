@@ -28,7 +28,12 @@ from rpg_core.tooling.base import BaseTool
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SceneTracker
-from rpg_core.status.tools import StatusTableSetValuesTool, StatusTableToolProvider, StatusWritePolicy
+from rpg_core.status.tools import (
+    StatusTableEditFieldsTool,
+    StatusTableSetValuesTool,
+    StatusTableToolProvider,
+    StatusWritePolicy,
+)
 from tests.support.scripted_llm import InvalidChatResponseProvider, response
 
 
@@ -173,15 +178,18 @@ async def test_status_table_tool_rejects_structure_and_access_errors() -> None:
     assert scratch.staged_changes == []
 
 
-def test_status_tool_provider_exposes_all_nonempty_normal_tables() -> None:
+def test_status_tool_provider_exposes_structure_tool_for_empty_normal_table() -> None:
     empty_manager = FakeRuntimeStatusManager(normal_rows=())
     _scratch, empty_runtime = _scratch_runtime(empty_manager)
     populated_manager = FakeRuntimeStatusManager()
     _scratch, populated_runtime = _scratch_runtime(populated_manager)
 
-    assert StatusTableToolProvider(empty_runtime).get_tools() == []
+    assert [
+        tool.name for tool in StatusTableToolProvider(empty_runtime).get_tools()
+    ] == ["status_table_edit_fields"]
     assert [tool.name for tool in StatusTableToolProvider(populated_runtime).get_tools()] == [
-        "status_table_set_values"
+        "status_table_set_values",
+        "status_table_edit_fields",
     ]
 
     rule_manager = FakeRuntimeStatusManager()
@@ -191,7 +199,346 @@ def test_status_tool_provider_exposes_all_nonempty_normal_tables() -> None:
     ])
     _scratch, rule_runtime = _scratch_runtime(rule_manager)
     assert [tool.name for tool in StatusTableToolProvider(rule_runtime).get_tools()] == [
-        "status_table_set_values"
+        "status_table_set_values",
+        "status_table_edit_fields",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_status_field_tool_creates_renames_deletes_and_preserves_policy() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[1] = StatusTableDocument.from_rows(rows=[
+        StatusTableRow(
+            "生命",
+            "10",
+            runtime_key_locked=True,
+            update_rule="受伤或恢复事实明确时更新",
+            metadata={"source": "author"},
+        ),
+        StatusTableRow(
+            "临时许可",
+            "有效",
+            update_rule="许可事实变化时更新",
+            metadata={"kind": "permit"},
+        ),
+        StatusTableRow(
+            "旧称呼",
+            "甲",
+            update_rule="身份称呼被正式纠正时更新",
+            metadata={"source": "author", "format": "short_text"},
+        ),
+    ])
+    scratch, runtime = _scratch_runtime(manager)
+    tool = StatusTableEditFieldsTool(runtime)
+
+    payload = json.loads(await tool.execute(
+        table_id=1,
+        creates=[{"key": "新线索", "value": "仓库钥匙"}],
+        renames=[{"key": "旧称呼", "new_key": "正式称呼"}],
+        deletes=["临时许可"],
+    ))
+
+    assert payload == {
+        "ok": True,
+        "tableId": 1,
+        "tableName": "角色状态",
+        "changed": True,
+        "created": [{"key": "新线索", "value": "仓库钥匙"}],
+        "renamed": [{"key": "旧称呼", "newKey": "正式称呼"}],
+        "deleted": [{"key": "临时许可", "oldValue": "有效"}],
+    }
+    rows = runtime.get_table_by_id(1)["document"]["rows"]
+    assert [row["key"] for row in rows] == ["生命", "正式称呼", "新线索"]
+    renamed = rows[1]
+    assert renamed == {
+        "key": "正式称呼",
+        "value": "甲",
+        "runtimeKeyLocked": False,
+        "updateRule": "身份称呼被正式纠正时更新",
+        "metadata": {"source": "author", "format": "short_text"},
+    }
+    created = rows[2]
+    assert created == {
+        "key": "新线索",
+        "value": "仓库钥匙",
+        "runtimeKeyLocked": False,
+        "updateRule": "",
+        "metadata": {},
+    }
+    assert manager.documents[1].row_for_key("旧称呼") is not None
+    scratch.commit()
+    assert manager.documents[1].row_for_key("正式称呼") is not None
+    assert manager.documents[1].row_for_key("临时许可") is None
+
+
+@pytest.mark.asyncio
+async def test_status_field_tool_rejects_locked_missing_scene_and_conflicts_atomically() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[1] = StatusTableDocument.from_rows(rows=[
+        StatusTableRow("锁定核心", "保留", runtime_key_locked=True),
+        StatusTableRow("可变字段", "旧值"),
+    ])
+    scratch, runtime = _scratch_runtime(manager)
+    tool = StatusTableEditFieldsTool(runtime)
+
+    locked = json.loads(await tool.execute(
+        table_id=1,
+        creates=[],
+        renames=[],
+        deletes=["锁定核心"],
+    ))
+    missing = json.loads(await tool.execute(
+        table_id=1,
+        creates=[],
+        renames=[{"key": "不存在", "new_key": "新名"}],
+        deletes=[],
+    ))
+    conflict = json.loads(await tool.execute(
+        table_id=1,
+        creates=[{"key": "新字段", "value": "值"}],
+        renames=[{"key": "可变字段", "new_key": "新字段"}],
+        deletes=[],
+    ))
+    existing_target = json.loads(await tool.execute(
+        table_id=1,
+        creates=[{"key": "锁定核心", "value": "覆盖"}],
+        renames=[],
+        deletes=[],
+    ))
+    scene = json.loads(await tool.execute(
+        table_id=2,
+        creates=[{"key": "天气", "value": "晴"}],
+        renames=[],
+        deletes=[],
+    ))
+    empty = json.loads(await tool.execute(
+        table_id=1,
+        creates=[],
+        renames=[],
+        deletes=[],
+    ))
+
+    assert locked["errorCode"] == "field_locked"
+    assert missing["errorCode"] == "key_not_found"
+    assert conflict["errorCode"] == "key_conflict"
+    assert existing_target["errorCode"] == "key_conflict"
+    assert scene["errorCode"] == "unsupported_table_kind"
+    assert empty["errorCode"] == "invalid_arguments"
+    assert scratch.staged_changes == []
+
+
+@pytest.mark.asyncio
+async def test_status_field_tool_creates_first_field_and_enforces_scope() -> None:
+    manager = FakeRuntimeStatusManager(normal_rows=())
+    scratch, runtime = _scratch_runtime(manager)
+    scoped = StatusTableEditFieldsTool(
+        runtime,
+        write_policy=StatusWritePolicy(
+            allowed_keys={1: frozenset()},
+            allowed_structure_table_ids=frozenset({1}),
+        ),
+    )
+
+    created = json.loads(await scoped.execute(
+        table_id=1,
+        creates=[{"key": "当前许可证", "value": "临时通行证"}],
+        renames=[],
+        deletes=[],
+    ))
+    blocked_table = json.loads(await scoped.execute(
+        table_id=2,
+        creates=[{"key": "天气", "value": "晴"}],
+        renames=[],
+        deletes=[],
+    ))
+
+    assert created["changed"] is True
+    assert runtime.get_table_by_id(1)["document"]["rows"][0]["key"] == "当前许可证"
+    assert blocked_table["errorCode"] == "write_not_allowed"
+    assert len(scratch.staged_changes) == 1
+
+
+@pytest.mark.asyncio
+async def test_status_field_tool_allows_omitting_unused_operation_arrays() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[1] = StatusTableDocument.from_rows(rows=[
+        StatusTableRow("临时许可", "有效"),
+    ])
+    scratch, runtime = _scratch_runtime(manager)
+    tool = StatusTableEditFieldsTool(runtime)
+
+    deleted = json.loads(await tool.execute(
+        table_id=1,
+        deletes=["临时许可"],
+    ))
+    empty = json.loads(await tool.execute(table_id=1))
+
+    assert deleted["ok"] is True
+    assert deleted["deleted"] == [{"key": "临时许可", "oldValue": "有效"}]
+    assert empty["errorCode"] == "invalid_arguments"
+    assert runtime.get_table_by_id(1)["document"]["rows"] == []
+    assert len(scratch.staged_changes) == 1
+
+
+@pytest.mark.asyncio
+async def test_status_route_supports_pure_structure_target_with_full_table_context() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[1] = StatusTableDocument.from_rows(rows=[
+        StatusTableRow(
+            "锁定核心",
+            "CORE_SENTINEL",
+            runtime_key_locked=True,
+        ),
+        StatusTableRow("其它字段", "OTHER_SENTINEL"),
+    ])
+    scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        async def chat(self, messages, *, tools):  # noqa: ANN001
+            names = {tool["function"]["name"] for tool in tools}
+            if names == {"select_status_targets"}:
+                catalog = str(messages[-1]["content"])
+                assert '"runtime_key_locked": true' in catalog
+                return response(tool_calls=[{
+                    "function": {
+                        "name": "select_status_targets",
+                        "arguments": json.dumps({
+                            "scene": False,
+                            "tables": [{
+                                "table_id": 1,
+                                "keys": [],
+                                "structure": True,
+                                "reason": "出现了新的持久许可",
+                            }],
+                        }),
+                    },
+                }])
+            assert names == {"status_table_edit_fields"}
+            target = str(messages[-1]["content"])
+            assert "CORE_SENTINEL" in target
+            assert "OTHER_SENTINEL" in target
+            return response(tool_calls=[{
+                "function": {
+                    "name": "status_table_edit_fields",
+                    "arguments": json.dumps({
+                        "table_id": 1,
+                        "creates": [{"key": "当前许可", "value": "夜间通行"}],
+                        "renames": [],
+                        "deletes": [],
+                    }),
+                },
+            }])
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([
+        StatusTableSetValuesTool(runtime),
+        StatusTableEditFieldsTool(runtime),
+    ])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="当前普通状态",
+        scene_context="",
+        context_tables=runtime.list_context_tables(),
+        user_input="负责人正式给了我一张今晚有效的夜间通行证。",
+    )
+
+    assert result.failed is False
+    assert result.updated is True
+    assert result.route is not None
+    assert result.route.targets[0].keys == ()
+    assert result.route.targets[0].structure is True
+    assert runtime.get_table_by_id(1)["document"]["rows"][-1]["key"] == "当前许可"
+
+
+@pytest.mark.asyncio
+async def test_status_structure_scope_failure_rolls_back_target_changes() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[1] = StatusTableDocument.from_rows(rows=[
+        StatusTableRow("允许操作", "保留"),
+        StatusTableRow("范围外字段", "不得删除"),
+    ])
+    scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        async def chat(self, _messages, *, tools):  # noqa: ANN001
+            names = {tool["function"]["name"] for tool in tools}
+            if names == {"select_status_targets"}:
+                return response(tool_calls=[{
+                    "function": {
+                        "name": "select_status_targets",
+                        "arguments": json.dumps({
+                            "scene": False,
+                            "tables": [{
+                                "table_id": 1,
+                                "keys": ["允许操作"],
+                                "structure": True,
+                                "reason": "结构变更",
+                            }],
+                        }),
+                    },
+                }])
+            assert names == {
+                "status_table_edit_fields",
+                "status_table_set_values",
+            }
+            return response(tool_calls=[
+                {
+                    "function": {
+                        "name": "status_table_edit_fields",
+                        "arguments": json.dumps({
+                            "table_id": 1,
+                            "creates": [{"key": "先暂存", "value": "会回滚"}],
+                            "renames": [],
+                            "deletes": [],
+                        }),
+                    },
+                },
+                {
+                    "function": {
+                        "name": "status_table_edit_fields",
+                        "arguments": json.dumps({
+                            "table_id": 1,
+                            "creates": [],
+                            "renames": [],
+                            "deletes": ["范围外字段"],
+                        }),
+                    },
+                },
+            ])
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([
+        StatusTableSetValuesTool(runtime),
+        StatusTableEditFieldsTool(runtime),
+    ])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent.set_mutation_boundary(
+        scratch.create_checkpoint,
+        scratch.restore_checkpoint,
+    )
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="当前普通状态",
+        scene_context="",
+        context_tables=runtime.list_context_tables(),
+        user_input="调整许可字段。",
+    )
+
+    assert result.failed is True
+    assert result.updated is False
+    assert scratch.staged_changes == []
+    assert [
+        record.status for record in result.records
+    ] == [
+        StatusSubAgentRecordStatus.ROLLED_BACK_DUE_TO_FAILURE,
+        StatusSubAgentRecordStatus.ERROR,
     ]
 
 

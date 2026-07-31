@@ -20,6 +20,7 @@ from rpg_data.model.status import (
     StatusDocumentWrite,
     StatusRowRef,
     StatusTableDocument,
+    StatusTableRow,
 )
 
 if TYPE_CHECKING:
@@ -93,6 +94,53 @@ class StatusValueUpdateResult:
     @property
     def changed(self) -> bool:
         return bool(self.changes)
+
+
+class StatusFieldEditError(ValueError):
+    """Base error for one rejected normal-table structure edit."""
+
+
+class StatusFieldLockedError(StatusFieldEditError):
+    """A rename or delete targeted a runtime-locked field."""
+
+
+class StatusFieldKeyNotFoundError(StatusFieldEditError):
+    """A rename or delete targeted an unknown field."""
+
+
+class StatusFieldConflictError(StatusFieldEditError):
+    """One edit request contains conflicting field identities."""
+
+
+@dataclass(frozen=True)
+class StatusFieldCreated:
+    key: str
+    value: str
+
+
+@dataclass(frozen=True)
+class StatusFieldRenamed:
+    key: str
+    new_key: str
+
+
+@dataclass(frozen=True)
+class StatusFieldDeleted:
+    key: str
+    old_value: str
+
+
+@dataclass(frozen=True)
+class StatusFieldEditResult:
+    table_id: int
+    table_name: str
+    created: tuple[StatusFieldCreated, ...] = ()
+    renamed: tuple[StatusFieldRenamed, ...] = ()
+    deleted: tuple[StatusFieldDeleted, ...] = ()
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.created or self.renamed or self.deleted)
 
 
 class StatusManager:
@@ -314,7 +362,7 @@ class StatusManager:
         updates: list[tuple[str, str]],
     ) -> StatusValueUpdateResult:
         table = self._require_table(table_id)
-        if table.status_kind is not STATUS_KIND_NORMAL:
+        if table.status_kind != STATUS_KIND_NORMAL:
             raise PermissionError(
                 "Generic status table updates only support normal tables"
             )
@@ -331,6 +379,35 @@ class StatusManager:
                 base_document=table.document,
             )
         return StatusValueUpdateResult(table.id, table.name, changes)
+
+    def runtime_edit_fields(
+        self,
+        table_id: int,
+        *,
+        creates: list[tuple[str, str]],
+        renames: list[tuple[str, str]],
+        deletes: list[str],
+    ) -> StatusFieldEditResult:
+        table = self._require_table(table_id)
+        if table.status_kind != STATUS_KIND_NORMAL:
+            raise PermissionError(
+                "Generic status field edits only support normal tables"
+            )
+        updated_document, result = apply_status_field_edits(
+            table.document,
+            table_id=table.id,
+            table_name=table.name,
+            creates=creates,
+            renames=renames,
+            deletes=deletes,
+        )
+        self._save_document(
+            table,
+            updated_document,
+            expected_status_kind=STATUS_KIND_NORMAL,
+            base_document=table.document,
+        )
+        return result
 
     def get_active_scene_table(self) -> dict[str, object] | None:
         table = self._scene.get_active_table(self.session_id)
@@ -391,10 +468,140 @@ def collect_value_changes(
     )
 
 
+def apply_status_field_edits(
+    current: StatusTableDocument,
+    *,
+    table_id: int,
+    table_name: str,
+    creates: list[tuple[str, str]],
+    renames: list[tuple[str, str]],
+    deletes: list[str],
+) -> tuple[StatusTableDocument, StatusFieldEditResult]:
+    """Validate and apply one atomic normal-table field edit in memory."""
+
+    normalized_creates = [(str(key), str(value)) for key, value in creates]
+    normalized_renames = [(str(key), str(new_key)) for key, new_key in renames]
+    normalized_deletes = [str(key) for key in deletes]
+    if not (normalized_creates or normalized_renames or normalized_deletes):
+        raise StatusFieldEditError("Status field edits must not be empty")
+
+    all_keys = [
+        key
+        for key, _value in normalized_creates
+    ] + [
+        key
+        for key, _new_key in normalized_renames
+    ] + normalized_deletes
+    rename_targets = [new_key for _key, new_key in normalized_renames]
+    if any(not key for key in all_keys + rename_targets):
+        raise StatusFieldEditError("Status field keys must not be empty")
+
+    create_keys = [key for key, _value in normalized_creates]
+    rename_sources = [key for key, _new_key in normalized_renames]
+    if len(set(create_keys)) != len(create_keys):
+        raise StatusFieldConflictError("Status field creates contain duplicate keys")
+    if len(set(rename_sources)) != len(rename_sources):
+        raise StatusFieldConflictError("Status field renames contain duplicate source keys")
+    if len(set(normalized_deletes)) != len(normalized_deletes):
+        raise StatusFieldConflictError("Status field deletes contain duplicate keys")
+    if set(rename_sources).intersection(normalized_deletes):
+        raise StatusFieldConflictError(
+            "A status field cannot be renamed and deleted in the same edit"
+        )
+
+    target_keys = create_keys + rename_targets
+    if len(set(target_keys)) != len(target_keys):
+        raise StatusFieldConflictError(
+            "Status field create and rename targets must be unique"
+        )
+
+    rows_by_key = {row.key: row for row in current.rows}
+    existing_keys = set(rows_by_key)
+    for source_key in rename_sources + normalized_deletes:
+        if source_key not in existing_keys:
+            raise StatusFieldKeyNotFoundError(
+                f"Status table key not found: {source_key}"
+            )
+        if rows_by_key[source_key].runtime_key_locked:
+            raise StatusFieldLockedError(
+                f"Status key is runtime locked: {source_key}"
+            )
+    conflicting_targets = [
+        target_key for target_key in target_keys if target_key in existing_keys
+    ]
+    if conflicting_targets:
+        raise StatusFieldConflictError(
+            f"Status field target already exists: {conflicting_targets[0]}"
+        )
+
+    rename_by_source = dict(normalized_renames)
+    deleted_keys = set(normalized_deletes)
+    updated_rows: list[StatusTableRow] = []
+    for row in current.rows:
+        if row.key in deleted_keys:
+            continue
+        new_key = rename_by_source.get(row.key)
+        if new_key is None:
+            updated_rows.append(row)
+            continue
+        updated_rows.append(StatusTableRow(
+            key=new_key,
+            value=row.value,
+            runtime_key_locked=row.runtime_key_locked,
+            update_rule=row.update_rule,
+            metadata=dict(row.metadata),
+        ))
+    updated_rows.extend(
+        StatusTableRow(
+            key=key,
+            value=value,
+            runtime_key_locked=False,
+            update_rule="",
+            metadata={},
+        )
+        for key, value in normalized_creates
+    )
+    updated = StatusTableDocument(
+        schema_version=current.schema_version,
+        kind=current.kind,
+        mode=current.mode,
+        key_column=current.key_column,
+        value_column=current.value_column,
+        rows=tuple(updated_rows),
+        metadata=dict(current.metadata),
+    ).validated()
+    result = StatusFieldEditResult(
+        table_id=int(table_id),
+        table_name=str(table_name),
+        created=tuple(
+            StatusFieldCreated(key=key, value=value)
+            for key, value in normalized_creates
+        ),
+        renamed=tuple(
+            StatusFieldRenamed(key=key, new_key=new_key)
+            for key, new_key in normalized_renames
+        ),
+        deleted=tuple(
+            StatusFieldDeleted(key=key, old_value=rows_by_key[key].value)
+            for key in normalized_deletes
+        ),
+    )
+    return updated, result
+
+
 __all__ = [
+    "StatusFieldConflictError",
+    "StatusFieldCreated",
+    "StatusFieldDeleted",
+    "StatusFieldEditError",
+    "StatusFieldEditResult",
+    "StatusFieldKeyNotFoundError",
+    "StatusFieldLockedError",
+    "StatusFieldRenamed",
     "StatusManager",
     "StatusRuntimeDataPort",
     "StatusValueChange",
     "StatusValueUpdateResult",
+    "apply_status_field_edits",
     "collect_value_changes",
 ]

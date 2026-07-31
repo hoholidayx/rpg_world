@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from rpg_core.tooling.base import BaseTool
 from rpg_core.scene.tools import SCENE_TOOL_NAMES
 from rpg_core.status.tools import (
+    STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
     STATUS_TABLE_SET_VALUES_TOOL_NAME,
     StatusTableToolProvider,
 )
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 
 STATE_TOOL_NAMES = frozenset({
     *SCENE_TOOL_NAMES,
+    STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
     STATUS_TABLE_SET_VALUES_TOOL_NAME,
 })
 

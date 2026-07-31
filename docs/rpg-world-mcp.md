@@ -97,9 +97,17 @@ Preview reports missing, stale, or foreign bindings as conflicts.
 Status rows use the same hard-cut contract as RPG World runtime schema v2:
 `key`, `value`, `runtimeKeyLocked`, `updateRule`, and `metadata`. All values
 are eligible for current-turn Agent updates. `updateRule` is semantic guidance
-only, while `runtimeKeyLocked` protects key structure only. Legacy frequency,
-interval, or replacement write-permission fields are rejected by the generated
-schemas, portable validator, preview, apply, compare, and reconcile paths.
+only. In an existing normal Session table, neutral, IC, and GM body turns may
+create, read, update, rename, and delete fields but cannot CRUD the table
+itself; reads come from the current-turn Context, while OOC and commands are
+read-only. New fields start unlocked with empty `updateRule` and `metadata`.
+`runtimeKeyLocked=true` blocks only rename or deletion of that field, not its
+value updates or creation of other fields. Scene keeps the separate
+`agent.scene.allow_runtime_key_changes` policy. For an open-ended normal table,
+its `description` defines the dynamic key domain, naming/value format, and
+create/rename/delete conditions. Legacy frequency, interval, or replacement
+write-permission fields are rejected by the generated schemas, portable
+validator, preview, apply, compare, and reconcile paths.
 
 The importer never creates Sessions, messages, media jobs, TTS jobs, or
 binaries.

@@ -10,7 +10,7 @@
 | 失败与取消事务 | `test_agent_transactions`、`test_agent_service` | LLM 停机映射 | provider/缺失 DONE/取消均 discard，不留下部分消息、状态或裁定 |
 | Mailbox 与并发 | `test_agent_runtime`、`test_agent_service` | 独立 Agent 进程 | 同 Session FIFO、活动/排队 requestId 停止、不同 Session 可并发 |
 | Context 与模型选择 | `test_agent_runtime`、`test_agent_service` | Play context-preview | `summary_processed` 投影、门禁、config/story/session 优先级和切换快照 |
-| Outcome、scene、普通状态 | `test_agent_transactions` | 经真实 chat 链路冒烟 | 预裁定、目标隔离、事务提交/回滚、scene 只改已有 key |
+| Outcome、scene、普通状态 | `test_agent_transactions`、`test_live_agent_state_tools` | 经真实 chat 链路与显式 opt-in Provider 验收 | 预裁定、目标隔离、value/字段结构写入、事务提交/回滚、跨 Session 拒绝、scene 规则不变 |
 | Deferred 状态 | `test_agent_runtime` | — | 回复交付后、下一 mailbox 项前执行；批次失败隔离；值与进度原子提交 |
 | Memory | `test_agent_runtime` | Agent → LLM embedding | 初始化不访问远端；首次 recall 懒解析；失败本地 fallback；后续重试 |
 | Summary 与 Story Memory | `test_agent_runtime` | — | commit 后执行，失败不回滚；处理标记是真源且不截断历史 |

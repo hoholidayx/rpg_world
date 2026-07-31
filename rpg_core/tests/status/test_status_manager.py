@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -16,6 +17,7 @@ from rpg_data.model.status import (
 )
 from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentChange
 from rpg_core.status.manager import StatusManager
+from rpg_core.status.tools import StatusTableEditFieldsTool
 
 
 def _table(
@@ -238,6 +240,43 @@ def test_status_manager_commits_bootstrap_documents_without_progress_ledger() ->
     assert result[0]["rows"] == [["封印", "破裂"]]
     assert service.calls[-1][0] == "commit_document_batch"
     assert len(service.calls[-1]) == 3
+
+
+@pytest.mark.asyncio
+async def test_status_structure_tool_rejects_real_cross_session_table(
+    rpg_data_gateway,
+    make_data_session,
+) -> None:
+    make_data_session("s_main")
+    make_data_session("s_other")
+    other_table = rpg_data_gateway.status.create_table(
+        "s_other",
+        "其它会话状态",
+        document=StatusTableDocument.from_data(
+            StatusTableData(
+                headers=("属性", "值"),
+                rows=(("不得修改", "原值"),),
+            )
+        ),
+    )
+    tool = StatusTableEditFieldsTool(
+        StatusManager("s_main", service=rpg_data_gateway.status)
+    )
+
+    result = json.loads(await tool.execute(
+        table_id=other_table.id,
+        creates=[{"key": "越权字段", "value": "不得写入"}],
+        renames=[],
+        deletes=[],
+    ))
+
+    assert result["errorCode"] == "table_unavailable"
+    persisted = rpg_data_gateway.status.get_table_for_session(
+        "s_other",
+        other_table.id,
+    )
+    assert persisted.document.row_for_key("越权字段") is None
+    assert persisted.document.row_for_key("不得修改").value == "原值"
 
 
 def test_context_factory_initializes_status_manager_with_session_id(

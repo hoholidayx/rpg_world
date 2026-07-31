@@ -11,6 +11,10 @@ from rpg_data.model.status import (
     parse_session_status_metadata,
 )
 from rpg_core.context.rendering import render_jinja_template
+from rpg_core.status.tools import (
+    STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+    STATUS_TABLE_SET_VALUES_TOOL_NAME,
+)
 
 _DEFAULT_DESCRIPTION = "仅在剧情事实明确影响现有键时更新；不确定时保持原值。"
 _UNRESOLVED_CHARACTER = object()
@@ -20,7 +24,10 @@ logger = logging.getLogger("rpg_core.status.context")
 
 def prepare_status_context_tables(
     tables: Iterable[dict[str, object]],
+    *,
+    available_tool_names: Iterable[str] = (),
 ) -> list[dict[str, object]]:
+    tool_names = frozenset(str(name) for name in available_tool_names)
     prepared: list[dict[str, object]] = []
     for source in tables:
         table = dict(source)
@@ -41,12 +48,26 @@ def prepare_status_context_tables(
         context_rows = _context_rows(table)
         table["context_rows"] = context_rows
         table["has_rows"] = bool(context_rows)
+        table["value_writable"] = (
+            STATUS_TABLE_SET_VALUES_TOOL_NAME in tool_names
+            and bool(context_rows)
+        )
+        table["structure_writable"] = (
+            STATUS_TABLE_EDIT_FIELDS_TOOL_NAME in tool_names
+        )
         prepared.append(table)
     return prepared
 
 
-def render_status_tables_context(tables: Iterable[dict[str, object]]) -> str:
-    prepared = prepare_status_context_tables(tables)
+def render_status_tables_context(
+    tables: Iterable[dict[str, object]],
+    *,
+    available_tool_names: Iterable[str] = (),
+) -> str:
+    prepared = prepare_status_context_tables(
+        tables,
+        available_tool_names=available_tool_names,
+    )
     if not prepared:
         return ""
     return render_jinja_template("modules/status_tables.jinja", status_tables=prepared)
@@ -79,6 +100,9 @@ def _context_rows(table: dict[str, object]) -> list[dict[str, object]]:
             "key": str(row.get("key", "")),
             "value": str(row.get("value", "")),
             "update_rule": str(row.get(STATUS_ROW_UPDATE_RULE_KEY) or ""),
+            "runtime_key_locked": bool(
+                row.get("runtimeKeyLocked", False)
+            ),
         }
         for row in rows
         if isinstance(row, dict) and str(row.get("key", ""))

@@ -505,9 +505,9 @@ TurnRequest                            调用方原始、不可变输入
 
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
 - 创建 turn scratch 前先解析不可变 RP Module 快照，Narrative Outcome 权重随该快照固定；同时以显式白名单构建模块中立的裁定前缀，只含裁定事实/权限、Story Prompt、世界书、玩家绑定/角色卡、Persistent Memory 与 Story Memory。Summary Layer/正文、Recall、叙事风格、正文格式、核心叙事/状态同步契约、Message Mode 和所有当前/未来 `rp_module:*` 提示词一律不被动进入 Outcome、状态 Route/Update 或 soft Plot；裁定前缀只保留 Summary 次级证据与四个查询工具的使用边界，实际 Summary 内容只能由本阶段按需查询。RP Module 快照只决定能力/配置，不提供通用提示词。turn 开始后 `rp_story_outcome` 与 scratch 版 scene/status 工具一起绑定给 `StatusSubAgent`。代码固定编排为 Outcome 独立判定 → 状态表/字段路由 → scene 与每张命中表分别更新；Outcome 已暂存或判定失败时不进入状态路由与预写。
-- 状态路由只能选择具有实际可用工具的 scene，以及普通表中的已有字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID 与 key allowlist。空 `updateRule` 使用通用“事实已明确且值实际变化”条件，非空规则作为额外语义指导，不产生独立调度或数据库写入门禁。隔离 Update 使用稳定 system contract，明确只能调用本请求实际提供的工具；user 内容按 `Recent Conversation → User Action → Selected State Target` 排列，每次仍只下发当前目标 schema。默认结构权限关闭时只允许更新已有 value。即时更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
+- 状态路由只能选择具有实际可用工具的 scene 和普通表目标；普通表目标用 `keys` 列出现有 value 更新、改名或删除来源，并用 `structure=true` 声明结构变化，纯新增允许 `keys=[]`。value-only 更新只获得被选 rows；结构目标获得完整单表快照以及 table/key 双重 allowlist。空 `updateRule` 使用通用“事实已明确且值实际变化”条件，非空规则作为额外语义指导，不产生独立调度或数据库写入门禁。隔离 Update 使用稳定 system contract，明确只能调用本请求实际提供的工具；user 内容按 `Recent Conversation → User Action → Selected State Target` 排列，每次仍只下发当前目标 schema。即时更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
 - 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定成功后不再注入 Narrative Outcome fixed section，只用简短无序条目要求执行最终结果并明确列出本轮可用的 scene/status 工具，同时从主 Agent schema 和可执行 registry 移除 outcome 工具；漏判或预裁定失败时才保留原 fixed contract 和补判工具。主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，最终正文不得新增尚未同步的可追踪确定事实；状态同步无需询问玩家。
-- 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。状态 document 固定为 `schemaVersion=2`，行结构只允许 `key / value / runtimeKeyLocked / updateRule / metadata`；所有字段的 value 都可由 LLM 在当前 turn 即时更新，不存在频率、周期、人工只读或替代写权限字段。`runtimeKeyLocked` 只保护 key 结构。
+- 普通表保留 `status_table_set_values` 按当前 session 运行时表 ID 批量修改已有 key 的 value，并新增 `status_table_edit_fields` 在已有 normal 表内原子创建、改名或删除字段；不得 CRUD 整表。空表仍注册结构工具以创建首字段。新字段追加到表尾并默认 `runtimeKeyLocked=false / updateRule="" / metadata={}`；改名原位保留 value 和全部作者策略；LLM 不能修改锁、规则或 metadata。同源删除/改名、重复目标、目标已存在、未知或锁定字段使整次结构调用失败。`runtimeKeyLocked=true` 只禁止该字段改名/删除，不限制 value 更新或同表新增其他字段。no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
 - WebUI 停止生成通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 到 Agent service `/chat/stop`；取消成功的 stream turn 丢弃 scratch，不发 DONE，不提交消息、状态或 usage。
 - 持久化 session 的 commit 使用 `rpg_data` database atomic；`history_enabled=False` 仅作为测试/内存模式，不承诺补偿回滚已写入的外部 status manager。
@@ -660,7 +660,7 @@ reset 时从当前 Story 复制的 scene，以及显式创建的 Session 原生 
 `SceneTracker.get_context()` 注入本轮运行时 Context，持久化 user history 使用的 snapshot 不包含这些规则。
 
 普通 `STATUS_TABLES` 层只展示 session 运行时表 ID、表名、作为“用途与更新规则”的
-`description`、完整 KV 和逐字段 `updateRule`，不展示模板来源或通用作用范围。绑定角色的普通表进入独立的
+`description`、完整 KV、`runtimeKeyLocked` 和逐字段 `updateRule`，不展示模板来源或通用作用范围；只有本轮实际注册对应工具时才宣称可写，OOC/无工具 Context 明确只读。绑定角色的普通表进入独立的
 “角色状态表”段落并按 `characterName` 分组；当前角色绑定不触发额外工具或业务行为。
 角色绑定入库必须校验角色 name 非空。Story 副本 metadata 缺角色名时，优先按复制时保存的
 `characterId` 读取当前 Story Character；来源定义仍存在时也可从 `source_story_status_table_id`
@@ -879,13 +879,16 @@ batch，不决定 Scene、Context 或运行时写入策略。`StatusTableAdminis
 `SceneStatusService` 负责 Scene 字段约束与 active Scene，`StatusContextService` 负责角色名修复和 Context
 可见性，`StatusManager` 负责 Agent 当前 turn 即时更新与 bootstrap 写入资格。composition root 从
 `get_data_service_gateway().status` 取得 Data Service 后显式注入，不新增 per-service 全局 getter，也不让
-业务服务持有整个 Gateway。通用存储写操作仍支持 header 名称、行匹配和 key/value selector；LLM 的
-普通表工具只能更新已有 key 的 value，不能增删改 key。key/value 写入以 `StatusTableDocument` 的逻辑
-key/value 为准，不依赖 UI 列标题。
+业务服务持有整个 Gateway。通用存储写操作仍支持 header 名称、行匹配和 key/value selector；LLM 在已有
+normal Session 表内通过 `status_table_set_values` 更新 value，并通过 `status_table_edit_fields` 原子新增、
+改名或删除字段，但不能 CRUD 整张表。key/value 写入以 `StatusTableDocument` 的逻辑 key/value 为准，
+不依赖 UI 列标题。
 状态 document 固定为 `schemaVersion=2`；每个 `StatusTableRow` 只允许 `key`、`value`、
 `runtimeKeyLocked`、`updateRule` 和 `metadata`。旧版本、旧频率/周期字段与其它未知属性直接拒绝。
 所有字段 value 都可由 Agent 在当前 turn 即时更新；空 `updateRule` 使用通用事实变化条件，非空规则
-只是额外语义指导。`runtimeKeyLocked` 只保护 key 结构。`/clear` 删除既有 `story_copy` 并按当前 Story
+只是额外语义指导。normal 表的 `description` 若允许开放字段，还应定义动态 key 的领域、命名/value 格式及
+创建、改名、删除条件。`runtimeKeyLocked=true` 只禁止该字段删除或改名，不限制 value 更新或同表新增。
+`/clear` 删除既有 `story_copy` 并按当前 Story
 定义重建；`session_native` 表保留 ID 和完整结构，但所有 value 置空。同名原生表与当前 Story 定义
 冲突时 reset 原子失败。
 gateway/bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session

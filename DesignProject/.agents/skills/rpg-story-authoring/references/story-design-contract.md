@@ -1,7 +1,7 @@
 # Story design contract
 
-> authoringRulesVersion=1.4 ·
-> catalogDigest=12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413
+> authoringRulesVersion=1.5 ·
+> catalogDigest=da18005df6206dc24ecd2e38e0db4a22ebfb644eaf898a651b70d17d2005db35
 
 ## Contract and ownership
 
@@ -41,11 +41,19 @@ change the import contract.
 - Scene tables contain `时间`, `位置`, and `在场人物`. Use parseable virtual
   time such as `2020 年 7 月 18 日 9 时`.
 - Status table `description` contains table-wide semantics, value formats,
-  and shared immediate-update rules.
+  and shared immediate-update rules. For open-ended normal tables it also
+  defines the dynamic key domain, naming/value format, and
+  create/rename/delete conditions; authors need not enumerate every future
+  field.
 - Status rows contain only `key`, `value`, `runtimeKeyLocked`, `updateRule`,
   and `metadata`. `value` is a string that may express a number, enum, list,
   short description, or current fact state. A row `updateRule` contains only
   field-specific immediate conditions and does not assume a numeric model.
+- In an existing normal Session table, neutral/ic/gm turns may create, read,
+  update, rename, and delete fields but not CRUD the table. OOC and commands
+  are read-only. `runtimeKeyLocked=true` blocks only rename/delete of that
+  field, not value updates or creation of other fields. Scene structure keeps
+  its separate `agent.scene.allow_runtime_key_changes` policy.
 - Status tables hold current state that needs per-turn visibility and updates.
   Memory is better suited to time-ordered narrative history, but current
   facts, commitments, contacts, or event states may still be status rows.

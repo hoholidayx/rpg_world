@@ -79,7 +79,7 @@ def test_rule_catalog_covers_every_generated_schema_field() -> None:
     payload = dict(catalog)
     declared_digest = payload.pop("catalogDigest")
 
-    assert AUTHORING_RULES_VERSION == "1.4"
+    assert AUTHORING_RULES_VERSION == "1.5"
     assert catalog["authoringRulesVersion"] == AUTHORING_RULES_VERSION
     assert digest_json(payload) == declared_digest
     assert len(catalog["fields"]) >= 150
@@ -127,6 +127,12 @@ def test_rule_catalog_uses_model_specific_semantic_examples() -> None:
     assert fields[("StatusTableSpec", "characterRef")] is None
     assert "value 格式" in (
         rules[("StatusTableSpec", "description")]["description"]
+    )
+    assert "动态 key" in (
+        rules[("StatusTableSpec", "description")]["description"]
+    )
+    assert "不妨碍同表新增其他未锁字段" in (
+        rules[("StatusRowSpec", "runtimeKeyLocked")]["description"]
     )
     assert "字段专属" in (
         rules[("StatusRowSpec", "updateRule")]["description"]
@@ -207,6 +213,7 @@ def test_plot_scheduling_rules_model_scene_opportunities_and_runtime_marks() -> 
         "principle.plot-outline-binding-isolates-pool-lane"
     ]
     pool_cooldown_rule = principles["principle.plot-pool-cooldown"]
+    status_crud_rule = principles["principle.status-normal-field-crud"]
 
     assert "整个 active Scene document" in scene_rule["description"]
     assert "下一次 neutral、ic 或 gm turn" in scene_rule["runtimeEffect"]
@@ -228,11 +235,55 @@ def test_plot_scheduling_rules_model_scene_opportunities_and_runtime_marks() -> 
     assert "selectionOrigin=scheduler" in (
         pool_cooldown_rule["runtimeEffect"]
     )
+    assert "不能创建、删除或重命名整张表" in (
+        status_crud_rule["description"]
+    )
+    assert "status_table_edit_fields" in status_crud_rule["runtimeEffect"]
 
     assets = build_managed_authoring_assets()
     contract = json.loads(assets["schemas/rpg-mcp-contract-v2.json"])
+    status_policy = contract["statusTables"]
     policy = contract["plotScheduling"]
 
+    assert status_policy == {
+        "documentSchemaVersion": 2,
+        "worldAdvancingModes": ["neutral", "ic", "gm"],
+        "oocAndCommandsAreReadOnly": True,
+        "readSource": "current_turn_context",
+        "normal": {
+            "scope": "existing_session_tables",
+            "tableCrud": False,
+            "fieldCrud": [
+                "create",
+                "read",
+                "update",
+                "rename",
+                "delete",
+            ],
+            "valueTool": "status_table_set_values",
+            "structureTool": "status_table_edit_fields",
+            "emptyTableCanCreateFirstField": True,
+            "newFieldDefaults": {
+                "runtimeKeyLocked": False,
+                "updateRule": "",
+                "metadata": {},
+            },
+            "runtimeKeyLocked": {
+                "blocks": ["rename", "delete"],
+                "allowsValueUpdate": True,
+                "allowsOtherFieldCreation": True,
+            },
+            "authorPolicyFieldsMutableByLlm": False,
+        },
+        "scene": {
+            "usesNormalStatusTools": False,
+            "structurePolicySetting": (
+                "agent.scene.allow_runtime_key_changes"
+            ),
+            "defaultAllowsExistingValueUpdatesOnly": True,
+            "runtimeKeyLockedBlocks": ["rename", "delete"],
+        },
+    }
     assert policy["sceneTimeFormat"] == "Y 年 M 月 D 日 H 时 [M 分]"
     assert policy["sceneTimeUsesOrdinalPrefix"] is False
     assert policy["nonOocModes"] == ["neutral", "ic", "gm"]

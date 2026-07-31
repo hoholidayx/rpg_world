@@ -21,7 +21,7 @@ from rpg_mcp.contracts import (
     digest_json,
 )
 
-AUTHORING_RULES_VERSION = "1.4"
+AUTHORING_RULES_VERSION = "1.5"
 AUTHORING_RULES_SCHEMA_VERSION = "story-authoring-rules/1.0"
 AUTHORING_RULES_RELATIVE_PATH = (
     "schemas/story-authoring-rules-v1.json"
@@ -253,7 +253,10 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "tags": "检索和运行时过滤使用的去重标签。",
     "key": "状态字段名；同一表内唯一。",
     "value": "当前初始值；运行时可在本 turn 依据已确认事实即时更新。",
-    "runtimeKeyLocked": "只保护 key 不被运行时增删或改名，不锁定 value。",
+    "runtimeKeyLocked": (
+        "为 true 时只禁止运行时删除或重命名该字段；不锁定 value，"
+        "也不禁止在同表新增其他字段。"
+    ),
     "updateRule": "在通用明确事实规则之上的额外即时更新语义指导。",
     "statusKind": "scene 表示当前场景；normal 表示普通 Story/角色状态。",
     "characterRef": "可选的同 Story 角色 stableId，用于角色状态分组。",
@@ -350,7 +353,9 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
     ("LorebookSpec", "content"): "Agent 可使用的完整世界事实、规则、地点或组织资料。",
     ("StatusTableSpec", "description"): (
         "说明该表追踪什么，并集中写整表共同语义、value 格式和即时更新规则；"
-        "字段专属条件写入 row.updateRule。"
+        "字段专属条件写入 row.updateRule。normal 表若存在无法预先穷举的字段，"
+        "还应说明动态 key 的业务域、命名与 value 格式，以及创建、改名和删除条件；"
+        "无需预定义全部未来字段。"
     ),
     ("StatusRowSpec", "value"): (
         "当前初始值，以字符串表达；可按表约定表示数值、枚举、列表、简短描述或"
@@ -361,6 +366,10 @@ _FIELD_OVERRIDES: dict[tuple[str, str], str] = {
         "只写该字段专属的额外即时语义条件；整表共同规则写入表 description。"
         "不得写频率、延迟、后台调度、人工只读或数据库权限。留空时使用"
         "“事实明确且值实际变化”的通用规则。"
+    ),
+    ("StatusRowSpec", "runtimeKeyLocked"): (
+        "为 true 时只保护该字段不被运行时删除或重命名；仍允许更新 value，"
+        "也不妨碍同表新增其他未锁字段。"
     ),
     ("PlotPoolSpec", "description"): (
         "说明池的主题、用途、自动候选边界和建议冷却档位，不写单个事件指令。"
@@ -455,8 +464,11 @@ _FIELD_AVOID: dict[tuple[str, str], str] = {
     ("StatusTableSpec", "description"): (
         "不要逐字段复制相同规则，也不要把表当作无限追加的历史流水。当前事实、"
         "承诺、联系或事件状态可以成为字段；按时间累积的叙事历史更适合 Memory。"
+        "normal 表需要动态字段时，不要省略可创建字段的领域、格式与删除边界。"
     ),
-    ("StatusRowSpec", "runtimeKeyLocked"): "不要把它理解为 value 只读。",
+    ("StatusRowSpec", "runtimeKeyLocked"): (
+        "不要把它理解为 value 只读，也不要理解成禁止同表新增其他字段。"
+    ),
     ("StatusRowSpec", "updateRule"): (
         "不要重复表 description 的共同规则，也不要预设 value 是数值或写每 N "
         "回合、延迟、定时、manual 或 read-only 规则；不要用无事实变化的"
@@ -704,8 +716,9 @@ _RUNTIME_EFFECTS: dict[str, str] = {
     "character": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。",
     "lorebook": "作为 Story 世界知识进入运行时检索与 Context。",
     "status": (
-        "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文"
-        " turn 即时更新。"
+        "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。"
+        "已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；"
+        "Scene 的结构权限继续由专用 Scene 配置控制。"
     ),
     "composer": "影响 Story 叙事风格绑定或玩家快捷输入。",
     "rp-module": "限定 Story 可用的内置 RP 能力；Session 只能在其内覆盖。",
@@ -782,6 +795,24 @@ _PRINCIPLES: tuple[dict[str, str], ...] = (
         "runtimeEffect": (
             "StatusSubAgent 在 neutral、ic 或 gm 正文 turn 按目标即时处理"
             "状态；OOC 与命令不推进状态事实。"
+        ),
+    },
+    {
+        "ruleId": "principle.status-normal-field-crud",
+        "domain": "status",
+        "title": "普通状态表允许字段级运行时 CRUD",
+        "description": (
+            "neutral、ic 或 gm 正文 turn 可在已有 normal Session 状态表内按"
+            "明确事实创建、读取、更新、改名和删除字段，但不能创建、删除或"
+            "重命名整张表。读取来自每轮完整状态 Context；结构变化只用于当前"
+            "事实模型，不把状态表变成历史流水。OOC 与命令只读。"
+        ),
+        "runtimeEffect": (
+            "已有字段 value 使用 status_table_set_values；字段新增、改名或删除"
+            "使用 status_table_edit_fields，并与消息一起在 turn 事务中提交。"
+            "runtimeKeyLocked=true 只禁止该字段改名和删除，不限制 value 更新"
+            "或同表新增其他字段。Scene 不继承 normal 权限，仍遵循"
+            " agent.scene.allow_runtime_key_changes。"
         ),
     },
     {
@@ -1455,6 +1486,15 @@ creates one opportunity for the next non-OOC turn; `scheduledTime` and
 `deadlineTime` only gate candidates inside that opportunity. Do not author
 no-op Scene changes to poll Plot.
 
+In an existing normal Session status table, neutral/ic/gm turns may create,
+read, update, rename, and delete fields, but never CRUD the table itself.
+`runtimeKeyLocked=true` blocks only rename/delete of that field; value updates
+and creation of other fields remain allowed. OOC and commands are read-only,
+and Scene structure still follows `agent.scene.allow_runtime_key_changes`.
+When a normal table needs open-ended fields, use its `description` to define
+the dynamic key domain, naming/value format, and create/rename/delete
+conditions instead of predefining every possible field.
+
 An event referenced by any outline node is exclusive to the outline lane and
 does not consume pool-lane selection until every node reference is removed.
 `cooldownMinutes` pauses the whole pool after any scheduler-origin pool event
@@ -1606,11 +1646,19 @@ change the import contract.
 - Scene tables contain `时间`, `位置`, and `在场人物`. Use parseable virtual
   time such as `2020 年 7 月 18 日 9 时`.
 - Status table `description` contains table-wide semantics, value formats,
-  and shared immediate-update rules.
+  and shared immediate-update rules. For open-ended normal tables it also
+  defines the dynamic key domain, naming/value format, and
+  create/rename/delete conditions; authors need not enumerate every future
+  field.
 - Status rows contain only `key`, `value`, `runtimeKeyLocked`, `updateRule`,
   and `metadata`. `value` is a string that may express a number, enum, list,
   short description, or current fact state. A row `updateRule` contains only
   field-specific immediate conditions and does not assume a numeric model.
+- In an existing normal Session table, neutral/ic/gm turns may create, read,
+  update, rename, and delete fields but not CRUD the table. OOC and commands
+  are read-only. `runtimeKeyLocked=true` blocks only rename/delete of that
+  field, not value updates or creation of other fields. Scene structure keeps
+  its separate `agent.scene.allow_runtime_key_changes` policy.
 - Status tables hold current state that needs per-turn visibility and updates.
   Memory is better suited to time-ordered narrative history, but current
   facts, commitments, contacts, or event states may still be status rows.

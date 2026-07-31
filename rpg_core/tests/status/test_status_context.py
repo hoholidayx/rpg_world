@@ -3,6 +3,16 @@ from __future__ import annotations
 import json
 
 from rpg_core.status.context import prepare_status_context_tables, render_status_tables_context
+from rpg_core.status.tools import (
+    STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+    STATUS_TABLE_SET_VALUES_TOOL_NAME,
+)
+
+
+_STATUS_WRITE_TOOLS = (
+    STATUS_TABLE_SET_VALUES_TOOL_NAME,
+    STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+)
 
 
 def _table(
@@ -57,17 +67,22 @@ def test_status_context_separates_regular_and_character_tables() -> None:
             "updateRule": "生命事实明确变化时更新",
         }],
     }
-    rendered = render_status_tables_context([
-        world_table,
-        _table(2, "身体状态", description="只在 Alice 受伤或恢复时更新。", character_name="Alice", character_id=7),
-        _table(3, "装备状态", character_name="Alice", character_id=7),
-    ])
+    rendered = render_status_tables_context(
+        [
+            world_table,
+            _table(2, "身体状态", description="只在 Alice 受伤或恢复时更新。", character_name="Alice", character_id=7),
+            _table(3, "装备状态", character_name="Alice", character_id=7),
+        ],
+        available_tool_names=_STATUS_WRITE_TOOLS,
+    )
 
     assert "## 状态表" in rendered
     assert "status_table_set_values" in rendered
+    assert "status_table_edit_fields" in rendered
     assert "本轮回复前的普通状态表快照" in rendered
     assert "遵循核心状态同步协议" in rendered
-    assert "只能修改已有键的值" in rendered
+    assert "不能创建、删除或重命名整张表" in rendered
+    assert "Key 结构" in rendered
     assert "规则为空时使用默认语义" in rendered
     assert "生命事实明确变化时更新" in rendered
     assert "deferred" not in rendered
@@ -116,7 +131,23 @@ def test_status_context_does_not_fallback_to_flat_rows() -> None:
     table = _table(6, "空状态表")
     table["document"]["rows"] = []  # type: ignore[index]
 
-    rendered = render_status_tables_context([table])
+    rendered = render_status_tables_context(
+        [table],
+        available_tool_names=_STATUS_WRITE_TOOLS,
+    )
 
     assert "### 空状态表" in rendered
     assert "status_table_set_values" not in rendered
+    assert "status_table_edit_fields" in rendered
+
+
+def test_status_context_is_read_only_without_actual_tools_and_shows_lock() -> None:
+    table = _table(7, "只读状态")
+    table["document"]["rows"][0]["runtimeKeyLocked"] = True  # type: ignore[index]
+
+    rendered = render_status_tables_context([table])
+
+    assert "本轮未提供普通状态写入工具" in rendered
+    assert "status_table_set_values" not in rendered
+    assert "status_table_edit_fields" not in rendered
+    assert "| 生命 | 10 | 锁定 |" in rendered

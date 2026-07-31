@@ -1,6 +1,6 @@
 # 项目、Story 与 Opening 字段
 
-> authoringRulesVersion=1.4 · catalogDigest=12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413
+> authoringRulesVersion=1.5 · catalogDigest=da18005df6206dc24ecd2e38e0db4a22ebfb644eaf898a651b70d17d2005db35
 
 本文由 RPG World 字段语义单一真源生成；不要手工修改。
 
@@ -51,7 +51,7 @@ Character、Lorebook 与 Status 都直接归 Story 所有；不得设计 Workspa
 | `StoryResources` | `/resources/plotSchedule` | Story 级事件池、大纲和事件调度配置；自动 selector 只在已提交 Scene 净变化留下机会后运行。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Scene 净变化所产生的一次性自动调度机会，以及下一次非 OOC turn 的候选、判断和 directive 注入。 |
 | `StoryResources` | `/resources/quickReplies` | Story Composer 的快捷玩家输入。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 影响 Story 叙事风格绑定或玩家快捷输入。 |
 | `StoryResources` | `/resources/rpModules` | Story 允许启用的内置 RP Module。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 限定 Story 可用的内置 RP 能力；Session 只能在其内覆盖。 |
-| `StoryResources` | `/resources/statusTables` | 直接归当前 Story 所有的状态定义。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。 |
+| `StoryResources` | `/resources/statusTables` | 直接归当前 Story 所有的状态定义。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。 |
 | `StoryResources` | `/resources/visualCatalog` | 只归档、不自动创建媒体任务的独立视觉 brief。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 仅归档可生图规格，不创建媒体资产、任务或消息。 |
 | `RuntimeTarget` | `/target/allowCreateWorkspace` | 目标 Workspace 不存在时是否允许导入流程创建它。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 只影响 DesignProject 恢复、构建目标和作者工作流。 |
 | `RuntimeTarget` | `/target/storyId` | 已存在目标 Story 的运行时数字 ID；新建时留空。 | 不要把其他正式字段的职责塞入此字段，也不要保存聊天原文。 | 只影响 DesignProject 恢复、构建目标和作者工作流。 |

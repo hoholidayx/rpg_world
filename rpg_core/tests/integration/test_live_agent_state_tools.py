@@ -23,9 +23,14 @@ from rpg_core.scene import (
     SCENE_ATTR_TOOL_NAME,
     SCENE_TIME_TOOL_NAME,
 )
-from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
+from rpg_core.status.tools import (
+    STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+    STATUS_TABLE_SET_VALUES_TOOL_NAME,
+)
+from rpg_data import models
 from tests.support.live_agent import (
     first_call_with_tools,
+    main_tool_invocations,
     persisted_turn,
     status_record_arguments,
     status_record_result,
@@ -278,6 +283,182 @@ async def test_live_status_sub_agent_updates_existing_normal_status_values(
         before=before,
         after=after,
         mode="ic",
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_status_sub_agent_creates_then_removes_dynamic_field(
+    live_demo_harness,
+    integration_data_gateway,
+) -> None:
+    harness = live_demo_harness
+    _disable_module(
+        integration_data_gateway,
+        harness.session_id,
+        RP_MODULE_PLOT_SCHEDULER_NAME,
+    )
+    _disable_module(
+        integration_data_gateway,
+        harness.session_id,
+        RP_MODULE_NARRATIVE_OUTCOME_NAME,
+    )
+    table = integration_data_gateway.status.create_table(
+        harness.session_id,
+        "当前有效通行许可",
+        document=models.StatusTableDocument.from_rows(rows=[]),
+        description=(
+            "只追踪当前仍有效的正式通行许可。每份许可单独使用许可名称作为 key，"
+            "value 写明授权范围与有效期；正式授予且立即生效时新增，"
+            "明确收回、撤销或失效时删除。这里只保存当前有效许可，不保留历史。"
+        ),
+        sort_order=999,
+    )
+    before_create = status_snapshot(
+        integration_data_gateway,
+        harness.session_id,
+    )
+    create_call_offset = len(harness.calls)
+    create_input = (
+        "以 GM 已确认事实继续：学院总务官在莫兰见证下，"
+        "当场向 Alice 正式签发“东塔夜间通行许可”，许可立即生效，"
+        "授权她今晚进入东塔地下库前厅。请从签发完成后的现场继续描写。"
+    )
+
+    create_reply = await asyncio.wait_for(
+        harness.agent.send(create_input, mode="gm"),
+        timeout=240,
+    )
+
+    first_call_with_tools(
+        harness.calls[create_call_offset:],
+        biz_key=AGENT_STATUS_SUB_AGENT_BIZ_KEY,
+        required_names={STATUS_TABLE_EDIT_FIELDS_TOOL_NAME},
+    )
+    create_records = status_tool_records(
+        create_reply,
+        STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+    )
+    assert create_records, "live StatusSubAgent did not create the dynamic field"
+    create_results = [
+        status_record_result(record)
+        for record in create_records
+        if record["success"] is True and record["changed"] is True
+    ]
+    created_keys = {
+        str(item.get("key", ""))
+        for result in create_results
+        if isinstance(result, dict)
+        and result.get("tableId") == table.id
+        for item in result.get("created", [])
+        if isinstance(item, dict)
+    }
+    assert created_keys
+    persisted_after_create = integration_data_gateway.status.get_table_for_session(
+        harness.session_id,
+        table.id,
+    )
+    assert {
+        row.key for row in persisted_after_create.document.rows
+    } == created_keys
+    assert all(
+        row.runtime_key_locked is False
+        and row.update_rule == ""
+        and row.metadata == {}
+        for row in persisted_after_create.document.rows
+    )
+    after_create = status_snapshot(
+        integration_data_gateway,
+        harness.session_id,
+    )
+    assert create_reply.committed_turn_id is not None
+    _assert_committed_world_turn(
+        integration_data_gateway,
+        session_id=harness.session_id,
+        turn_id=create_reply.committed_turn_id,
+        mode="gm",
+    )
+    await _verify_final_turn(
+        harness,
+        user_input=create_input,
+        assistant_text=create_reply.text,
+        outcome=None,
+        before=before_create,
+        after=after_create,
+        mode="gm",
+    )
+
+    before_revoke = after_create
+    revoke_call_offset = len(harness.calls)
+    revoke_input = (
+        "以 GM 已确认事实继续：学院总务官当着 Alice 与莫兰的面，"
+        "已经收回刚才那张“东塔夜间通行许可”并正式撤销授权；"
+        "该许可从现在起彻底失效，Alice 不再持有任何有效通行许可。"
+        "请从撤销完成后的现场继续描写。"
+    )
+
+    revoke_reply = await asyncio.wait_for(
+        harness.agent.send(revoke_input, mode="gm"),
+        timeout=240,
+    )
+
+    first_call_with_tools(
+        harness.calls[revoke_call_offset:],
+        biz_key=AGENT_STATUS_SUB_AGENT_BIZ_KEY,
+        required_names={STATUS_TABLE_EDIT_FIELDS_TOOL_NAME},
+    )
+    revoke_records = status_tool_records(
+        revoke_reply,
+        STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+    )
+    assert revoke_records, "live StatusSubAgent did not remove the dynamic field"
+    status_deleted_keys = {
+        str(item.get("key", ""))
+        for record in revoke_records
+        if record["success"] is True and record["changed"] is True
+        for result in [status_record_result(record)]
+        if isinstance(result, dict)
+        and result.get("tableId") == table.id
+        for item in result.get("deleted", [])
+        if isinstance(item, dict)
+    }
+    main_deleted_keys = {
+        str(item.get("key", ""))
+        for invocation in main_tool_invocations(
+            revoke_reply,
+            STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+        )
+        if isinstance(invocation.result, dict)
+        and invocation.result.get("ok") is True
+        and invocation.result.get("tableId") == table.id
+        for item in invocation.result.get("deleted", [])
+        if isinstance(item, dict)
+    }
+    deleted_keys = status_deleted_keys | main_deleted_keys
+    assert created_keys <= deleted_keys
+    persisted_after_revoke = integration_data_gateway.status.get_table_for_session(
+        harness.session_id,
+        table.id,
+    )
+    assert persisted_after_revoke.document.rows == ()
+    after_revoke = status_snapshot(
+        integration_data_gateway,
+        harness.session_id,
+    )
+    assert revoke_reply.committed_turn_id is not None
+    _assert_committed_world_turn(
+        integration_data_gateway,
+        session_id=harness.session_id,
+        turn_id=revoke_reply.committed_turn_id,
+        mode="gm",
+    )
+    await _verify_final_turn(
+        harness,
+        user_input=revoke_input,
+        assistant_text=revoke_reply.text,
+        outcome=None,
+        before=before_revoke,
+        after=after_revoke,
+        mode="gm",
     )
 
 

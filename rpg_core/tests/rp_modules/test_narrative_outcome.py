@@ -112,6 +112,7 @@ class _NormalStatusCapabilities:
     def list_context_tables() -> list[dict[str, object]]:
         return [{
             "id": 1,
+            "status_kind": models.STATUS_KIND_NORMAL,
             "document": {
                 "rows": [{"key": "生命", "value": "10", "updateRule": ""}],
             },
@@ -213,7 +214,10 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
     assert "rp_story_outcome" not in content
     assert "不得改判" in content
     assert "reason 是不可缩小的整体目标边界" in content
-    assert "本轮实际提供的状态工具（scene_attr、status_table_set_values）" in content
+    assert (
+        "本轮实际提供的状态工具（scene_attr、status_table_set_values、"
+        "status_table_edit_fields）"
+    ) in content
     assert "scene_time" not in content
     assert "scene_del_attr" not in content
     assert "输出任何 RP 正文前调用" in content

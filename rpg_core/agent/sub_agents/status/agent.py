@@ -65,7 +65,10 @@ from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SCENE_TOOL_NAMES
 from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
-from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
+from rpg_core.status.tools import (
+    STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+    STATUS_TABLE_SET_VALUES_TOOL_NAME,
+)
 from rpg_core.tooling.base import BaseTool
 from rpg_core.tooling.registry import ToolRegistry
 
@@ -87,6 +90,7 @@ class _RoutedStatusUpdateBatch:
     selected_context: str
     schema_names: frozenset[str]
     allowed_status_keys: dict[int, frozenset[str]] | None
+    allowed_structure_table_ids: frozenset[int] | None = None
     is_scene: bool = False
 
 
@@ -129,6 +133,7 @@ class StatusSubAgent(BaseSubAgent):
         self._mutation_checkpoint: Callable[[], object] | None = None
         self._mutation_restore: Callable[[object], None] | None = None
         self._active_status_allowed_keys: dict[int, frozenset[str]] | None = None
+        self._active_structure_table_ids: frozenset[int] | None = None
         self._active_scene_allowed = True
 
     # ── 工具注册（可多次调用追加） ─────────────────────────────────────
@@ -343,6 +348,7 @@ class StatusSubAgent(BaseSubAgent):
                 result.failed,
             )
             self._active_status_allowed_keys = None
+            self._active_structure_table_ids = None
             self._active_scene_allowed = True
             self._busy = False
 
@@ -385,6 +391,7 @@ class StatusSubAgent(BaseSubAgent):
                 selected_context=scene_context,
                 schema_names=scene_tool_names,
                 allowed_status_keys=None,
+                allowed_structure_table_ids=None,
                 is_scene=True,
             ))
         for table in context_tables:
@@ -399,14 +406,18 @@ class StatusSubAgent(BaseSubAgent):
                 if not key:
                     continue
                 allowed.append(key)
-            if table_id <= 0 or not allowed:
+            if table_id <= 0:
                 continue
             allowed_keys = frozenset(allowed)
+            schema_names = {STATUS_TABLE_EDIT_FIELDS_TOOL_NAME}
+            if allowed_keys:
+                schema_names.add(STATUS_TABLE_SET_VALUES_TOOL_NAME)
             batches.append(_RoutedStatusUpdateBatch(
                 source=f"status_bootstrap:table:{table_id}",
-                selected_context=self._render_selected_table(table, allowed_keys),
-                schema_names=frozenset({STATUS_TABLE_SET_VALUES_TOOL_NAME}),
+                selected_context=self._render_selected_table(table, None),
+                schema_names=frozenset(schema_names),
                 allowed_status_keys={table_id: allowed_keys},
+                allowed_structure_table_ids=frozenset({table_id}),
             ))
         writable_batches = [
             batch
@@ -443,6 +454,9 @@ class StatusSubAgent(BaseSubAgent):
             for batch in writable_batches:
                 self._active_scene_allowed = batch.is_scene
                 self._active_status_allowed_keys = batch.allowed_status_keys
+                self._active_structure_table_ids = (
+                    batch.allowed_structure_table_ids
+                )
                 schemas = self._schemas_for_names(set(batch.schema_names))
                 if not schemas:
                     continue
@@ -452,7 +466,8 @@ class StatusSubAgent(BaseSubAgent):
                         content=self._build_system_context(
                             "你是 RPG 派生会话状态初始化器。只根据给出的已提交历史，"
                             "归纳当前目标在分支边界时的最终值。不得执行剧情裁定或猜测随机结果；"
-                            "只能修改工具 schema 允许的已有字段；不确定时不要调用工具。",
+                            "只能修改工具 schema 允许的当前表。需要重建历史中仍然有效且"
+                            "无法由现有字段表达的动态字段时可使用结构工具；不确定时不要调用工具。",
                             player_character=player_character,
                         ),
                     ).to_dict(),
@@ -517,6 +532,7 @@ class StatusSubAgent(BaseSubAgent):
             return result
         finally:
             self._active_status_allowed_keys = None
+            self._active_structure_table_ids = None
             self._active_scene_allowed = True
             self._busy = False
 
@@ -638,6 +654,9 @@ class StatusSubAgent(BaseSubAgent):
         scene_writable = any(
             name in SCENE_TOOL_NAMES for name in self._state_tool_set.names
         )
+        structure_writable = (
+            STATUS_TABLE_EDIT_FIELDS_TOOL_NAME in self._state_tool_set.names
+        )
         self._log_verbose(
             "stage started: stage=router catalog_tables={} scene_writable={} "
             "history_messages={} user_input={!r}",
@@ -652,6 +671,12 @@ class StatusSubAgent(BaseSubAgent):
             scene_schema = parameters["properties"]["scene"]  # type: ignore[index]
             scene_schema["const"] = False  # type: ignore[index]
             scene_schema["description"] = "本轮没有 scene 写入工具，必须为 false。"  # type: ignore[index]
+        if not structure_writable:
+            parameters = route_schema["function"]["parameters"]  # type: ignore[index]
+            table_items = parameters["properties"]["tables"]["items"]  # type: ignore[index]
+            structure_schema = table_items["properties"]["structure"]  # type: ignore[index]
+            structure_schema["const"] = False
+            structure_schema["description"] = "本轮没有普通表结构工具，必须为 false。"
         scene_constraint = (
             ""
             if scene_writable
@@ -663,7 +688,8 @@ class StatusSubAgent(BaseSubAgent):
                 "你是状态更新路由器。只选择本轮确实涉及的状态目标，不修改状态。"
                 "字段的值只在事实明确且实际变化时选择；表 description 中的共同"
                 "规则始终适用，若字段带 update_rule，还必须确认该字段专属规则"
-                "已经满足。"
+                "已经满足。keys 列出需要更新、重命名或删除的已有字段；只有确需"
+                "新增、重命名或删除字段时 structure 才为 true，纯新增时 keys 可为空。"
             ),
             user_content=(
                 f"## Status Catalog\n{json.dumps(catalog, ensure_ascii=False)}\n\n"
@@ -724,10 +750,15 @@ class StatusSubAgent(BaseSubAgent):
                     raw_target.get("keys"),
                     policy_index[table_id],
                 )
-                if keys:
+                raw_structure = raw_target.get("structure", False)
+                if not isinstance(raw_structure, bool):
+                    raise TypeError("route table structure must be a boolean")
+                structure = raw_structure and structure_writable
+                if keys or structure:
                     route.targets.append(StatusRouteTarget(
                         table_id=table_id,
                         keys=keys,
+                        structure=structure,
                         reason=str(raw_target.get("reason") or "")[:500],
                     ))
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -740,6 +771,7 @@ class StatusSubAgent(BaseSubAgent):
                 {
                     "table_id": target.table_id,
                     "keys": list(target.keys),
+                    "structure": target.structure,
                     "reason": target.reason,
                 }
                 for target in route.targets
@@ -776,6 +808,7 @@ class StatusSubAgent(BaseSubAgent):
                 selected_context=scene_context,
                 schema_names=scene_tool_names,
                 allowed_status_keys=None,
+                allowed_structure_table_ids=None,
                 is_scene=True,
             ))
         for target in route.targets:
@@ -788,18 +821,31 @@ class StatusSubAgent(BaseSubAgent):
                 )
                 continue
             allowed = frozenset(target.keys)
-            if not allowed:
+            if not allowed and not target.structure:
                 self._log_verbose(
                     "update target skipped: source=status_update:table:{} "
-                    "reason=no_allowed_keys",
+                    "reason=no_allowed_operations",
                     target.table_id,
                 )
                 continue
+            schema_names: set[str] = set()
+            if allowed:
+                schema_names.add(STATUS_TABLE_SET_VALUES_TOOL_NAME)
+            if target.structure:
+                schema_names.add(STATUS_TABLE_EDIT_FIELDS_TOOL_NAME)
             batches.append(_RoutedStatusUpdateBatch(
                 source=f"status_update:table:{target.table_id}",
-                selected_context=self._render_selected_table(table, allowed),
-                schema_names=frozenset({STATUS_TABLE_SET_VALUES_TOOL_NAME}),
+                selected_context=self._render_selected_table(
+                    table,
+                    None if target.structure else allowed,
+                ),
+                schema_names=frozenset(schema_names),
                 allowed_status_keys={target.table_id: allowed},
+                allowed_structure_table_ids=(
+                    frozenset({target.table_id})
+                    if target.structure
+                    else frozenset()
+                ),
             ))
 
         self._log_verbose(
@@ -809,6 +855,7 @@ class StatusSubAgent(BaseSubAgent):
         for batch in batches:
             self._active_scene_allowed = batch.is_scene
             self._active_status_allowed_keys = batch.allowed_status_keys
+            self._active_structure_table_ids = batch.allowed_structure_table_ids
             schemas = self._schemas_for_names(set(batch.schema_names))
             if not schemas:
                 self._log_verbose(
@@ -851,7 +898,8 @@ class StatusSubAgent(BaseSubAgent):
                         f"## Recent Conversation\n{recent}\n\n"
                         f"## User Action\n{user_input}\n\n"
                         f"## Selected State Target\n{batch.selected_context}\n\n"
-                        "只更新这里列出的、已经确定且实际变化的值；没有变化不要调用工具。"
+                        "只处理这个目标中已经确定且实际需要同步的当前状态；"
+                        "没有变化不要调用工具。"
                     ),
                     player_character=player_character,
                 )
@@ -1294,6 +1342,9 @@ class StatusSubAgent(BaseSubAgent):
                     "key": key,
                     "value": str(raw_row.get("value") or ""),
                     "update_rule": rule,
+                    "runtime_key_locked": bool(
+                        raw_row.get("runtimeKeyLocked", False)
+                    ),
                 })
             index[table_id] = frozenset(keys)
             catalog.append({
@@ -1324,7 +1375,7 @@ class StatusSubAgent(BaseSubAgent):
     @staticmethod
     def _render_selected_table(
         table: dict[str, object],
-        allowed_keys: frozenset[str],
+        allowed_keys: frozenset[str] | None,
     ) -> str:
         document = table.get("document")
         rows = document.get("rows", []) if isinstance(document, dict) else []
@@ -1332,7 +1383,10 @@ class StatusSubAgent(BaseSubAgent):
             row
             for row in rows
             if isinstance(row, dict)
-            and str(row.get("key") or "") in allowed_keys
+            and (
+                allowed_keys is None
+                or str(row.get("key") or "") in allowed_keys
+            )
         ]
         return json.dumps(
             {
@@ -1347,16 +1401,54 @@ class StatusSubAgent(BaseSubAgent):
     def _validate_active_scope(self, name: str, args: str) -> None:
         if name in SCENE_TOOL_NAMES and not self._active_scene_allowed:
             raise PermissionError("scene tools are outside the routed update scope")
-        if name != STATUS_TABLE_SET_VALUES_TOOL_NAME:
+        if name not in {
+            STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+            STATUS_TABLE_SET_VALUES_TOOL_NAME,
+        }:
             return
-        if self._active_status_allowed_keys is None:
+        if (
+            self._active_status_allowed_keys is None
+            and self._active_structure_table_ids is None
+        ):
             return
         try:
             payload = json.loads(args)
             table_id = int(payload.get("table_id", 0))
-            updates = payload.get("updates", [])
         except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError("invalid scoped status tool arguments") from exc
+        if name == STATUS_TABLE_EDIT_FIELDS_TOOL_NAME:
+            if (
+                self._active_structure_table_ids is not None
+                and table_id not in self._active_structure_table_ids
+            ):
+                raise PermissionError(
+                    "status structure edit is outside the routed update scope"
+                )
+            renames = payload.get("renames", [])
+            deletes = payload.get("deletes", [])
+            if not isinstance(renames, list) or not isinstance(deletes, list):
+                raise PermissionError(
+                    "status structure edit is outside the routed update scope"
+                )
+            source_keys = {
+                str(item.get("key", ""))
+                for item in renames
+                if isinstance(item, dict)
+            }
+            source_keys.update(
+                str(key) for key in deletes if isinstance(key, str)
+            )
+            allowed = (
+                self._active_status_allowed_keys.get(table_id, frozenset())
+                if self._active_status_allowed_keys is not None
+                else frozenset()
+            )
+            if not source_keys.issubset(allowed):
+                raise PermissionError(
+                    "status structure edit is outside the routed update scope"
+                )
+            return
+        updates = payload.get("updates", [])
         allowed = self._active_status_allowed_keys.get(table_id, frozenset())
         if not isinstance(updates, list) or not updates:
             raise PermissionError("status update is outside the routed update scope")

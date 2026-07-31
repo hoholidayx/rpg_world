@@ -40,13 +40,18 @@ if TYPE_CHECKING:
 
 def _flatten_status_tables(
     status_mgr: StatusManager | None,
+    *,
+    available_tool_names: tuple[str, ...] = (),
 ) -> list[dict[str, object]]:
     """Return normal status tables for context rendering."""
 
     if status_mgr is None:
         return []
     try:
-        return prepare_status_context_tables(status_mgr.list_context_tables())
+        return prepare_status_context_tables(
+            status_mgr.list_context_tables(),
+            available_tool_names=available_tool_names,
+        )
     except Exception as exc:
         logger.debug("[RPGContextBuilder] flatten status tables failed: {}", exc)
         return []
@@ -195,6 +200,7 @@ class RPGContextBuilder:
         status_mgr: StatusManager | None = None,
         scene_tracker: SceneTracker | None = None,
         rp_module_sections: list[RPModuleRuntimeSection] | None = None,
+        status_tool_names: tuple[str, ...] = (),
         persistent_memory_snapshot: tuple[PersistentMemoryFact, ...] = (),
         story_memory_snapshot: tuple[StoryMemoryFact, ...] = (),
     ) -> RPGContext:
@@ -248,7 +254,10 @@ class RPGContextBuilder:
 
         status_tables: list[dict] = []
         if status_mgr and self.config.enable_status_tables:
-            status_tables = _flatten_status_tables(status_mgr)
+            status_tables = _flatten_status_tables(
+                status_mgr,
+                available_tool_names=status_tool_names,
+            )
 
         recalled_items: list[str] = []
         if self._recalled_memory and self.config.enable_recalled_memory:

@@ -43,6 +43,20 @@ class _Scene:
         return [self.tool]
 
 
+class _Status:
+    session_id = "s1"
+
+    @staticmethod
+    def list_context_tables() -> list[dict[str, object]]:
+        return [{
+            "id": 1,
+            "status_kind": models.STATUS_KIND_NORMAL,
+            "document": {
+                "rows": [{"key": "生命", "value": "10"}],
+            },
+        }]
+
+
 class _RPRuntime:
     def __init__(self) -> None:
         self.outcome = _Tool("rp_story_outcome")
@@ -267,6 +281,45 @@ def test_state_tool_set_reports_exact_runtime_capabilities() -> None:
     assert state_tools.supports("scene_time") is True
     assert state_tools.supports("scene_del_attr") is False
     assert AgentToolService.state_tools(None, None).names == ()
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (TurnMode.NEUTRAL, True),
+        (TurnMode.IC, True),
+        (TurnMode.GM, True),
+        (TurnMode.OOC, False),
+    ],
+)
+def test_normal_status_value_and_structure_tools_follow_turn_mode(
+    mode: TurnMode,
+    expected: bool,
+) -> None:
+    resources = AgentContextResources(
+        builder=SimpleNamespace(),
+        character_manager=None,
+        lorebook_manager=None,
+        status_manager=None,
+        scene_tracker=None,
+        memory_manager=None,
+    )
+    service = AgentToolService(
+        resources=lambda: resources,
+        history_query=_HistoryQuery(),
+        summary_query=_SummaryQuery(),
+    )
+    service.refresh_base_registry()
+
+    registry = service.registry_for_turn(
+        None,
+        _Status(),  # type: ignore[arg-type]
+        turn_execution=_execution(mode),
+    )
+    names = {tool.name for tool in registry} if registry is not None else set()
+
+    assert ("status_table_set_values" in names) is expected
+    assert ("status_table_edit_fields" in names) is expected
 
 
 @pytest.mark.parametrize(

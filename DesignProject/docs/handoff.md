@@ -111,6 +111,17 @@ Story Pack v2 每包只包含一个 Story，支持按 section 拆包，采用 me
 RP Module，模式固定为 `neutral | ic | ooc | gm`，不再设计 Workspace mode。
 Design/Pack/Project/MCP 契约均硬切 2.0，v1 输入直接拒绝且无转换器。
 
+### 普通状态表与 Scene 运行时权限
+
+普通状态表 `description` 除整表共同语义、value 格式和即时更新规则外，在需要
+开放字段时还必须定义动态 key 的业务域、命名/value 格式以及创建、改名、删除
+条件，不必穷举未来所有字段。`neutral | ic | gm` 可在已有 normal Session 表内
+创建、读取、更新、改名和删除字段，但不能 CRUD 整张表；读取来自每轮状态
+Context，OOC 与命令只读。新字段默认未锁且 `updateRule`/`metadata` 为空；
+`runtimeKeyLocked=true` 只禁止该字段改名或删除，不限制 value 更新，也不妨碍
+同表新增其他字段。Scene 不继承这项 normal 权限，结构编辑仍单独服从
+`agent.scene.allow_runtime_key_changes`。
+
 ### Scene、turn 与 Plot 调度口径
 
 `neutral | ic | gm` 是非 OOC 正文 turn；OOC 和命令不推进世界事实。自动
@@ -153,7 +164,7 @@ pool lane 成功注入后，整个池在到期前跳过。锚点复用已提交�
 
 SceneTime 固定使用无“第”字的 `Y 年 M 月 D 日 H 时 [M 分]`。
 
-`authoringRulesVersion=1.4` 与 Story Pack `contractVersion=2.0` 独立演进。
+`authoringRulesVersion=1.5` 与 Story Pack `contractVersion=2.0` 独立演进。
 日常迭代调用 `story_design_validate(profile="draft")`；准备 checkpoint 或
 构建包时调用 `profile="package"`。`diagnostics` 固定包含
 `ruleId/severity/path/message/suggestion/runtimeEffect`。error 是确定性门禁；

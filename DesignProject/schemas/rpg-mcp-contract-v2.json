@@ -1,6 +1,6 @@
 {
   "authoringRules": {
-    "digest": "12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413",
+    "digest": "da18005df6206dc24ecd2e38e0db4a22ebfb644eaf898a651b70d17d2005db35",
     "managedAssetRefresh": {
       "changesDesignRevision": false,
       "changesRuntimeIntegration": false,
@@ -20,7 +20,7 @@
       "suggestion",
       "runtimeEffect"
     ],
-    "version": "1.4"
+    "version": "1.5"
   },
   "characterCards": {
     "objectiveDetailTags": [
@@ -420,5 +420,52 @@
     "oneStoryPerPack": true,
     "visualCatalogIsArchiveOnly": true
   },
-  "schemaVersion": "rpg-mcp-contract/2.0"
+  "schemaVersion": "rpg-mcp-contract/2.0",
+  "statusTables": {
+    "documentSchemaVersion": 2,
+    "normal": {
+      "authorPolicyFieldsMutableByLlm": false,
+      "emptyTableCanCreateFirstField": true,
+      "fieldCrud": [
+        "create",
+        "read",
+        "update",
+        "rename",
+        "delete"
+      ],
+      "newFieldDefaults": {
+        "metadata": {},
+        "runtimeKeyLocked": false,
+        "updateRule": ""
+      },
+      "runtimeKeyLocked": {
+        "allowsOtherFieldCreation": true,
+        "allowsValueUpdate": true,
+        "blocks": [
+          "rename",
+          "delete"
+        ]
+      },
+      "scope": "existing_session_tables",
+      "structureTool": "status_table_edit_fields",
+      "tableCrud": false,
+      "valueTool": "status_table_set_values"
+    },
+    "oocAndCommandsAreReadOnly": true,
+    "readSource": "current_turn_context",
+    "scene": {
+      "defaultAllowsExistingValueUpdatesOnly": true,
+      "runtimeKeyLockedBlocks": [
+        "rename",
+        "delete"
+      ],
+      "structurePolicySetting": "agent.scene.allow_runtime_key_changes",
+      "usesNormalStatusTools": false
+    },
+    "worldAdvancingModes": [
+      "neutral",
+      "ic",
+      "gm"
+    ]
+  }
 }

@@ -96,7 +96,7 @@ TurnRuntimeFactory
        │    └─ NOT_REQUIRED
        │          │
        │          ▼
-       │       Route：选择 scene / normal table / existing key
+       │       Route：选择 scene / normal table / existing key，并标记 structure
        │          │
        │          ▼
        │       Update：scene 一次 + 每张普通表各一次；本 turn 即时更新，目标失败仅恢复该目标并继续
@@ -281,7 +281,8 @@ normal table B 被选中      → 1 次 table B update
 | 目标 | 可见 Context | 可用工具 | 代码边界 |
 |---|---|---|---|
 | scene | 共享裁定前缀 + 当前 scene + 近期历史 + input | 四个 Lookup 工具 + 本轮动态注册的 scene 工具 | 禁止普通表工具；默认只能改已有 value |
-| 单张 normal 表 | 共享裁定前缀 + 该表被选中的 rows + 近期历史 + input | 四个 Lookup 工具 + `status_table_set_values` | 固定 table ID + key allowlist |
+| 单张 normal 表（仅 value） | 共享裁定前缀 + 该表被选中的 rows + 近期历史 + input | 四个 Lookup 工具 + `status_table_set_values` | 固定 table ID + key allowlist |
+| 单张 normal 表（`structure=true`） | 共享裁定前缀 + 该表完整快照 + 近期历史 + input | 四个 Lookup 工具 + 按目标所需的 `status_table_set_values` / `status_table_edit_fields` | 固定 table ID；改名/删除来源受 key allowlist 约束，纯新增允许 `keys=[]` |
 
 隔离 Update 使用同一份稳定 system contract，不再根据整轮工具全集动态枚举能力。contract 明确“只能使用本请求实际提供的工具”，而每次实际下发的 schema 仍只包含当前 scene 或单张 normal 表，因此提示词与执行能力一致。user message 固定按以下顺序组织：
 
@@ -293,13 +294,14 @@ Recent Conversation
 
 同一 Route 产生多个目标时，近期历史和当前动作构成共同前缀，目标内容只在末尾分叉；scene 与单表仍保持独立 Context、schema、allowlist 和 checkpoint，不合并调用。
 
-普通表更新工具以及默认策略下的 scene 工具都只能修改已有 key 的 value，不能新增、删除或重命名 key。执行前后有多层校验：
+普通表保留 `status_table_set_values` 更新已有 value，并通过 `status_table_edit_fields` 在已有 normal Session 表内原子创建、改名或删除字段；不提供整表 CRUD。默认策略下的 scene 工具仍只能修改已有 key 的 value。执行前后有多层校验：
 
 1. 当前阶段只能调用为该 batch 注册的工具名。
-2. StatusSubAgent active scope 校验 `table_id` 和本次 Route 产生的 key allowlist。
-3. `StatusWritePolicy` 再读取真实 document，校验表可访问且 key 存在。
+2. StatusSubAgent active scope 校验 `table_id`、`structure` 资格和本次 Route 产生的 key allowlist。
+3. `StatusWritePolicy` 再读取真实 document，校验表可访问、表在结构范围内且已有来源 key 在 allowlist 中。
 4. scratch manager 再拒绝 scene 等非 normal 表。
-5. 值未变化时返回 no-op，不产生 staged document。
+5. 结构编辑先完整校验重复项、未知/锁定来源、目标冲突与跨操作冲突，再一次性生成新 document；失败不产生部分写入。
+6. 值未变化时返回 no-op，不产生 staged document。
 
 每个即时 Update 目标在 provider 调用前各自创建内存 checkpoint。目标内任一 provider 异常、非法工具、工具执行失败或范围校验失败，都会恢复该目标开始前的 scratch；该目标内已恢复的记录只保留诊断意义，此前成功目标不受影响，代码继续执行后续 scene/普通表目标和主 Agent。`StatusSubAgentResult.failed` 仅表示至少一个目标失败，`updated` 表示最终仍有修改保留在 scratch，二者可以同时为 `true`。
 
@@ -353,7 +355,7 @@ Status preflight 的结果决定主 Agent 能看到什么：
 - `NONE`：没有预裁定；若 Narrative Outcome 模块允许，主 Agent 仍可调用 `rp_story_outcome` 补判。
 - `FALLBACK`：预判不可靠，主 Agent 保留同一 outcome 工具完成补判。
 
-scene/status 工具仍绑定到同一个 turn scratch。主 Agent 可以补做预路由遗漏或目标失败后的确定状态同步；普通表工具允许修改任意已有 normal key 的 value，默认 scene 工具同样只接受已有 key。该补写是机会性的，不承诺一定修复预处理失败。
+scene/status 工具仍绑定到同一个 turn scratch。主 Agent 可以补做预路由遗漏或目标失败后的确定状态同步；普通表工具允许更新任意可见 normal key 的 value，也可在已有 normal 表内创建、改名或删除字段，默认 scene 工具仍只接受已有 key。该补写是机会性的，不承诺一定修复预处理失败。
 
 模型协议要求：只有发生真实、持久、确定的追踪值变化时才写状态；有变化时先在不含 RP 正文的工具调用轮完成同步，最终正文不得新增尚未同步的可追踪确定事实。确认没有变化时允许零状态工具，也不得询问玩家是否需要标记状态。
 
@@ -363,7 +365,7 @@ Story 定义和 Session 运行表共用严格的 `schemaVersion=2` document。�
 
 | 字段 | 语义 |
 |---|---|
-| `key` | 稳定字段名；普通状态工具只能定位已有 key |
+| `key` | 状态字段名；同表唯一。既有字段可被定位更新，未锁字段可按已确认事实改名/删除，动态字段可在已有 normal 表中创建 |
 | `value` | 当前值，以字符串表达；可按表约定表示数值、枚举、列表、简短描述或当前事实状态 |
 | `runtimeKeyLocked` | 只保护 key 不被运行时删除或重命名，不限制 value 更新 |
 | `updateRule` | 字段专属的额外即时语义指导，保存时 trim；整表共同规则放在表 description，空字符串使用通用事实变化条件，不预设 value 是数值 |
@@ -371,10 +373,13 @@ Story 定义和 Session 运行表共用严格的 `schemaVersion=2` document。�
 
 旧 schema、字段频率、延迟周期和其它未知行属性直接拒绝，不做兼容解析。`updateRule` 不是事件总线、调度器或数据库条件：
 
-- 表 `description` 集中承载共同语义、value 格式和即时更新规则，不在各 row 重复；
-- Router 依据本轮已确认事实判断字段是否相关；
-- 隔离更新器只获得 Router 选中的 key，并把非空规则作为额外更新条件；
-- 主 Agent fallback 可修改任意已有 normal key，但仍须遵循同一规则与“值实际变化”约束；
+- 表 `description` 集中承载共同语义、value 格式和即时更新规则，不在各 row 重复；开放字段的 normal 表还要定义动态 key 的业务域、命名/value 格式与创建、改名、删除条件；
+- Router 依据本轮已确认事实判断字段是否相关，并以 `structure` 标记是否需要结构变化；纯新增允许不选择已有 key；
+- value-only 隔离更新器只获得 Router 选中的 rows；结构更新器获得完整单表快照，但改名/删除来源仍受 Router key allowlist 约束；
+- 主 Agent fallback 可更新任意可见 normal key，也可在已有 normal 表内编辑字段结构，但仍须遵循同一规则与“事实已经明确”约束；
+- 新字段追加到表尾，默认未锁且作者策略为空；改名保留原位置、value、锁、`updateRule` 与 `metadata`；
+- `runtimeKeyLocked=true` 只禁止该字段改名或删除，不限制 value 更新，也不禁止同表新增其他字段；LLM 不能修改锁、规则或 metadata；
+- 同一结构调用内的来源/目标冲突、未知或锁定字段会使整次调用失败，不产生部分写入；
 - 空规则不等于无约束，仍只允许同步真实、持久、已经确定的变化；
 - 状态表保存需要每轮可见和更新的当前状态；当前事实、承诺、联系或事件状态都可以成为字段；
 - Memory 更适合按时间累积的叙事历史，这不是对上述内容进入状态表的禁止；
@@ -392,7 +397,7 @@ scene 在数据层和 Agent 编排层承担不同职责：
 | Outcome / Route | 可读取 scene；Route 用独立 `scene: boolean` 决定本轮是否涉及它 |
 | Update | 命中后单独调用，只暴露 scene Context 和 scene 专用工具 |
 | LLM key 权限 | `agent.scene.allow_runtime_key_changes=false` 时只能修改已有 value；开启后才允许增删非锁定 key |
-| 普通表工具 | 永远不使用 `status_table_set_values` |
+| 普通表工具 | 永远不使用 `status_table_set_values` 或 `status_table_edit_fields` |
 | 回复后任务 | 不存在 Scene 状态归纳或逐字段进度 |
 
 因此需要区分两件事：

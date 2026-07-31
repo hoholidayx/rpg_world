@@ -17,7 +17,10 @@ from rpg_core.agent.sub_agents.status.models import (
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SCENE_TOOL_NAMES
 from rpg_core.status.context import render_status_tables_context
-from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
+from rpg_core.status.tools import (
+    STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+    STATUS_TABLE_SET_VALUES_TOOL_NAME,
+)
 
 if TYPE_CHECKING:
     from rpg_core.agent.adjudication import AdjudicationContextSnapshot
@@ -98,6 +101,7 @@ class StatusPreflightHook:
                 turn_scratch.scene_tracker,
                 turn_scratch.status_manager,
                 context_tables=context_tables,
+                available_tool_names=tuple(tool.name for tool in state_tool_set),
             )
             scene_context = (
                 turn_scratch.scene_tracker.get_context()
@@ -142,6 +146,7 @@ class StatusPreflightHook:
         status_manager: "StatusManager | None",
         *,
         context_tables: list[dict[str, object]] | None = None,
+        available_tool_names: tuple[str, ...] = (),
     ) -> str:
         sections: list[str] = []
         if scene_tracker is not None:
@@ -151,7 +156,8 @@ class StatusPreflightHook:
                 status_context = render_status_tables_context(
                     context_tables
                     if context_tables is not None
-                    else status_manager.list_context_tables()
+                    else status_manager.list_context_tables(),
+                    available_tool_names=available_tool_names,
                 )
             except Exception as exc:
                 logger.warning(
@@ -315,7 +321,10 @@ class TurnDiagnostics:
             and turn_scratch.narrative_outcome is not None
         ):
             effective = StatusSubAgentPreflightOutcome.FALLBACK
-        state_tool_names = SCENE_TOOL_NAMES | {STATUS_TABLE_SET_VALUES_TOOL_NAME}
+        state_tool_names = SCENE_TOOL_NAMES | {
+            STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
+            STATUS_TABLE_SET_VALUES_TOOL_NAME,
+        }
         main_state_corrections = sum(
             name in state_tool_names for name in main_tool_names
         )

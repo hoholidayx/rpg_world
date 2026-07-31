@@ -14,7 +14,10 @@ from rpg_core.session.modes import DEFAULT_TURN_MODE, WORLD_ADVANCING_MODES
 from rpg_core.scene import SceneTracker
 from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
-from rpg_core.status.tools import StatusTableSetValuesTool
+from rpg_core.status.tools import (
+    StatusTableEditFieldsTool,
+    StatusTableSetValuesTool,
+)
 
 if TYPE_CHECKING:
     from rpg_core.agent.sub_agents.status.agent import StatusSubAgent
@@ -99,7 +102,10 @@ class StatusBootstrapCoordinator:
         tools = []
         if scratch_scene is not None:
             tools.extend(scratch_scene.get_tools())
-        tools.append(StatusTableSetValuesTool(scratch_manager))
+        tools.extend([
+            StatusTableSetValuesTool(scratch_manager),
+            StatusTableEditFieldsTool(scratch_manager),
+        ])
 
         def create_checkpoint() -> object:
             return (

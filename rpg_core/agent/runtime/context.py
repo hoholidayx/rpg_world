@@ -47,6 +47,7 @@ from rpg_core.context.models import (
 from rpg_core.context.renderer import ContextRenderer
 from rpg_core.rp_modules.models import PlayerPortrayalDetail
 from rpg_core.status.context import render_status_tables_context
+from rpg_core.status.tools import StatusTableToolProvider
 from rpg_core.context.usage import estimate_rendered_context_usage
 from rpg_core.settings import settings
 
@@ -258,6 +259,23 @@ class AgentContextService:
         story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
     ) -> "RPGContext":
         resources = self._resources()
+        resolved_status_manager = (
+            resources.status_manager
+            if status_manager is None
+            else status_manager
+        )
+        status_tool_names: tuple[str, ...] = ()
+        if (
+            resolved_status_manager is not None
+            and turn_execution is not None
+            and turn_execution.policy.expose_state_tools
+        ):
+            status_tool_names = tuple(
+                tool.name
+                for tool in StatusTableToolProvider(
+                    resolved_status_manager
+                ).get_tools()
+            )
         fixed_layer = self._assemble_fixed_layer(
             rp_module_runtime.get_fixed_sections()
             if rp_module_runtime is not None
@@ -270,11 +288,7 @@ class AgentContextService:
             history_messages=list(history.messages),
             current_user_message=current_user_message,
             summarized_message_count=history.filtered_message_count,
-            status_mgr=(
-                resources.status_manager
-                if status_manager is None
-                else status_manager
-            ),
+            status_mgr=resolved_status_manager,
             scene_tracker=(
                 resources.scene_tracker
                 if scene_tracker is None
@@ -286,6 +300,7 @@ class AgentContextService:
                 rp_module_runtime=rp_module_runtime,
                 turn_execution=turn_execution,
             ),
+            status_tool_names=status_tool_names,
             persistent_memory_snapshot=persistent_memory_snapshot,
             story_memory_snapshot=story_memory_snapshot,
         )

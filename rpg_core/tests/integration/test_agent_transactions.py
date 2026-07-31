@@ -338,6 +338,218 @@ async def test_status_scratch_and_messages_commit_together_with_real_sqlite(
 
 
 @pytest.mark.asyncio
+async def test_status_structure_edit_commits_with_messages_in_real_sqlite(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    table = (
+        integration_status_agent._lifecycle.resources.status_manager
+        .list_context_tables()[0]
+    )
+    table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                json.dumps({
+                    "scene": False,
+                    "tables": [{
+                        "table_id": table_id,
+                        "keys": [],
+                        "structure": True,
+                        "reason": "新增当前许可",
+                    }],
+                }, ensure_ascii=False),
+            )],
+        ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "status_table_edit_fields",
+                json.dumps({
+                    "table_id": table_id,
+                    "creates": [{"key": "当前许可", "value": "夜间通行"}],
+                    "renames": [],
+                    "deletes": [],
+                }, ensure_ascii=False),
+            )],
+        ),
+    )
+
+    reply = await integration_status_agent.send(
+        "负责人正式给了我一张今晚有效的夜间通行证。"
+    )
+
+    assert reply.status_sub_agent_records
+    assert reply.status_sub_agent_records[0]["changed"] is True
+    persisted = integration_data_gateway.status.get_table_for_session(
+        "integration_status",
+        table_id,
+    )
+    field = persisted.document.row_for_key("当前许可")
+    assert field is not None
+    assert field.value == "夜间通行"
+    assert field.runtime_key_locked is False
+    assert field.update_rule == ""
+    assert field.metadata == {}
+    assert integration_data_gateway.messages.count("integration_status") == 2
+    assert integration_data_gateway.backup.messages.count("integration_status") == 2
+    main_call = scripted_llm_manager.main_provider().calls[-1]
+    main_context = "\n".join(
+        str(message.get("content", ""))
+        for message in main_call.messages
+    )
+    assert "当前许可" in main_context
+    assert "夜间通行" in main_context
+
+
+@pytest.mark.asyncio
+async def test_main_provider_failure_discards_structural_status_edit(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    table = (
+        integration_status_agent._lifecycle.resources.status_manager
+        .list_context_tables()[0]
+    )
+    table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                json.dumps({
+                    "scene": False,
+                    "tables": [{
+                        "table_id": table_id,
+                        "keys": [],
+                        "structure": True,
+                        "reason": "新增临时字段",
+                    }],
+                }, ensure_ascii=False),
+            )],
+        ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "status_table_edit_fields",
+                json.dumps({
+                    "table_id": table_id,
+                    "creates": [{"key": "不应提交", "value": "暂存"}],
+                    "renames": [],
+                    "deletes": [],
+                }, ensure_ascii=False),
+            )],
+        ),
+    )
+    scripted_llm_manager.main_provider().queue_chat(
+        RuntimeError("main failed after structure edit")
+    )
+
+    with pytest.raises(RuntimeError, match="main failed after structure edit"):
+        await integration_status_agent.send("建立一个新的当前状态。")
+
+    persisted = integration_data_gateway.status.get_table_for_session(
+        "integration_status",
+        table_id,
+    )
+    assert persisted.document.row_for_key("不应提交") is None
+    assert integration_data_gateway.messages.count("integration_status") == 0
+    assert integration_data_gateway.backup.messages.count("integration_status") == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_cancellation_discards_structural_status_edit(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    table = (
+        integration_status_agent._lifecycle.resources.status_manager
+        .list_context_tables()[0]
+    )
+    table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                json.dumps({
+                    "scene": False,
+                    "tables": [{
+                        "table_id": table_id,
+                        "keys": [],
+                        "structure": True,
+                        "reason": "新增取消字段",
+                    }],
+                }, ensure_ascii=False),
+            )],
+        ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "status_table_edit_fields",
+                json.dumps({
+                    "table_id": table_id,
+                    "creates": [{"key": "取消字段", "value": "暂存"}],
+                    "renames": [],
+                    "deletes": [],
+                }, ensure_ascii=False),
+            )],
+        ),
+    )
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def gated_stream(_messages, _tools):
+        started.set()
+        await release.wait()
+        return (
+            ProviderChunk(content="too late"),
+            ProviderChunk(finish_reason="stop", model="config-model"),
+        )
+
+    scripted_llm_manager.main_provider().queue_stream(gated_stream)
+    events: list[AgentStreamEvent] = []
+
+    async def consume() -> None:
+        async for event in integration_status_agent.send_stream(
+            "建立一个随后取消的状态。",
+            request_id="req_cancel_structure",
+        ):
+            events.append(event)
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(started.wait(), timeout=2)
+    cancel_result = await integration_status_agent.cancel_current_turn(
+        request_id="req_cancel_structure"
+    )
+    await asyncio.wait_for(task, timeout=2)
+
+    assert cancel_result.status == TurnCancelStatus.CANCELLED
+    assert all(event.kind != StreamEventKind.DONE for event in events)
+    persisted = integration_data_gateway.status.get_table_for_session(
+        "integration_status",
+        table_id,
+    )
+    assert persisted.document.row_for_key("取消字段") is None
+    assert integration_data_gateway.messages.count("integration_status") == 0
+    assert integration_data_gateway.backup.messages.count("integration_status") == 0
+
+
+@pytest.mark.asyncio
 async def test_status_target_failure_keeps_successful_scene_and_main_turn_running(
     integration_status_agent,
     integration_data_gateway,
@@ -1050,6 +1262,19 @@ async def test_main_agent_syncs_scene_and_normal_status_after_preadjudication(
                     f'{{"table_id":{table_id},"updates":[{{"key":"线索","value":"地下入口已确认"}}]}}',
                     call_id="call_status_correction",
                 ),
+                tool_call(
+                    "status_table_edit_fields",
+                    json.dumps({
+                        "table_id": table_id,
+                        "creates": [{
+                            "key": "地下入口状态",
+                            "value": "已发现",
+                        }],
+                        "renames": [],
+                        "deletes": [],
+                    }, ensure_ascii=False),
+                    call_id="call_status_structure_correction",
+                ),
             ],
         ),
         response("裁定结果已落实到场景与线索状态。", model="config-model"),
@@ -1067,6 +1292,7 @@ async def test_main_agent_syncs_scene_and_normal_status_after_preadjudication(
         for schema in provider.calls[0].tools or []
     }
     assert "scene_attr" in first_schema_by_name
+    assert "status_table_edit_fields" in first_schema_by_name
     assert "status_table_set_values" in first_schema_by_name
     assert "scene_del_attr" not in first_schema_by_name
     assert first_schema_by_name["scene_attr"]["function"]["parameters"]["properties"]["key"]["enum"] == [
@@ -1082,6 +1308,10 @@ async def test_main_agent_syncs_scene_and_normal_status_after_preadjudication(
         table_id,
     )
     assert persisted_table.document.row_for_key("线索").value == "地下入口已确认"
+    assert (
+        persisted_table.document.row_for_key("地下入口状态").value
+        == "已发现"
+    )
     persisted_outcome = integration_data_gateway.narrative_outcomes.get_for_turn(
         "integration_status",
         1,

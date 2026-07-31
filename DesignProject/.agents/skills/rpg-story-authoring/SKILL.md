@@ -5,8 +5,8 @@ description: Persist, resume, revise, inspect, validate, and package a portable 
 
 # RPG Story Authoring
 
-<!-- authoring-rules-version: 1.4 -->
-<!-- authoring-rules-digest: 12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413 -->
+<!-- authoring-rules-version: 1.5 -->
+<!-- authoring-rules-digest: da18005df6206dc24ecd2e38e0db4a22ebfb644eaf898a651b70d17d2005db35 -->
 
 Persist the Story design as immutable local revisions and use
 `rpg-world-mcp` as the only runtime boundary. Never rely on conversation
@@ -57,6 +57,15 @@ poll. A successfully committed net change to the entire active Scene document
 creates one opportunity for the next non-OOC turn; `scheduledTime` and
 `deadlineTime` only gate candidates inside that opportunity. Do not author
 no-op Scene changes to poll Plot.
+
+In an existing normal Session status table, neutral/ic/gm turns may create,
+read, update, rename, and delete fields, but never CRUD the table itself.
+`runtimeKeyLocked=true` blocks only rename/delete of that field; value updates
+and creation of other fields remain allowed. OOC and commands are read-only,
+and Scene structure still follows `agent.scene.allow_runtime_key_changes`.
+When a normal table needs open-ended fields, use its `description` to define
+the dynamic key domain, naming/value format, and create/rename/delete
+conditions instead of predefining every possible field.
 
 An event referenced by any outline node is exclusive to the outline lane and
 does not consume pool-lane selection until every node reference is removed.

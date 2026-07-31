@@ -134,7 +134,8 @@ async def test_bootstrap_updates_all_fields_and_commits_once() -> None:
     class Provider:
         async def chat(self, messages, *, tools):  # noqa: ANN001
             assert {tool["function"]["name"] for tool in tools} == {
-                "status_table_set_values"
+                "status_table_edit_fields",
+                "status_table_set_values",
             }
             prompt = str(messages[-1]["content"])
             assert "生命降为八" in prompt
@@ -187,7 +188,8 @@ async def test_bootstrap_prompt_keeps_long_message_tail() -> None:
     class Provider:
         async def chat(self, messages, *, tools):  # noqa: ANN001
             assert {tool["function"]["name"] for tool in tools} == {
-                "status_table_set_values"
+                "status_table_edit_fields",
+                "status_table_set_values",
             }
             assert tail_marker in str(messages[-1]["content"])
             return response()
@@ -211,6 +213,59 @@ async def test_bootstrap_prompt_keeps_long_message_tail() -> None:
 
     assert result.failed is False
     assert result.processed_turns == 1
+    assert len(manager.commits) == 1
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_rebuilds_dynamic_field_in_empty_normal_table() -> None:
+    manager = _StatusManager()
+    manager.document = models.StatusTableDocument.from_rows(rows=[])
+
+    class Provider:
+        async def chat(self, messages, *, tools):  # noqa: ANN001
+            assert {tool["function"]["name"] for tool in tools} == {
+                "status_table_edit_fields"
+            }
+            prompt = str(messages[-1]["content"])
+            assert "生命降为八" in prompt
+            assert '"rows": []' in prompt
+            return response(tool_calls=[{
+                "function": {
+                    "name": "status_table_edit_fields",
+                    "arguments": json.dumps({
+                        "table_id": 1,
+                        "creates": [{
+                            "key": "当前伤势",
+                            "value": "受伤，生命降为八",
+                        }],
+                        "renames": [],
+                        "deletes": [],
+                    }),
+                },
+            }])
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+
+    async def get_provider():
+        return Provider()
+
+    sub_agent._get_provider = get_provider  # type: ignore[method-assign]
+    result = await StatusBootstrapCoordinator(sub_agent).run(
+        history=_history(),
+        boundary_turn_id=4,
+        status_manager=manager,  # type: ignore[arg-type]
+        scene_tracker=None,
+    )
+
+    assert result.failed is False
+    assert result.updated is True
+    rebuilt = manager.document.row_for_key("当前伤势")
+    assert rebuilt is not None
+    assert rebuilt.value == "受伤，生命降为八"
+    assert rebuilt.runtime_key_locked is False
+    assert rebuilt.update_rule == ""
+    assert rebuilt.metadata == {}
     assert len(manager.commits) == 1
 
 
@@ -275,7 +330,7 @@ async def test_disabled_bootstrap_with_complete_history_and_normal_target_fails(
 
 
 @pytest.mark.asyncio
-async def test_disabled_bootstrap_with_no_writable_target_skips() -> None:
+async def test_disabled_bootstrap_with_empty_structural_target_fails() -> None:
     manager = _StatusManager()
     manager.document = models.StatusTableDocument.from_rows(rows=[])
     sub_agent = StatusSubAgent(
@@ -291,10 +346,9 @@ async def test_disabled_bootstrap_with_no_writable_target_skips() -> None:
         scene_tracker=None,
     )
 
-    assert result.failed is False
+    assert result.failed is True
     assert result.processed_turns == 2
-    assert len(manager.commits) == 1
-    assert manager.commits[0]["changes"] == []
+    assert len(manager.commits) == 0
 
 
 class _SceneStatusManager:
@@ -393,7 +447,10 @@ async def test_bootstrap_scene_uses_scratch_and_publishes_with_other_documents()
                             "arguments": json.dumps({"key": "位置", "value": "城堡"}),
                         }
                     }])
-            assert names == {"status_table_set_values"}
+            assert names == {
+                "status_table_edit_fields",
+                "status_table_set_values",
+            }
             return response()
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
@@ -435,7 +492,8 @@ async def test_bootstrap_target_failure_restores_all_scratch_and_skips_publish()
     class Provider:
         async def chat(self, messages, *, tools):  # noqa: ANN001
             assert {tool["function"]["name"] for tool in tools} == {
-                "status_table_set_values"
+                "status_table_edit_fields",
+                "status_table_set_values",
             }
             prompt = str(messages[-1]["content"])
             table_id = 1 if '"table_id": 1' in prompt else 3

@@ -792,6 +792,7 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
     assert not (
         {
             "rp_story_outcome",
+            "status_table_edit_fields",
             "status_table_set_values",
             "list_files",
             "read_file",
@@ -801,6 +802,7 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
         & ooc_tool_names
     )
     assert not any(name.startswith("scene_") for name in ooc_tool_names)
+    assert "本轮未提供普通状态写入工具" in ooc_content
 
     gm_reply = await agent.send("推进场景", mode="gm", narrative_style_id=style.id)
     gm_call = scripted_llm_manager.main_provider().calls[-1]
@@ -825,6 +827,11 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
     assert {"list_files", "read_file", "write_file", "grep"}.isdisjoint(
         gm_tool_names
     )
+    assert {
+        "status_table_edit_fields",
+        "status_table_set_values",
+    }.issubset(gm_tool_names)
+    assert "本轮实际提供 status_table_edit_fields" in gm_content
     assert "COMPOSER_STYLE_PROMPT" in gm_content
     rows = integration_data_gateway.messages.list(session_id)
     assert [row.mode for row in rows] == ["ooc", "ooc", "gm", "gm"]

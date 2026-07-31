@@ -49,7 +49,14 @@ the entire turn.
   current fact state. Status tables hold current state that needs per-turn
   visibility and updates. Memory is better suited to time-ordered narrative
   history, but current facts, commitments, contacts, or event states may still
-  be modeled as status rows.
+  be modeled as status rows. When a normal table needs open-ended fields, its
+  `description` also defines the dynamic key domain, naming/value format, and
+  create/rename/delete conditions; do not enumerate every possible field.
+  In an existing normal Session table, neutral/ic/gm turns may create, read,
+  update, rename, and delete fields but never CRUD the table itself. OOC and
+  commands are read-only. `runtimeKeyLocked=true` blocks only rename/delete of
+  that field, not value updates or creation of other fields; Scene structure
+  remains governed separately by `agent.scene.allow_runtime_key_changes`.
 - Treat `neutral | ic | gm` as non-OOC body turns; OOC and commands do not
   advance world facts. Automatic Plot selection is not a per-turn poll. Only
   a successfully committed net change to the entire active Scene document

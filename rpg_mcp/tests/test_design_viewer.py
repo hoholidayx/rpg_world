@@ -135,7 +135,7 @@ def test_viewer_serves_only_read_only_loopback_apis(tmp_path) -> None:
         )
         assert status == 200
         rules = json.loads(body)
-        assert rules["authoringRulesVersion"] == "1.4"
+        assert rules["authoringRulesVersion"] == "1.5"
         assert any(
             rule["field"] == "selectionWeight"
             for rule in rules["fields"]

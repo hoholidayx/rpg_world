@@ -1100,7 +1100,7 @@
           "title": "Key",
           "type": "string",
           "x-authoringRuleId": "field.status-row.key",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "metadata": {
           "additionalProperties": true,
@@ -1111,18 +1111,18 @@
           "title": "Metadata",
           "type": "object",
           "x-authoringRuleId": "field.status-row.metadata",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "runtimeKeyLocked": {
           "default": false,
-          "description": "只保护 key 不被运行时增删或改名，不锁定 value。",
+          "description": "为 true 时只保护该字段不被运行时删除或重命名；仍允许更新 value，也不妨碍同表新增其他未锁字段。",
           "examples": [
             true
           ],
           "title": "Runtimekeylocked",
           "type": "boolean",
           "x-authoringRuleId": "field.status-row.runtime-key-locked",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "updateRule": {
           "default": "",
@@ -1133,7 +1133,7 @@
           "title": "Updaterule",
           "type": "string",
           "x-authoringRuleId": "field.status-row.update-rule",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "value": {
           "default": "",
@@ -1144,7 +1144,7 @@
           "title": "Value",
           "type": "string",
           "x-authoringRuleId": "field.status-row.value",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         }
       },
       "required": [
@@ -1173,18 +1173,18 @@
           ],
           "title": "Characterref",
           "x-authoringRuleId": "field.status-table.character-ref",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "description": {
           "default": "",
-          "description": "说明该表追踪什么，并集中写整表共同语义、value 格式和即时更新规则；字段专属条件写入 row.updateRule。",
+          "description": "说明该表追踪什么，并集中写整表共同语义、value 格式和即时更新规则；字段专属条件写入 row.updateRule。normal 表若存在无法预先穷举的字段，还应说明动态 key 的业务域、命名与 value 格式，以及创建、改名和删除条件；无需预定义全部未来字段。",
           "examples": [
             "追踪当前 Session 的时间、位置与在场人物。"
           ],
           "title": "Description",
           "type": "string",
           "x-authoringRuleId": "field.status-table.description",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "metadata": {
           "additionalProperties": true,
@@ -1195,7 +1195,7 @@
           "title": "Metadata",
           "type": "object",
           "x-authoringRuleId": "field.status-table.metadata",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "name": {
           "description": "面向作者和管理界面的名称。",
@@ -1205,7 +1205,7 @@
           "title": "Name",
           "type": "string",
           "x-authoringRuleId": "field.status-table.name",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "rows": {
           "description": "该状态表的有序字段定义。",
@@ -1240,7 +1240,7 @@
           "title": "Rows",
           "type": "array",
           "x-authoringRuleId": "field.status-table.rows",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "sortOrder": {
           "default": 0,
@@ -1252,7 +1252,7 @@
           "title": "Sortorder",
           "type": "integer",
           "x-authoringRuleId": "field.status-table.sort-order",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "stableId": {
           "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
@@ -1262,7 +1262,7 @@
           "title": "Stableid",
           "type": "string",
           "x-authoringRuleId": "field.status-table.stable-id",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "statusKind": {
           "default": "normal",
@@ -1277,7 +1277,7 @@
           "title": "Statuskind",
           "type": "string",
           "x-authoringRuleId": "field.status-table.status-kind",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         }
       },
       "required": [
@@ -1542,7 +1542,7 @@
           "title": "Statustables",
           "type": "array",
           "x-authoringRuleId": "field.resources.status-tables",
-          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在 neutral、ic 或 gm 正文 turn 即时更新。"
+          "x-runtimeEffect": "创建 Session 时复制；neutral、ic 或 gm 正文 turn 可即时更新 value。已有 normal Session 表还允许字段级创建、读取、更新、改名和删除；Scene 的结构权限继续由专用 Scene 配置控制。"
         },
         "visualCatalog": {
           "description": "只归档、不自动创建媒体任务的独立视觉 brief。",
@@ -1853,6 +1853,6 @@
   ],
   "title": "RPG World Story Pack v2",
   "type": "object",
-  "x-authoringRulesDigest": "12b496205275a6eed2b2aee0d4a96f6f8cffc09a9b3ae7829c6cb7f3db29e413",
-  "x-authoringRulesVersion": "1.4"
+  "x-authoringRulesDigest": "da18005df6206dc24ecd2e38e0db4a22ebfb644eaf898a651b70d17d2005db35",
+  "x-authoringRulesVersion": "1.5"
 }

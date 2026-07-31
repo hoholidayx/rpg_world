@@ -104,7 +104,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
     )
     changed_document = story_copy.document.with_existing_values([
         (story_copy.document.rows[0].key, "会话中的旧值")
-    ])
+    ]).with_key_value("运行时动态字段", "只属于旧会话")
     gateway.status.save_table(story_copy.id, changed_document)
     source_story_table = gateway.status.get_story_table(
         int(story_copy.source_story_status_table_id)
@@ -126,7 +126,8 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
             "已推进",
             update_rule="长期进度事实明确变化时更新",
             metadata={"format": "text"},
-        )
+        ),
+        models.StatusTableRow("运行时新增许可", "夜间通行"),
     ])
     native_table = gateway.status.create_table(
         session_id,
@@ -171,6 +172,7 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     assert _story_memory(gateway).list(session_id) == []
     rebuilt = gateway.status.get_table(session_id, template_name)
     assert rebuilt.document.rows[0].value == "Story 当前状态值"
+    assert rebuilt.document.row_for_key("运行时动态字段") is None
     native_after = gateway.status.get_table_by_id(native_before.id)
     assert native_after.id == native_before.id
     assert native_after.name == native_before.name
@@ -189,6 +191,9 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
         == "长期进度事实明确变化时更新"
     )
     assert native_after.document.rows[0].metadata == {"format": "text"}
+    assert native_after.document.rows[1].key == "运行时新增许可"
+    assert native_after.document.rows[1].value == ""
+    assert native_after.document.rows[1].runtime_key_locked is False
 
     assert gateway.backup.messages.count(session_id) == backup_count + 1
     state = SessionRoleService(gateway.sessions).get_state(session_id)
