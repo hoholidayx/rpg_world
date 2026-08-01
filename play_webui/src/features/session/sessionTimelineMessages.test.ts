@@ -50,10 +50,54 @@ const turn: Turn = {
       createdAt: '2026-07-29T10:00:01Z',
     },
   ],
-  plotInjections: [
+  plotDecisions: [
     {
+      id: 71,
+      sourceKind: 'pool',
+      sourceId: 9,
+      eventId: 31,
+      containerId: 9,
+      decisionStatus: 'triggered',
+      dispatchMode: 'soft',
+      selectionOrigin: 'scheduler',
+      sceneTime: { year: 1, month: 1, day: 1, hour: 8, minute: 0 },
       eventTitle: '末班列车',
       directive: '让末班列车进入站台。',
+      reason: '与当前场景适宜。',
+      errorCode: '',
+      errorMessage: '',
+    },
+    {
+      id: 72,
+      sourceKind: 'outline',
+      sourceId: 3,
+      eventId: 32,
+      containerId: 3,
+      decisionStatus: 'deferred',
+      dispatchMode: 'soft',
+      selectionOrigin: 'scheduler',
+      sceneTime: { year: 1, month: 1, day: 1, hour: 8, minute: 0 },
+      eventTitle: '未到站的电话',
+      directive: null,
+      reason: '当前时机不合适。',
+      errorCode: '',
+      errorMessage: '',
+    },
+    {
+      id: 73,
+      sourceKind: 'pool',
+      sourceId: 9,
+      eventId: 33,
+      containerId: 9,
+      decisionStatus: 'error',
+      dispatchMode: 'soft',
+      selectionOrigin: 'scheduler',
+      sceneTime: null,
+      eventTitle: '信号中断',
+      directive: null,
+      reason: '',
+      errorCode: 'JUDGE_UNAVAILABLE',
+      errorMessage: '裁定服务暂不可用。',
     },
   ],
   outcome: {
@@ -102,13 +146,13 @@ describe('mapHistoryToMessages', () => {
     expect(user && canRetryMessage(user)).toBe(true)
   })
 
-  it('projects plot injections and outcomes without changing assistant content', () => {
+  it('projects plot decisions and outcomes without changing assistant content', () => {
     const messages = mapHistoryToMessages({ turns: [turn], playerCharacter: player })
     const assistant = messages.find(
       (message) => message.role === SESSION_TIMELINE_ROLE.ASSISTANT,
     )
     const plot = messages.find(
-      (message) => message.role === SESSION_TIMELINE_ROLE.PLOT_INJECTION,
+      (message) => message.role === SESSION_TIMELINE_ROLE.PLOT_DECISION,
     )
     const outcome = messages.find(
       (message) => message.role === SESSION_TIMELINE_ROLE.OUTCOME,
@@ -118,10 +162,16 @@ describe('mapHistoryToMessages', () => {
       '<rp-narration>列车灯从远处亮起。</rp-narration>',
     )
     expect(plot).toMatchObject({
-      id: 'history-plot-injection-8',
-      content: '让末班列车进入站台。',
+      id: 'history-plot-decision-8',
+      content: '让末班列车进入站台。\n\n当前时机不合适。\n\n裁定服务暂不可用。',
       canCopy: false,
     })
+    expect(plot?.plotDecisions).toHaveLength(3)
+    expect(plot?.plotDecisions?.map((decision) => decision.decisionStatus)).toEqual([
+      'triggered',
+      'deferred',
+      'error',
+    ])
     expect(outcome).toMatchObject({
       id: 'history-outcome-8',
       content: '及时赶到了站台。',

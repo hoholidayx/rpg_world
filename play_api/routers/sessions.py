@@ -245,12 +245,53 @@ class PlayPlotInjection(BaseModel):
     directive: str
 
 
+class PlayPlotSceneTime(BaseModel):
+    """A compact SceneTime projection for a Session-history Plot decision."""
+
+    year: int
+    month: int
+    day: int
+    hour: int
+    minute: int = 0
+
+
+class PlayPlotDecision(BaseModel):
+    """Player-facing, committed Plot scheduling decision summary.
+
+    This deliberately does not expose the raw event snapshot: it can contain
+    scheduler-only selection diagnostics.  ``directive`` is only projected for
+    a triggered decision, because it is the text actually injected into the
+    successful turn.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    source_kind: str = Field(alias="sourceKind")
+    source_id: int = Field(alias="sourceId")
+    event_id: int = Field(alias="eventId")
+    container_id: int = Field(alias="containerId")
+    decision_status: str = Field(alias="decisionStatus")
+    dispatch_mode: str = Field(alias="dispatchMode")
+    selection_origin: str = Field(alias="selectionOrigin")
+    scene_time: PlayPlotSceneTime | None = Field(alias="sceneTime")
+    event_title: str | None = Field(default=None, alias="eventTitle")
+    directive: str | None = None
+    reason: str = ""
+    error_code: str = Field(default="", alias="errorCode")
+    error_message: str = Field(default="", alias="errorMessage")
+
+
 class PlayTurn(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     turn_id: int = Field(alias="turnId")
     messages: list[PlayHistoryMessage] = Field(default_factory=list)
     outcome: "PlayNarrativeOutcome | None" = None
+    plot_decisions: list[PlayPlotDecision] = Field(
+        default_factory=list,
+        alias="plotDecisions",
+    )
     plot_injections: list[PlayPlotInjection] = Field(
         default_factory=list,
         alias="plotInjections",
@@ -566,8 +607,6 @@ def _attach_turn_annotations(
     )
     plot_records_by_turn: dict[int, list[SessionPlotScheduleDecision]] = {}
     for record in plot_records:
-        if record.decision_status != PLOT_DECISION_TRIGGERED:
-            continue
         plot_records_by_turn.setdefault(record.turn_id, []).append(record)
 
     source_order = {
@@ -583,14 +622,37 @@ def _attach_turn_annotations(
             ),
         )
         for record in records_for_turn:
-            event_title = record.event_snapshot.get("eventTitle")
-            directive = record.event_snapshot.get("directive")
-            if (
-                not isinstance(event_title, str)
-                or not event_title.strip()
-                or not isinstance(directive, str)
-                or not directive.strip()
-            ):
+            event_title = _plot_snapshot_text(record, "eventTitle")
+            directive = _plot_snapshot_text(record, "directive")
+            turn.plot_decisions.append(
+                PlayPlotDecision(
+                    id=record.id,
+                    sourceKind=record.source_kind,
+                    sourceId=record.source_id,
+                    eventId=record.event_id,
+                    containerId=record.container_id,
+                    decisionStatus=record.decision_status,
+                    dispatchMode=record.dispatch_mode,
+                    selectionOrigin=record.selection_origin,
+                    sceneTime=(
+                        PlayPlotSceneTime(**record.scene_time.to_dict())
+                        if record.scene_time is not None
+                        else None
+                    ),
+                    eventTitle=event_title,
+                    directive=(
+                        directive
+                        if record.decision_status == PLOT_DECISION_TRIGGERED
+                        else None
+                    ),
+                    reason=record.reason,
+                    errorCode=record.error_code,
+                    errorMessage=_plot_error_summary(record.error_message),
+                )
+            )
+            if record.decision_status != PLOT_DECISION_TRIGGERED:
+                continue
+            if event_title is None or directive is None:
                 logger.warning(
                     "[PlayAPI] skipping malformed Plot injection snapshot: "
                     "session_id={}, turn_id={}, decision_id={}",
@@ -600,12 +662,27 @@ def _attach_turn_annotations(
                 )
                 continue
             turn.plot_injections.append(
-                PlayPlotInjection(
-                    eventTitle=event_title,
-                    directive=directive,
-                )
+                PlayPlotInjection(eventTitle=event_title, directive=directive)
             )
     return turns
+
+
+def _plot_snapshot_text(
+    record: SessionPlotScheduleDecision,
+    key: str,
+) -> str | None:
+    value = record.event_snapshot.get(key)
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _plot_error_summary(value: str) -> str:
+    """Keep the Session-room annotation readable without exposing long traces."""
+
+    normalized = " ".join(str(value or "").split())
+    return normalized[:240]
 
 
 def _history_payload_from_row(row: object) -> dict[str, object]:

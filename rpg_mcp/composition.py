@@ -31,6 +31,23 @@ def build_runtime_composition(
 ) -> RuntimeComposition:
     gateway = DataServiceGateway(db_path)
     gateway.initialize()
+    return RuntimeComposition(
+        application=build_runtime_application(gateway),
+        gateway=gateway,
+    )
+
+
+def build_runtime_application(
+    gateway: DataServiceGateway,
+) -> RuntimeApplication:
+    """Compose the runtime adapter over an already-owned data gateway.
+
+    The MCP process normally owns its gateway through
+    :func:`build_runtime_composition`.  Tests and other composition roots that
+    already own the database lifecycle can use this narrower helper without
+    opening a second connection or duplicating the production service wiring.
+    """
+
     services = RuntimeServices(
         transaction=gateway.transaction,
         catalog=gateway.catalog,
@@ -47,10 +64,11 @@ def build_runtime_composition(
         plot=PlotScheduleManagementService(gateway.plot_scheduling),
         story_packs=gateway.story_packs,
     )
-    return RuntimeComposition(
-        application=RuntimeApplication(services),
-        gateway=gateway,
-    )
+    return RuntimeApplication(services)
 
 
-__all__ = ["RuntimeComposition", "build_runtime_composition"]
+__all__ = [
+    "RuntimeComposition",
+    "build_runtime_application",
+    "build_runtime_composition",
+]

@@ -1,4 +1,9 @@
-import { HISTORY_MESSAGE_ROLE, type SessionPlayerCharacter, type Turn } from '@/types/session'
+import {
+  HISTORY_MESSAGE_ROLE,
+  type PlotTurnDecision,
+  type SessionPlayerCharacter,
+  type Turn,
+} from '@/types/session'
 import {
   NARRATIVE_OUTCOME_CODES,
   type NarrativeOutcome,
@@ -62,12 +67,16 @@ export function outcomeSpeaker(): SessionSpeaker {
   }
 }
 
-export function plotInjectionSpeaker(): SessionSpeaker {
+export function plotDecisionSpeaker(): SessionSpeaker {
   return {
-    name: '剧情注入',
-    fallback: '注',
+    name: '剧情调度',
+    fallback: '调',
     tone: 'plot',
   }
+}
+
+function plotDecisionTimelineContent(decision: PlotTurnDecision) {
+  return decision.directive || decision.reason || decision.errorMessage || ''
 }
 
 export function commandSpeaker(): SessionSpeaker {
@@ -226,22 +235,22 @@ export function mapHistoryToMessages({
     const outcomeCreatedAt = turn.messages.find(
       (message) => message.role === HISTORY_MESSAGE_ROLE.ASSISTANT,
     )?.createdAt ?? turn.messages[0]?.createdAt
-    const plotInjections = turn.plotInjections ?? []
+    const plotDecisions = turn.plotDecisions ?? []
     const supplementalMessages: SessionTimelineMessage[] = []
 
-    if (plotInjections.length) {
+    if (plotDecisions.length) {
       supplementalMessages.push({
-        id: `history-plot-injection-${turn.turnId}`,
+        id: `history-plot-decision-${turn.turnId}`,
         turnId: turn.turnId,
         timelineGroupId,
         timelineAnchorTurnId: turn.turnId,
         timelineGroupOrder: 0,
         seqInTurn: 2,
-        role: SESSION_TIMELINE_ROLE.PLOT_INJECTION,
-        content: plotInjections.map((injection) => injection.directive).join('\n\n'),
-        plotInjections,
+        role: SESSION_TIMELINE_ROLE.PLOT_DECISION,
+        content: plotDecisions.map(plotDecisionTimelineContent).join('\n\n'),
+        plotDecisions,
         createdAt: outcomeCreatedAt,
-        speaker: plotInjectionSpeaker(),
+        speaker: plotDecisionSpeaker(),
         status: SESSION_MESSAGE_STATUS.DONE,
         canCopy: false,
         canRetry: false,

@@ -681,23 +681,91 @@ def test_rp_module_config_inheritance_validation_and_history_page(
                 "directive": "让远处的钟声打断当前对话。",
             },
         ]
+        assert [
+            {
+                "status": item["decisionStatus"],
+                "source": item["sourceKind"],
+                "title": item["eventTitle"],
+                "directive": item["directive"],
+                "reason": item["reason"],
+                "error": item["errorMessage"],
+            }
+            for item in turn_one["plotDecisions"]
+        ] == [
+            {
+                "status": "triggered",
+                "source": "outline",
+                "title": "封印异动",
+                "directive": "描写祭坛封印出现第一次明确异动。",
+                "reason": "",
+                "error": "",
+            },
+            {
+                "status": "triggered",
+                "source": "pool",
+                "title": "林间钟声",
+                "directive": "让远处的钟声打断当前对话。",
+                "reason": "",
+                "error": "",
+            },
+        ]
+        assert turn_one["plotDecisions"][0]["sceneTime"] == {
+            "year": 1,
+            "month": 1,
+            "day": 1,
+            "hour": 8,
+            "minute": 0,
+        }
         turn_two = next(
             turn for turn in history_page.json()["turns"] if turn["turnId"] == 2
         )
         assert turn_two["plotInjections"] == []
+        assert [
+            {
+                "status": item["decisionStatus"],
+                "title": item["eventTitle"],
+                "directive": item["directive"],
+                "reason": item["reason"],
+                "errorCode": item["errorCode"],
+                "errorMessage": item["errorMessage"],
+            }
+            for item in turn_two["plotDecisions"]
+        ] == [
+            {
+                "status": "error",
+                "title": "裁定失败事件",
+                "directive": None,
+                "reason": "",
+                "errorCode": "JUDGE_UNAVAILABLE",
+                "errorMessage": "judge unavailable",
+            },
+            {
+                "status": "deferred",
+                "title": "暂缓事件",
+                "directive": None,
+                "reason": "当前不适合",
+                "errorCode": "",
+                "errorMessage": "",
+            },
+        ]
         turn_three = next(
             turn for turn in history_page.json()["turns"] if turn["turnId"] == 3
         )
         assert turn_three["plotInjections"] == []
+        assert turn_three["plotDecisions"][0]["decisionStatus"] == "triggered"
+        assert turn_three["plotDecisions"][0]["eventTitle"] == "缺少公开指令"
+        assert turn_three["plotDecisions"][0]["directive"] is None
 
         history = client.get("/play-api/v1/sessions/s_forest001/history")
         assert history.status_code == 200
         assert history.json()[0]["outcome"]["outcomeCode"] == "success_with_cost"
         assert history.json()[0]["plotInjections"] == turn_one["plotInjections"]
+        assert history.json()[0]["plotDecisions"] == turn_one["plotDecisions"]
 
         turn = client.get("/play-api/v1/sessions/s_forest001/turns/1")
         assert turn.status_code == 200
         assert turn.json()["plotInjections"] == turn_one["plotInjections"]
+        assert turn.json()["plotDecisions"] == turn_one["plotDecisions"]
         assert set(turn.json()["plotInjections"][0]) == {"eventTitle", "directive"}
 
 

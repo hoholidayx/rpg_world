@@ -1,6 +1,6 @@
 import { AlertCircle, ChevronDown, Copy, GitBranch, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Trash2, Volume2, Waypoints } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { HistoryPage } from '@/types/session'
+import type { HistoryPage, PlotTurnDecision } from '@/types/session'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
 import type { NarrativeOutcomeCode } from '@/types/narrativeOutcome'
 import { cn } from '@/lib/utils/cn'
@@ -240,7 +240,7 @@ function MessageBubble({
     user: 'border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-100 dark:shadow-violet-950/30',
     assistant: 'border-slate-200 bg-white text-slate-950 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:shadow-black/25',
     tool: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200',
-    'plot-injection': 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200',
+    'plot-decision': 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200',
     outcome: 'border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200',
     system: 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300',
     thinking: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200',
@@ -382,8 +382,8 @@ function TimelineMessage({
   if (message.role === SESSION_TIMELINE_ROLE.OUTCOME && message.outcome) {
     return <NarrativeOutcomeCard message={message} />
   }
-  if (message.role === SESSION_TIMELINE_ROLE.PLOT_INJECTION && message.plotInjections?.length) {
-    return <PlotInjectionCard message={message} />
+  if (message.role === SESSION_TIMELINE_ROLE.PLOT_DECISION && message.plotDecisions?.length) {
+    return <PlotDecisionCard message={message} />
   }
   const isUser = message.role === SESSION_TIMELINE_ROLE.USER
 
@@ -484,31 +484,89 @@ function NarrativeOutcomeCard({ message }: { message: SessionTimelineMessage }) 
   )
 }
 
-function PlotInjectionCard({ message }: { message: SessionTimelineMessage }) {
-  const plotInjections = message.plotInjections!
+const PLOT_DECISION_TONE: Record<PlotTurnDecision['decisionStatus'], string> = {
+  triggered: 'border-sky-300 bg-sky-50 text-sky-900 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-100',
+  deferred: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100',
+  error: 'border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100',
+}
+
+const PLOT_DECISION_STATUS_LABEL: Record<PlotTurnDecision['decisionStatus'], string> = {
+  triggered: '已注入本轮',
+  deferred: '本轮未注入',
+  error: '调度未完成',
+}
+
+function plotDecisionSourceLabel(decision: PlotTurnDecision) {
+  return decision.sourceKind === 'outline' ? '剧情大纲' : '事件池'
+}
+
+function plotDecisionSceneTime(value: PlotTurnDecision['sceneTime']) {
+  if (!value) return '无 SceneTime'
+  const minute = value.minute ? ` ${value.minute} 分` : ''
+  return `${value.year} 年 ${value.month} 月 ${value.day} 日 ${value.hour} 时${minute}`
+}
+
+function PlotDecisionCard({ message }: { message: SessionTimelineMessage }) {
+  const plotDecisions = message.plotDecisions!
   return (
     <article
       data-turn-index={message.turnId}
-      data-plot-injection-count={plotInjections.length}
-      className="mx-auto max-w-2xl rounded-lg border border-sky-300 bg-sky-50 px-4 py-3 text-sky-900 shadow-sm dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-100"
+      data-plot-decision-count={plotDecisions.length}
+      className="mx-auto max-w-2xl space-y-3"
     >
-      <div className="flex items-center gap-2 text-sm font-black">
-        <Waypoints size={16} />
-        剧情注入 · 已注入本轮
-      </div>
-      <div className="mt-3 space-y-3">
-        {plotInjections.map((injection, index) => (
-          <section
-            key={`${injection.eventTitle}-${index}`}
-            className="rounded-lg border border-sky-200/80 bg-white/70 px-3 py-2.5 dark:border-sky-500/20 dark:bg-slate-950/25"
-          >
-            <h3 className="text-sm font-black [overflow-wrap:anywhere]">{injection.eventTitle}</h3>
-            <p className="mt-1.5 whitespace-pre-wrap text-sm font-semibold leading-6 text-sky-800 [overflow-wrap:anywhere] dark:text-sky-100">
-              {injection.directive}
-            </p>
-          </section>
-        ))}
-      </div>
+      {plotDecisions.map((decision) => (
+        <section
+          key={decision.id}
+          data-plot-decision-status={decision.decisionStatus}
+          className={cn('rounded-lg border px-4 py-3 shadow-sm', PLOT_DECISION_TONE[decision.decisionStatus])}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-2 text-sm font-black">
+              <Waypoints size={16} />
+              剧情调度裁定 · {PLOT_DECISION_STATUS_LABEL[decision.decisionStatus]}
+            </span>
+            <span className="rounded-full bg-white/70 px-2.5 py-1 text-xs font-black dark:bg-slate-950/30">
+              {decision.selectionOrigin === 'manual' ? '手动标记' : '自动调度'} · {plotDecisionSourceLabel(decision)}
+            </span>
+          </div>
+          <div className="mt-3 rounded-lg border border-current/15 bg-white/60 px-3 py-2.5 dark:bg-slate-950/20">
+            <h3 className="text-sm font-black [overflow-wrap:anywhere]">
+              {decision.eventTitle ?? `事件 #${decision.eventId}`}
+            </h3>
+            {decision.decisionStatus === 'triggered' ? (
+              <>
+                <p className="mt-2 text-xs font-black opacity-70">实际注入内容</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm font-semibold leading-6 [overflow-wrap:anywhere]">
+                  {decision.directive ?? '注入内容记录缺失。'}
+                </p>
+                {decision.reason ? (
+                  <p className="mt-2 text-xs font-bold leading-5 opacity-75 [overflow-wrap:anywhere]">
+                    裁定说明 · {decision.reason}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="mt-1.5 text-sm font-semibold leading-6 [overflow-wrap:anywhere]">
+                {decision.decisionStatus === 'error'
+                  ? decision.errorMessage || decision.reason || '调度器未能完成本次判断。'
+                  : decision.reason || '当前不适宜注入。'}
+              </p>
+            )}
+          </div>
+          <details className="mt-3 rounded-lg border border-current/15 bg-white/45 dark:bg-slate-950/15">
+            <summary className="cursor-pointer px-3 py-2 text-xs font-black">查看裁定详情</summary>
+            <dl className="grid gap-x-4 gap-y-2 border-t border-current/15 px-3 py-3 text-xs font-semibold sm:grid-cols-2">
+              <div><dt className="opacity-65">决策 ID</dt><dd className="mt-0.5">#{decision.id}</dd></div>
+              <div><dt className="opacity-65">SceneTime</dt><dd className="mt-0.5">{plotDecisionSceneTime(decision.sceneTime)}</dd></div>
+              <div><dt className="opacity-65">来源</dt><dd className="mt-0.5">{plotDecisionSourceLabel(decision)} #{decision.sourceId}</dd></div>
+              <div><dt className="opacity-65">事件 / 容器</dt><dd className="mt-0.5">#{decision.eventId} / #{decision.containerId}</dd></div>
+              <div><dt className="opacity-65">调度方式</dt><dd className="mt-0.5">{decision.dispatchMode === 'forced' ? '强制' : '软约束'}</dd></div>
+              {decision.reason ? <div className="sm:col-span-2"><dt className="opacity-65">裁定理由</dt><dd className="mt-0.5 whitespace-pre-wrap [overflow-wrap:anywhere]">{decision.reason}</dd></div> : null}
+              {decision.errorCode ? <div><dt className="opacity-65">错误代码</dt><dd className="mt-0.5 [overflow-wrap:anywhere]">{decision.errorCode}</dd></div> : null}
+            </dl>
+          </details>
+        </section>
+      ))}
     </article>
   )
 }

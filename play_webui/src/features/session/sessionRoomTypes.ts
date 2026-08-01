@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { InputMode } from '@/types/command'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
-import { HISTORY_MESSAGE_ROLE, type PlotInjection } from '@/types/session'
+import { HISTORY_MESSAGE_ROLE, type PlotTurnDecision } from '@/types/session'
 import type { NarrativeOutcome } from '@/types/narrativeOutcome'
 
 export type SessionInputMode = InputMode
@@ -63,7 +63,7 @@ export const SESSION_HISTORY_MESSAGES = {
 export const SESSION_TIMELINE_ROLE = {
   ...HISTORY_MESSAGE_ROLE,
   THINKING: 'thinking',
-  PLOT_INJECTION: 'plot-injection',
+  PLOT_DECISION: 'plot-decision',
   OUTCOME: 'outcome',
   ERROR: 'error',
 } as const
@@ -92,7 +92,7 @@ export type SessionTimelineMessage = {
   content: string
   usage?: ContextUsageSnapshot | null
   outcome?: NarrativeOutcome
-  plotInjections?: PlotInjection[]
+  plotDecisions?: PlotTurnDecision[]
   metadata?: Record<string, unknown>
   createdAt?: string | null
   speaker: SessionSpeaker

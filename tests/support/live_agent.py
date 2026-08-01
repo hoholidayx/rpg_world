@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import time
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
 
 from llm_client.provider import RemoteLLMProvider
+from llm_client.types import LLMResponse
 
 if TYPE_CHECKING:
     from rpg_core.agent.agent import RPGGameAgent
@@ -20,13 +22,20 @@ DEMO_SESSION_ID = "s_academy01"
 DEMO_PLAYER_CHARACTER_NAME = "Alice"
 
 
-@dataclass(frozen=True)
+@dataclass
 class RecordedLiveCall:
     """One real Provider chat call captured at the process boundary."""
 
     biz_key: str
     messages: list[dict[str, object]]
     tools: list[dict[str, object]] | None
+    transport: str = "chat"
+    provider_key: str = ""
+    configured_model: str = ""
+    response: dict[str, object] | None = None
+    duration_ms: float = 0.0
+    error_type: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,23 +63,110 @@ class ToolInvocation:
 def install_live_call_recorder(
     monkeypatch,
 ) -> list[RecordedLiveCall]:
-    """Record real remote calls without changing their messages or schemas."""
+    """Record real remote calls without changing their messages or schemas.
+
+    Only the observable Provider contract is captured.  Authentication
+    headers and private reasoning content never pass through this facade and
+    therefore cannot enter the recording.
+    """
 
     calls: list[RecordedLiveCall] = []
     original_chat = RemoteLLMProvider.chat
+    original_chat_stream = RemoteLLMProvider.chat_stream
 
     async def recorded_chat(self, messages, tools=None):  # noqa: ANN001, ANN202
-        calls.append(
-            RecordedLiveCall(
-                biz_key=str(self.biz_key),
-                messages=deepcopy(messages),
-                tools=deepcopy(tools),
-            )
+        call = RecordedLiveCall(
+            biz_key=str(self.biz_key),
+            messages=strip_private_reasoning(deepcopy(messages)),
+            tools=deepcopy(tools),
+            provider_key=str(self.provider_key),
+            configured_model=str(self.get_default_model()),
         )
-        return await original_chat(self, messages, tools)
+        calls.append(call)
+        started = time.perf_counter()
+        try:
+            result = await original_chat(self, messages, tools)
+        except Exception as exc:
+            call.error_type = type(exc).__name__
+            call.error_message = str(exc)
+            raise
+        finally:
+            call.duration_ms = (time.perf_counter() - started) * 1000
+        call.response = _recorded_response(result)
+        return result
+
+    async def recorded_chat_stream(  # noqa: ANN001, ANN202
+        self,
+        messages,
+        tools=None,
+    ):
+        call = RecordedLiveCall(
+            biz_key=str(self.biz_key),
+            messages=strip_private_reasoning(deepcopy(messages)),
+            tools=deepcopy(tools),
+            transport="chat_stream",
+            provider_key=str(self.provider_key),
+            configured_model=str(self.get_default_model()),
+        )
+        calls.append(call)
+        started = time.perf_counter()
+        chunks: list[dict[str, object]] = []
+        try:
+            async for chunk in original_chat_stream(self, messages, tools):
+                chunks.append({
+                    "content": str(chunk.content or ""),
+                    "toolCalls": deepcopy(chunk.tool_calls),
+                    "finishReason": chunk.finish_reason,
+                    "usage": asdict(chunk.usage) if chunk.usage is not None else None,
+                    "model": chunk.model,
+                    "requestId": chunk.request_id,
+                    "created": chunk.created,
+                })
+                yield chunk
+        except Exception as exc:
+            call.error_type = type(exc).__name__
+            call.error_message = str(exc)
+            raise
+        finally:
+            call.duration_ms = (time.perf_counter() - started) * 1000
+            call.response = {"chunks": chunks}
 
     monkeypatch.setattr(RemoteLLMProvider, "chat", recorded_chat)
+    monkeypatch.setattr(
+        RemoteLLMProvider,
+        "chat_stream",
+        recorded_chat_stream,
+    )
     return calls
+
+
+def _recorded_response(result: LLMResponse) -> dict[str, object]:
+    return {
+        "content": str(result.content or ""),
+        "toolCalls": deepcopy(result.tool_calls),
+        "finishReason": result.finish_reason,
+        "usage": asdict(result.usage) if result.usage is not None else None,
+        "model": result.model,
+        "requestId": result.request_id,
+        "created": result.created,
+    }
+
+
+def strip_private_reasoning(value):  # noqa: ANN001, ANN201
+    """Remove Provider reasoning text while preserving observable messages."""
+
+    if isinstance(value, dict):
+        return {
+            key: strip_private_reasoning(item)
+            for key, item in value.items()
+            if str(key).replace("_", "").replace("-", "").casefold()
+            not in {"reasoningcontent", "thinkingcontent"}
+        }
+    if isinstance(value, list):
+        return [strip_private_reasoning(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(strip_private_reasoning(item) for item in value)
+    return value
 
 
 def main_tool_invocations(
@@ -225,4 +321,5 @@ __all__ = [
     "status_record_result",
     "status_snapshot",
     "status_tool_records",
+    "strip_private_reasoning",
 ]

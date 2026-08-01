@@ -1,5 +1,6 @@
 import type { NarrativeOutcome } from './narrativeOutcome'
 import type { InputMode } from './command'
+import type { PlotDispatchMode, SceneTimeValue } from './plotScheduling'
 
 export const PLAYER_CHARACTER_STATUS = {
   BOUND: 'bound',
@@ -94,7 +95,25 @@ export type Turn = {
   turnId: number
   messages: HistoryMessage[]
   outcome?: NarrativeOutcome | null
+  plotDecisions?: PlotTurnDecision[]
   plotInjections?: PlotInjection[]
+}
+
+export type PlotTurnDecision = {
+  id: number
+  sourceKind: 'outline' | 'pool'
+  sourceId: number
+  eventId: number
+  containerId: number
+  decisionStatus: 'triggered' | 'deferred' | 'error'
+  dispatchMode: PlotDispatchMode
+  selectionOrigin: 'scheduler' | 'manual'
+  sceneTime: SceneTimeValue | null
+  eventTitle: string | null
+  directive: string | null
+  reason: string
+  errorCode: string
+  errorMessage: string
 }
 
 export type PlotInjection = {
