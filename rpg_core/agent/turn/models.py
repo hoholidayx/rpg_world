@@ -62,21 +62,31 @@ class TurnExecutionPolicy:
     """Mode-derived switches applied consistently across the whole turn."""
 
     run_status_preflight: bool
+    run_status_preflight_state_updates: bool
     expose_state_tools: bool
     expose_rp_modules: bool
     expose_plot_sandbox_tools: bool
 
     @classmethod
-    def for_mode(cls, mode: TurnMode) -> "TurnExecutionPolicy":
+    def for_mode(
+        cls,
+        mode: TurnMode,
+        *,
+        preflight_state_updates: bool = True,
+    ) -> "TurnExecutionPolicy":
+        if not isinstance(preflight_state_updates, bool):
+            raise TypeError("preflight_state_updates must be a boolean")
         if mode is TurnMode.OOC:
             return cls(
                 run_status_preflight=False,
+                run_status_preflight_state_updates=False,
                 expose_state_tools=False,
                 expose_rp_modules=False,
                 expose_plot_sandbox_tools=True,
             )
         return cls(
             run_status_preflight=True,
+            run_status_preflight_state_updates=preflight_state_updates,
             expose_state_tools=True,
             expose_rp_modules=True,
             expose_plot_sandbox_tools=(mode is TurnMode.GM),

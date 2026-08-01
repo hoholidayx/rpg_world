@@ -277,6 +277,12 @@ class PlotSchedulingPreflightHook:
                 status_manager=turn_scratch.status_manager,
                 scene_tracker=turn_scratch.scene_tracker,
                 adjudication_context=plan.adjudication_context,
+                scene_preflight_staged=(
+                    turn_scratch.status_scratch.scene_changed
+                ),
+                status_preflight_staged_table_ids=(
+                    turn_scratch.status_scratch.normal_status_changed_table_ids
+                ),
             )
             judgment = await self._judge.judge(messages, turn_stats=turn_stats)
             selected = next(

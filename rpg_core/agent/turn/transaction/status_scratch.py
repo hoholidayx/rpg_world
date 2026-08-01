@@ -110,6 +110,20 @@ class StatusDocumentScratch:
             and self._active_scene_id in self._staged_documents
         )
 
+    @property
+    def normal_status_changed(self) -> bool:
+        """Whether any normal status document differs from the turn baseline."""
+        return bool(self.normal_status_changed_table_ids)
+
+    @property
+    def normal_status_changed_table_ids(self) -> tuple[int, ...]:
+        """Normal table IDs whose working documents differ from the baseline."""
+        return tuple(
+            change.table_id
+            for change in self.staged_changes
+            if change.status_kind == STATUS_KIND_NORMAL
+        )
+
     def create_checkpoint(self) -> dict[int, StatusTableDocument]:
         """Snapshot staged documents for an in-memory tool batch rollback."""
         return dict(self._staged_documents)

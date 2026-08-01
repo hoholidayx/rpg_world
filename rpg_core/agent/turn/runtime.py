@@ -27,6 +27,7 @@ class TurnRuntime:
     scratch: "TurnScratch"
     stats: "TurnStats"
     provider: "LLMProvider"
+    pre_turn_scene_context: str | None = None
     rp_module_runtime: "RPModuleTurnRuntime | None" = None
     preflight_result: "StatusSubAgentResult | None" = None
     preflight_outcome: "StatusSubAgentPreflightOutcome | None" = None

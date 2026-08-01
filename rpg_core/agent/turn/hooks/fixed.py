@@ -9,6 +9,7 @@ from loguru import logger
 
 from llm_client.client import LLMProviderContractError
 from rpg_core.agent.runtime.resources import AgentContextResources
+from rpg_core.agent.tools.state import StateToolSet
 from rpg_core.agent.sub_agents.status.models import (
     OutcomeDecision,
     StatusSubAgentPreflightOutcome,
@@ -62,13 +63,20 @@ class StatusPreflightHook:
         player_character: "TurnPlayerCharacterSnapshot | None" = None,
         adjudication_context: "AdjudicationContextSnapshot | None" = None,
         message_mode: TurnMode = TurnMode.NEUTRAL,
+        run_state_updates: bool = True,
     ) -> StatusSubAgentResult | None:
+        if not isinstance(run_state_updates, bool):
+            raise TypeError("run_state_updates must be a boolean")
         sub_agent = self._status_sub_agent()
         if sub_agent is None:
             return None
-        state_tool_set = self._tool_service.state_tools(
-            turn_scratch.scene_tracker,
-            turn_scratch.status_manager,
+        state_tool_set = (
+            self._tool_service.state_tools(
+                turn_scratch.scene_tracker,
+                turn_scratch.status_manager,
+            )
+            if run_state_updates
+            else StateToolSet()
         )
         tools = [
             *self._tool_service.narrative_outcome_tools(

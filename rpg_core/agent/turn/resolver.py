@@ -56,11 +56,15 @@ class TurnSnapshotResolver:
         data: TurnSnapshotDataPort,
         composer: SessionComposerSnapshotReader,
         role_service: SessionRoleSnapshotReader,
+        preflight_state_updates: bool = True,
     ) -> None:
+        if not isinstance(preflight_state_updates, bool):
+            raise TypeError("preflight_state_updates must be a boolean")
         self._session_id = str(session_id)
         self._data = data
         self._composer = composer
         self._role_service = role_service
+        self._preflight_state_updates = preflight_state_updates
 
     def resolve(
         self,
@@ -68,7 +72,10 @@ class TurnSnapshotResolver:
         *,
         require_player_character: bool = False,
     ) -> TurnExecutionSnapshot:
-        policy = TurnExecutionPolicy.for_mode(request.mode)
+        policy = TurnExecutionPolicy.for_mode(
+            request.mode,
+            preflight_state_updates=self._preflight_state_updates,
+        )
         session = self._data.get_session(self._session_id)
         if session is None:
             if request.narrative_style_id is not None:

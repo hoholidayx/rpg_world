@@ -116,6 +116,7 @@ class AgentContextService:
             data=self._turn_snapshot_data,
             composer=self._session_composer,
             role_service=self._role_snapshot_reader,
+            preflight_state_updates=settings.status_preflight_state_updates,
         ).resolve(
             request,
             require_player_character=require_player_character,
@@ -188,6 +189,7 @@ class AgentContextService:
         user_input: str = "",
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
+        status_preflight_staged_table_ids: tuple[int, ...] = (),
         persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
         story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
     ) -> "RPGContext":
@@ -201,6 +203,9 @@ class AgentContextService:
             include_staged_turn_runtime=True,
             rp_module_runtime=rp_module_runtime,
             turn_execution=turn_execution,
+            status_preflight_staged_table_ids=(
+                status_preflight_staged_table_ids
+            ),
             persistent_memory_snapshot=persistent_memory_snapshot,
             story_memory_snapshot=story_memory_snapshot,
         )
@@ -216,6 +221,8 @@ class AgentContextService:
         status_manager: "StatusManager | None",
         scene_tracker: "SceneTracker | None",
         adjudication_context: AdjudicationContextSnapshot,
+        scene_preflight_staged: bool = False,
+        status_preflight_staged_table_ids: tuple[int, ...] = (),
     ) -> list[Message]:
         """Build one soft-Plot request from the shared adjudication prefix."""
         messages = adjudication_context.to_messages()
@@ -223,10 +230,17 @@ class AgentContextService:
 
         state_sections: list[str] = []
         if scene_tracker is not None:
-            state_sections.append(scene_tracker.get_context())
+            state_sections.append(
+                scene_tracker.get_context(
+                    preflight_staged=scene_preflight_staged
+                )
+            )
         if status_manager is not None:
             status_text = render_status_tables_context(
-                status_manager.list_context_tables()
+                status_manager.list_context_tables(),
+                preflight_staged_table_ids=(
+                    status_preflight_staged_table_ids
+                ),
             )
             if status_text:
                 state_sections.append(status_text)
@@ -279,6 +293,7 @@ class AgentContextService:
         include_staged_turn_runtime: bool = False,
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
+        status_preflight_staged_table_ids: tuple[int, ...] = (),
         persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
         story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
     ) -> "RPGContext":
@@ -325,6 +340,9 @@ class AgentContextService:
                 turn_execution=turn_execution,
             ),
             status_tool_names=status_tool_names,
+            status_preflight_staged_table_ids=(
+                status_preflight_staged_table_ids
+            ),
             persistent_memory_snapshot=persistent_memory_snapshot,
             story_memory_snapshot=story_memory_snapshot,
         )

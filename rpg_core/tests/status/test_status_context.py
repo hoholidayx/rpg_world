@@ -79,7 +79,8 @@ def test_status_context_separates_regular_and_character_tables() -> None:
     assert "## 状态表" in rendered
     assert "status_table_set_values" in rendered
     assert "status_table_edit_fields" in rendered
-    assert "本轮回复前的普通状态表快照" in rendered
+    assert "普通状态起始快照" in rendered
+    assert "尚无普通状态变化根据当前用户输入暂存" in rendered
     assert "遵循核心状态同步协议" in rendered
     assert "不能创建、删除或重命名整张表" in rendered
     assert "Key 结构" in rendered
@@ -100,6 +101,20 @@ def test_status_context_separates_regular_and_character_tables() -> None:
     assert "story_copy" not in rendered
     assert "source_story_status_table_id" not in rendered
     assert "characterId" not in rendered
+
+
+def test_status_context_labels_preflight_staged_working_snapshot() -> None:
+    rendered = render_status_tables_context(
+        [_table(8, "本轮工作状态")],
+        available_tool_names=_STATUS_WRITE_TOOLS,
+        preflight_staged_table_ids=(8,),
+    )
+
+    assert "状态预处理结合当前用户输入后形成" in rendered
+    assert "1 张表已有变化暂存在本 turn 事务中" in rendered
+    assert "当前值是本轮权威工作值，不得重复写相同值" in rendered
+    assert "仅核验明确遗漏的其它字段" in rendered
+    assert "尚无普通状态变化" not in rendered
 
 
 def test_status_context_excludes_unresolved_character_table(caplog) -> None:

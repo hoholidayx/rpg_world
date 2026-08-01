@@ -1,7 +1,13 @@
 {% if status_tables %}
 {% set value_writable_tables = status_tables | selectattr('value_writable') | list %}
 {% set structure_writable_tables = status_tables | selectattr('structure_writable') | list %}
-以下是本轮回复前的普通状态表快照，遵循核心状态同步协议。
+{% set preflight_staged_tables = status_tables | selectattr('preflight_staged') | list %}
+{% if preflight_staged_tables %}
+以下是状态预处理结合当前用户输入后形成的普通状态工作快照；{{ preflight_staged_tables | length }} 张表已有变化暂存在本 turn 事务中。每张表的阶段在表内单独标明，后续工具结果优先于本快照。
+{% else %}
+以下是当前 turn 状态处理开始时的普通状态起始快照；尚无普通状态变化根据当前用户输入暂存。请结合当前输入核验相关字段，后续工具结果优先于本快照。
+{% endif %}
+该快照遵循核心状态同步协议。
 {% if value_writable_tables %}本轮实际提供 status_table_set_values，可用对应的运行时表 ID 修改已有字段的 value。{% endif %}
 {% if structure_writable_tables %}本轮实际提供 status_table_edit_fields，可在已有普通表内新增、重命名或删除字段；不能创建、删除或重命名整张表。新字段只用于真实、持久且无法由现有字段表达的当前事实。{% endif %}
 {% if not value_writable_tables and not structure_writable_tables %}本轮未提供普通状态写入工具，本段仅供读取；不得假设可以修改 value 或字段结构。{% endif %}
@@ -17,6 +23,8 @@ runtimeKeyLocked 只保护字段结构：锁定字段不能重命名或删除，
 ### {{ table.name }}
 
 运行时表 ID：{{ table.id }}
+
+本表阶段：{% if table.preflight_staged %}状态预处理已在本表暂存变化；当前值是本轮权威工作值，不得重复写相同值；仅核验明确遗漏的其它字段。{% else %}起始值；前置状态处理未在本表暂存变化，仍需结合当前输入核验相关字段。{% endif %}
 
 用途与更新规则：{{ table.context_description }}
 
@@ -41,6 +49,8 @@ runtimeKeyLocked 只保护字段结构：锁定字段不能重命名或删除，
 #### {{ table.name }}
 
 运行时表 ID：{{ table.id }}
+
+本表阶段：{% if table.preflight_staged %}状态预处理已在本表暂存变化；当前值是本轮权威工作值，不得重复写相同值；仅核验明确遗漏的其它字段。{% else %}起始值；前置状态处理未在本表暂存变化，仍需结合当前输入核验相关字段。{% endif %}
 
 用途与更新规则：{{ table.context_description }}
 

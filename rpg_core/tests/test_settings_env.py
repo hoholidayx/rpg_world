@@ -628,3 +628,53 @@ def test_summary_memory_settings_reject_invalid_values(
 
     with pytest.raises(ValueError, match=message):
         settings_module.Settings()
+
+
+def test_status_preflight_state_updates_defaults_true_and_reads_false(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg)
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    assert settings_module.Settings().status_preflight_state_updates is True
+
+    _write_settings(
+        cfg,
+        agent_extra=(
+            "    status_sub_agent:\n"
+            "      preflight_state_updates: false\n"
+            "      history_rounds: 5\n"
+        ),
+    )
+    configured = settings_module.Settings()
+    assert configured.status_preflight_state_updates is False
+    assert configured.status_sub_agent_settings.preflight_state_updates is False
+
+
+@pytest.mark.parametrize("rendered", ["0", "'false'", "null", "[]"])
+def test_status_preflight_state_updates_rejects_non_boolean(
+    tmp_path: Path,
+    monkeypatch,
+    rendered: str,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(
+        cfg,
+        agent_extra=(
+            "    status_sub_agent:\n"
+            f"      preflight_state_updates: {rendered}\n"
+        ),
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    with pytest.raises(
+        ValueError,
+        match="status_sub_agent.preflight_state_updates must be a boolean",
+    ):
+        settings_module.Settings()

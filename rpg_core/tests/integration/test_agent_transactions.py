@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+import rpg_core.agent.runtime.context as context_module
 from commons.scene_time import SceneTime
 from llm_client.client import LLMProviderContractError
 from llm_client.types import ProviderChunk
@@ -29,6 +30,36 @@ from tests.support.scripted_llm import (
 )
 
 pytestmark = pytest.mark.integration
+
+
+class _ContextSettingsProxy:
+    """Override the state-update owner while preserving all other settings."""
+
+    def __init__(self, source, *, preflight_state_updates: bool) -> None:  # noqa: ANN001
+        self._source = source
+        self.status_preflight_state_updates = preflight_state_updates
+
+    def __getattr__(self, name: str):  # noqa: ANN204
+        return getattr(self._source, name)
+
+
+@pytest.fixture(autouse=True)
+def _use_status_preflight_variant(monkeypatch) -> None:  # noqa: ANN001
+    """Keep legacy transaction cases on their explicit preflight variant.
+
+    The production base setting can select the main-Agent A/B branch without
+    silently changing what the existing StatusSubAgent transaction cases test.
+    Individual main-Agent variant cases override this proxy with ``false``.
+    """
+
+    monkeypatch.setattr(
+        context_module,
+        "settings",
+        _ContextSettingsProxy(
+            context_module.settings,
+            preflight_state_updates=True,
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -338,6 +369,185 @@ async def test_status_scratch_and_messages_commit_together_with_real_sqlite(
 
 
 @pytest.mark.asyncio
+async def test_main_agent_state_update_variant_skips_status_route_and_commits_tools(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        context_module,
+        "settings",
+        _ContextSettingsProxy(
+            context_module.settings,
+            preflight_state_updates=False,
+        ),
+    )
+    status_manager = integration_status_agent._lifecycle.resources.status_manager
+    table_id = int(status_manager.list_context_tables()[0]["id"])
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        response(
+            "",
+            model="config-model",
+            tool_calls=[
+                tool_call(
+                    "scene_attr",
+                    '{"key":"位置","value":"主模型更新现场"}',
+                    call_id="call_scene",
+                ),
+                tool_call(
+                    "status_table_set_values",
+                    json.dumps({
+                        "table_id": table_id,
+                        "updates": [{"key": "线索", "value": "主模型已更新"}],
+                    }, ensure_ascii=False),
+                    call_id="call_status",
+                ),
+            ],
+        ),
+        response("<rp-narration>状态已经同步。</rp-narration>", model="config-model"),
+    )
+
+    reply = await integration_status_agent.send(
+        "已确认事实：我已经移动到新现场，并把线索记录更新完成。"
+    )
+
+    assert reply.status_sub_agent_records is None
+    assert scripted_llm_manager.status.calls == []
+    assert scripted_llm_manager.plot_scheduler.calls == []
+    assert len(provider.calls) == 2
+    first_schema_names = {
+        schema["function"]["name"]
+        for schema in provider.calls[0].tools or []
+    }
+    assert {"scene_attr", "status_table_set_values"} <= first_schema_names
+    first_context = "\n".join(
+        str(message.get("content", ""))
+        for message in provider.calls[0].messages
+    )
+    assert "Scene 起始快照" in first_context
+    assert "本表阶段：起始值" in first_context
+    second_context = "\n".join(
+        str(message.get("content", ""))
+        for message in provider.calls[1].messages
+    )
+    assert "场景属性已设置：位置 = 主模型更新现场" in second_context
+    assert "主模型已更新" in second_context
+
+    scene_attrs = SceneStatusService(
+        integration_data_gateway.status
+    ).get_attrs("integration_status")
+    assert scene_attrs is not None
+    assert scene_attrs["位置"] == "主模型更新现场"
+    persisted = integration_data_gateway.status.get_table_for_session(
+        "integration_status",
+        table_id,
+    )
+    assert persisted.document.row_for_key("线索").value == "主模型已更新"
+    rows = integration_data_gateway.messages.list("integration_status")
+    assert "集成测试大厅" in rows[0].content
+    assert "主模型更新现场" not in rows[0].content
+
+
+@pytest.mark.asyncio
+async def test_main_state_update_variant_keeps_plot_injection_before_main(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        context_module,
+        "settings",
+        _ContextSettingsProxy(
+            context_module.settings,
+            preflight_state_updates=False,
+        ),
+    )
+    session = integration_data_gateway.sessions.get_session("integration_status")
+    assert session is not None
+    management = PlotScheduleManagementService(
+        integration_data_gateway.plot_scheduling
+    )
+    pool = management.create_pool(
+        CreatePlotPoolCommand(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            name="主模型状态 A/B Plot 池",
+            selection_mode=models.PLOT_POOL_SEQUENTIAL,
+            selection_weight=1,
+        )
+    )
+    event = management.create_event(
+        CreatePlotEventCommand(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            pool_id=pool.id,
+            title="前置注入的敲门声",
+            directive="在主模型处理状态前，让门外响起三声敲门声。",
+            dispatch_mode=models.PLOT_DISPATCH_FORCED,
+            scheduled_time=SceneTime(2, 3, 4, 5),
+        )
+    )
+    old_opportunity = (
+        integration_data_gateway.plot_scheduling.replace_scene_opportunity(
+            session.id,
+            expected_version=None,
+            source_turn_id=9,
+        )
+    )
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        response(
+            "",
+            model="config-model",
+            tool_calls=[tool_call(
+                "scene_attr",
+                '{"key":"位置","value":"敲门后的门厅"}',
+            )],
+        ),
+        response("<rp-narration>门外响起三声敲门声。</rp-narration>", model="config-model"),
+    )
+
+    reply = await integration_status_agent.send(
+        "已确认事实：我随后走到门厅。"
+    )
+
+    assert reply.committed_turn_id == 1
+    assert scripted_llm_manager.status.calls == []
+    assert scripted_llm_manager.plot_scheduler.calls == []
+    first_main_input = str(
+        [
+            message
+            for message in provider.calls[0].messages
+            if message.get("role") == "user"
+        ][-1]["content"]
+    )
+    assert "[engine_plot_directive]" in first_main_input
+    assert event.directive in first_main_input
+    decisions = integration_data_gateway.plot_scheduling.list_session_decisions(
+        session.id
+    )
+    assert len(decisions) == 1
+    assert decisions[0].event_id == event.id
+    assert decisions[0].decision_status == models.PLOT_DECISION_TRIGGERED
+    next_opportunity = (
+        integration_data_gateway.plot_scheduling.get_scene_opportunity(
+            session.id
+        )
+    )
+    assert next_opportunity is not None
+    assert next_opportunity.source_turn_id == 1
+    assert next_opportunity.version == old_opportunity.version + 1
+    scene_attrs = SceneStatusService(
+        integration_data_gateway.status
+    ).get_attrs(session.id)
+    assert scene_attrs is not None
+    assert scene_attrs["位置"] == "敲门后的门厅"
+
+
+@pytest.mark.asyncio
 async def test_status_structure_edit_commits_with_messages_in_real_sqlite(
     integration_status_agent,
     integration_data_gateway,
@@ -591,12 +801,15 @@ async def test_status_target_failure_keeps_successful_scene_and_main_turn_runnin
         for message in scripted_llm_manager.main_provider().calls[0].messages
     )
     assert "部分成功现场" in main_context
-    assert SceneTracker.RUNTIME_GUIDANCE in main_context
+    assert SceneTracker.PREFLIGHT_STAGED_GUIDANCE in main_context
+    assert "本表阶段：起始值" in main_context
     main_rows = integration_data_gateway.messages.list("integration_status")
     backup_rows = integration_data_gateway.backup.messages.list("integration_status")
     assert "[scene]" in main_rows[0].content
-    assert "部分成功现场" in main_rows[0].content
-    assert SceneTracker.RUNTIME_GUIDANCE not in main_rows[0].content
+    assert "集成测试大厅" in main_rows[0].content
+    assert "部分成功现场" not in main_rows[0].content
+    assert SceneTracker.PREFLIGHT_STAGED_GUIDANCE not in main_rows[0].content
+    assert SceneTracker.START_SNAPSHOT_GUIDANCE not in main_rows[0].content
     assert backup_rows[0].content == main_rows[0].content
     scene_attrs = SceneStatusService(integration_data_gateway.status).get_attrs("integration_status")
     assert scene_attrs is not None

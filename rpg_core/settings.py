@@ -122,8 +122,9 @@ class SceneSettings:
 
 @dataclass(frozen=True)
 class StatusSubAgentSettings:
-    """Status history-window policy shared by turns and derivation bootstrap."""
+    """Status preflight owner and history policy; bootstrap only uses history."""
 
+    preflight_state_updates: bool = True
     history_rounds: int = 5
 
 
@@ -508,6 +509,11 @@ class Settings(ProfiledYamlSettings):
         raw = self.status_sub_agent_config
         if not isinstance(raw, dict):
             raise ValueError("agent.status_sub_agent must be a mapping")
+        preflight_state_updates = raw.get("preflight_state_updates", True)
+        if not isinstance(preflight_state_updates, bool):
+            raise ValueError(
+                "agent.status_sub_agent.preflight_state_updates must be a boolean"
+            )
         history_rounds = raw.get("history_rounds", 5)
         if (
             isinstance(history_rounds, bool)
@@ -517,7 +523,14 @@ class Settings(ProfiledYamlSettings):
             raise ValueError(
                 "agent.status_sub_agent.history_rounds must be a positive integer"
             )
-        return StatusSubAgentSettings(history_rounds=history_rounds)
+        return StatusSubAgentSettings(
+            preflight_state_updates=preflight_state_updates,
+            history_rounds=history_rounds,
+        )
+
+    @property
+    def status_preflight_state_updates(self) -> bool:
+        return self.status_sub_agent_settings.preflight_state_updates
 
     @property
     def status_history_rounds(self) -> int:

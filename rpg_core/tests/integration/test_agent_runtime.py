@@ -9,6 +9,7 @@ from dataclasses import replace
 
 import pytest
 
+import rpg_core.agent.runtime.context as context_module
 from commons.errors import (
     MainContextWindowThresholdExceededError,
     MessageModeUnavailableError,
@@ -44,6 +45,29 @@ from rpg_memory.types import EpistemicStatus, MemoryKind
 from rpg_memory.story.application import StoryMemoryApplicationService
 
 pytestmark = pytest.mark.integration
+
+
+class _ContextSettingsProxy:
+    """Override the state-update owner while preserving all other settings."""
+
+    status_preflight_state_updates = True
+
+    def __init__(self, source) -> None:  # noqa: ANN001
+        self._source = source
+
+    def __getattr__(self, name: str):  # noqa: ANN204
+        return getattr(self._source, name)
+
+
+@pytest.fixture(autouse=True)
+def _use_status_preflight_variant(monkeypatch) -> None:  # noqa: ANN001
+    """Keep integration cases independent from the production A/B default."""
+
+    monkeypatch.setattr(
+        context_module,
+        "settings",
+        _ContextSettingsProxy(context_module.settings),
+    )
 
 
 def _story_memory(gateway):  # noqa: ANN001, ANN202

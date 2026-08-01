@@ -11,7 +11,7 @@ base:
   # ── Agent 业务行为（不包含 LLM provider / model 选型）───────────────
   agent:
     # 单轮最多允许工具调用次数。
-    max_tool_call_limit: 10
+    max_tool_call_limit: 30
     # 是否把工具调用记录写入最终对话历史。
     include_tool_records: true
     # 是否输出详细调试日志。
@@ -58,6 +58,9 @@ base:
     # 状态子 Agent 开关。
     status_sub_agent:
       enabled: true
+      # true：状态子 Agent 在主模型前预写 Scene/普通状态；false：主模型直接调用状态工具。
+      # Narrative Outcome 预裁定和派生 Session bootstrap 不受此项影响。
+      preflight_state_updates: false
       # 普通 preflight 与派生初始化读取的最近完整可推进世界 turn 数。
       history_rounds: 5
 

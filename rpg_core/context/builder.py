@@ -42,6 +42,7 @@ def _flatten_status_tables(
     status_mgr: StatusManager | None,
     *,
     available_tool_names: tuple[str, ...] = (),
+    preflight_staged_table_ids: tuple[int, ...] = (),
 ) -> list[dict[str, object]]:
     """Return normal status tables for context rendering."""
 
@@ -51,6 +52,7 @@ def _flatten_status_tables(
         return prepare_status_context_tables(
             status_mgr.list_context_tables(),
             available_tool_names=available_tool_names,
+            preflight_staged_table_ids=preflight_staged_table_ids,
         )
     except Exception as exc:
         logger.debug("[RPGContextBuilder] flatten status tables failed: {}", exc)
@@ -201,6 +203,7 @@ class RPGContextBuilder:
         scene_tracker: SceneTracker | None = None,
         rp_module_sections: list[RPModuleRuntimeSection] | None = None,
         status_tool_names: tuple[str, ...] = (),
+        status_preflight_staged_table_ids: tuple[int, ...] = (),
         persistent_memory_snapshot: tuple[PersistentMemoryFact, ...] = (),
         story_memory_snapshot: tuple[StoryMemoryFact, ...] = (),
     ) -> RPGContext:
@@ -213,6 +216,7 @@ class RPGContextBuilder:
             summarized_message_count: 被 ``summary_processed`` 排除的消息数。
             status_mgr: 状态管理器，为 None 时动态层跳过状态表格模块。
             rp_module_sections: 可选 RP module 运行态；静态契约应放在 fixed_layer.sections。
+            status_preflight_staged_table_ids: 本 turn 前置状态处理已暂存变化的普通表 ID。
             persistent_memory_snapshot: 本次 turn/preview 固化的常驻记忆投影。
             story_memory_snapshot: 本次 turn/preview 固化的剧情记忆投影。
         """
@@ -257,6 +261,7 @@ class RPGContextBuilder:
             status_tables = _flatten_status_tables(
                 status_mgr,
                 available_tool_names=status_tool_names,
+                preflight_staged_table_ids=status_preflight_staged_table_ids,
             )
 
         recalled_items: list[str] = []

@@ -48,8 +48,8 @@ README 只保留架构概览；涉及阶段顺序、状态写入边界或失败�
 | `TurnPreprocessor` | 在快照、门禁和事务之前处理斜杠命令与玩家角色 guard |
 | `TurnPlanResolver` | 先解析 RP Module 并执行 message-mode 门禁，再固化 mode/style、玩家角色、Story Prompt、主模型、Plot Schedule、Story/Persistent Memory 与共享裁定 Context 快照 |
 | `TurnRuntimeFactory` | Context 门禁、provider 解析、transaction/scratch、RP runtime、Status 与 Plot preflight |
-| `StatusPreflightHook` | 为 `StatusSubAgent` 绑定本 turn 的 scratch 工具和逐目标 checkpoint 回调 |
-| `PlotSchedulingPreflightHook` | 在状态更新后按 Scene 时间选择大纲/池候选；强制项直接暂存，软约束项隔离调用判断 LLM |
+| `StatusPreflightHook` | 为 `StatusSubAgent` 绑定本 turn 的 Outcome 工具；配置开启时再绑定 scratch 状态工具和逐目标 checkpoint 回调 |
+| `PlotSchedulingPreflightHook` | 固定在 Status hook 后按当时 scratch Scene 选择大纲/池候选；强制项直接暂存，软约束项隔离调用判断 LLM |
 | `TurnPreparation` | 暂存 user message、memory recall、构建主 Context、工具 registry 与 schema |
 | `TurnOrchestrator` | 同步/流式共享的 runner、commit、discard 和 post-commit 模板 |
 | `AgentTurnTransaction` | message、Narrative Outcome、Plot decision、scene/status COW scratch 与短 commit |
@@ -188,6 +188,10 @@ Story、Session 或模型配置在生成中的修改只影响下一 turn，不�
 
 Status preflight 在 user message 正式 stage 之前运行。它读取 `base_history`、当前 scratch state 和原始 `user_input`，因此不会把尚未提交的当前输入误当成已确认历史。
 
+`agent.status_sub_agent.preflight_state_updates` 是进程级 A/B 配置，并在 `TurnExecutionPolicy` 中按 turn 冻结。字段缺失时为兼容旧配置回退 `true`，当前 base 配置显式使用 `false`。设为 `true` 时保持下面的完整状态预写；设为 `false` 时 Status hook 仍可执行 Narrative Outcome 预裁定，但不注册 scene/普通状态工具，Outcome 不可用时不会产生 Status Provider 调用，Outcome 返回无需裁定后也直接跳过 Route/Update。主 Agent 在 `neutral | ic | gm` 中仍获得同一组现有状态工具并直接写 scratch；OOC/命令仍只读。派生 Session bootstrap 始终使用 StatusSubAgent 重建分支状态，不读取这个开关。
+
+Plot hook 不参与这项 A/B，也不移动到主 Agent 之后。关闭状态预写时，它仍在主 Agent 前消费上一轮 Scene 机会，并以 turn 起始 scratch Scene 做本轮自动选择；主 Agent 本轮直接写入造成的 Scene 净变化只会在 commit 时留下供下一轮使用的新机会。Plot selector、Judge、手动注入、directive 和决策账本规则均不变。
+
 ## StatusSubAgent 固定编排
 
 固定顺序是：
@@ -197,6 +201,8 @@ Outcome → 仅当 NOT_REQUIRED 时 Route → scene/逐普通表 Update
 ```
 
 Outcome、Route 和每个 Update 都是独立 LLM 调用，不会在同一个 sub-agent turn 中混合完成。
+
+上述完整顺序只在 `preflight_state_updates=true` 时成立。关闭时缩为 `Outcome（仅 eligibility 开放时）→ 主 Agent`，没有状态 Route 或隔离 Update 调用。
 
 ### 共享裁定 Context、输入与历史窗口
 
@@ -359,9 +365,11 @@ Status preflight 的结果决定主 Agent 能看到什么：
 
 补判第一次成功后，runner 在 turn 内重新投影动态 Context 和 schema：最终 Outcome 指令取代待裁定契约，工具立即消失。底层 sampler 的幂等行为不构成对 LLM 的重复调用权限。
 
-scene/status 工具仍绑定到同一个 turn scratch。主 Agent 可以补做预路由遗漏或目标失败后的确定状态同步；普通表工具允许更新任意可见 normal key 的 value，也可在已有 normal 表内创建、改名或删除字段，默认 scene 工具仍只接受已有 key。该补写是机会性的，不承诺一定修复预处理失败。
+scene/status 工具仍绑定到同一个 turn scratch。`preflight_state_updates=true` 时主 Agent 可以补做预路由遗漏或目标失败后的确定状态同步；关闭时主 Agent 是本轮 Scene/普通状态的唯一 LLM 写入阶段。普通表工具允许更新任意可见 normal key 的 value，也可在已有 normal 表内创建、改名或删除字段，默认 scene 工具仍只接受已有 key。
 
-模型协议要求：只有发生真实、持久、确定的追踪值变化时才写状态；有变化时先在不含 RP 正文的工具调用轮完成同步，最终正文不得新增尚未同步的可追踪确定事实。确认没有变化时允许零状态工具，也不得询问玩家是否需要标记状态。
+模型协议要求：只核验与当前输入和本轮后果相关的字段。Scene 动态提示与普通状态表逐表说明当前内容是 turn 起始值还是 Status 前置已暂存工作值；前置已暂存值不得重复写，尚未同步且真实、持久、确定的变化才在不含 RP 正文的工具调用轮完成同步。最终正文不得新增尚未同步的可追踪确定事实；确认没有变化时允许零状态工具，也不得询问玩家是否需要标记状态。
+
+持久化历史与主请求故意使用不同阶段的 Scene：`TurnRuntimeFactory` 在 Status hook 前捕获纯数据的 pre-turn Scene，`TurnPreparation` 用它 stage user message；主 LLM 当前 user message 使用最新 scratch Scene 和只存在于请求中的阶段提示。这样前置更新不会倒灌进用户消息、伪装成用户行动之前就存在的事实。普通状态表不写进消息历史，只在动态层逐表标记前置暂存状态；后续主工具 transcript 优先于初始动态快照。
 
 ## 状态字段契约与即时更新
 
@@ -547,6 +555,8 @@ Status preflight 的单目标可恢复失败不会自动终止后续即时目标
 | 命令 / 角色 guard / Context 门禁拒绝 | 0 |
 | `ooc` 普通正文 | 主 Agent 1 次 |
 | StatusSubAgent 禁用或本轮无任何相关工具 | 主 Agent 1 次 |
+| `preflight_state_updates=false` 且 Outcome 工具不可用 | 主 Agent 1 次 |
+| `preflight_state_updates=false` 且 Outcome 工具可用 | Outcome 1 次 + 主 Agent 1 次 |
 | Outcome 成功预裁定 | Outcome 1 次 + 主 Agent 1 次 |
 | Outcome 无需裁定或失败，且没有状态工具 | Outcome 1 次 + 主 Agent 1 次 |
 | Outcome 不需要、Route 无目标 | Outcome 1 次 + Route 1 次 + 主 Agent 1 次 |

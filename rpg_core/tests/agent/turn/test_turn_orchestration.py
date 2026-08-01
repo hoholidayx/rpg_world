@@ -108,6 +108,42 @@ def test_turn_snapshot_resolver_freezes_mode_and_style_selection() -> None:
     assert composer.style_calls == [("s1", 7)]
 
 
+def test_turn_snapshot_resolver_freezes_main_agent_state_update_variant() -> None:
+    composer = _Composer()
+    data = _SnapshotData(_Catalog(SimpleNamespace(workspace_id="ws")))
+
+    snapshot = TurnSnapshotResolver(
+        "s1",
+        data=data,
+        composer=composer,
+        role_service=_SessionRoles(),
+        preflight_state_updates=False,
+    ).resolve(TurnRequest.create("行动", mode="ic"))
+
+    assert snapshot.policy.run_status_preflight is True
+    assert snapshot.policy.run_status_preflight_state_updates is False
+    assert snapshot.policy.expose_state_tools is True
+
+
+def test_ooc_policy_never_enables_preflight_state_updates() -> None:
+    policy = TurnExecutionPolicy.for_mode(
+        TurnMode.OOC,
+        preflight_state_updates=True,
+    )
+
+    assert policy.run_status_preflight is False
+    assert policy.run_status_preflight_state_updates is False
+    assert policy.expose_state_tools is False
+
+
+def test_turn_policy_rejects_non_boolean_preflight_state_updates() -> None:
+    with pytest.raises(TypeError, match="preflight_state_updates must be a boolean"):
+        TurnExecutionPolicy.for_mode(  # type: ignore[arg-type]
+            TurnMode.IC,
+            preflight_state_updates=1,
+        )
+
+
 def test_ooc_snapshot_keeps_explicit_style_for_mode_stable_fixed_layer() -> None:
     composer = _Composer()
     roles = _SessionRoles()

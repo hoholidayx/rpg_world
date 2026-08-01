@@ -98,7 +98,8 @@ class _Builder:
 
 class _Scene:
     @staticmethod
-    def get_context() -> str:
+    def get_context(*, preflight_staged: bool = False) -> str:
+        assert preflight_staged is False
         return "<scene>大厅</scene>"
 
 
@@ -484,7 +485,13 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_world_turns() -
     adjudication_context = AdjudicationContextSnapshot.from_messages(
         [Message(Role.SYSTEM, "shared adjudication marker")]
     )
-    scene = SimpleNamespace(get_context=lambda: "[scene]\n位置: 大厅\n[/scene]")
+    scene_calls: list[bool] = []
+
+    def scene_context(*, preflight_staged: bool = False) -> str:
+        scene_calls.append(preflight_staged)
+        return "[scene]\n位置: 大厅\n[/scene]"
+
+    scene = SimpleNamespace(get_context=scene_context)
     status = SimpleNamespace(
         list_context_tables=lambda: [
             {
@@ -514,6 +521,8 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_world_turns() -
         status_manager=status,
         scene_tracker=scene,
         adjudication_context=adjudication_context,
+        scene_preflight_staged=True,
+        status_preflight_staged_table_ids=(1,),
     )
 
     contents = [message.content for message in messages]
@@ -521,6 +530,8 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_world_turns() -
     assert contents[1] == "judge marker"
     assert "位置: 大厅" in contents[2]
     assert "生命" in contents[2]
+    assert "状态预处理结合当前用户输入后形成" in contents[2]
+    assert scene_calls == [True]
     assert contents[-5:] == [
         "gm user",
         "gm reply",

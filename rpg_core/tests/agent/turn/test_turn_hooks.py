@@ -126,6 +126,84 @@ async def test_status_preflight_hook_binds_scratch_checkpoint_restore() -> None:
     assert sub_agent.preflight_kwargs["player_character"].name == "Alice"
 
 
+@pytest.mark.asyncio
+async def test_status_preflight_hook_skips_provider_when_state_updates_are_disabled_and_no_outcome() -> None:
+    status_scratch = _StatusScratch()
+    scene = _Scene()
+    sub_agent = _SubAgent(status_scratch, scene)
+
+    class OutcomeOnlyTools(_Tools):
+        @staticmethod
+        def state_tools(_scene, _status):  # noqa: ANN001, ANN205
+            raise AssertionError("state tools must not be resolved")
+
+    hook = StatusPreflightHook(
+        status_sub_agent=lambda: sub_agent,
+        tool_service=OutcomeOnlyTools(),
+    )
+    scratch = SimpleNamespace(
+        status_scratch=status_scratch,
+        scene_tracker=scene,
+        status_manager=None,
+        base_history=[],
+        narrative_outcome=None,
+    )
+
+    result = await hook.run(
+        turn_scratch=scratch,
+        user_input="接受好友邀请",
+        turn_stats=TurnStats(),
+        run_state_updates=False,
+    )
+
+    assert result is None
+    assert sub_agent.bound_tools == []
+    assert sub_agent.preflight_kwargs == {}
+
+
+@pytest.mark.asyncio
+async def test_status_preflight_hook_binds_only_outcome_when_state_updates_are_disabled() -> None:
+    status_scratch = _StatusScratch()
+    scene = _Scene()
+    sub_agent = _SubAgent(status_scratch, scene)
+
+    class OutcomeOnlyTools(_Tools):
+        @staticmethod
+        def narrative_outcome_tools(  # noqa: ANN205
+            _input,  # noqa: ANN001
+            _runtime,  # noqa: ANN001
+            _message_mode,  # noqa: ANN001
+        ):
+            return [SimpleNamespace(name="rp_story_outcome")]
+
+        @staticmethod
+        def state_tools(_scene, _status):  # noqa: ANN001, ANN205
+            raise AssertionError("state tools must not be resolved")
+
+    hook = StatusPreflightHook(
+        status_sub_agent=lambda: sub_agent,
+        tool_service=OutcomeOnlyTools(),
+    )
+    scratch = SimpleNamespace(
+        status_scratch=status_scratch,
+        scene_tracker=scene,
+        status_manager=None,
+        base_history=[],
+        narrative_outcome=None,
+    )
+
+    result = await hook.run(
+        turn_scratch=scratch,
+        user_input="尝试说服守卫",
+        turn_stats=TurnStats(),
+        run_state_updates=False,
+    )
+
+    assert result is not None
+    assert [tool.name for tool in sub_agent.bound_tools] == ["rp_story_outcome"]
+    assert sub_agent.preflight_kwargs["state_context"] == "scene"
+
+
 def test_status_preflight_outcome_state_is_structured() -> None:
     staged = SimpleNamespace(narrative_outcome=object())
     assert (

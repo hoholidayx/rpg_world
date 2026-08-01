@@ -89,12 +89,18 @@ class TurnRuntimeFactory:
             plot_scene_opportunity=plan.plot_schedule.scene_opportunity,
             track_plot_scene_opportunity=plan.plot_schedule.enabled,
         )
+        pre_turn_scene_context = (
+            scratch.scene_tracker.get_snapshot_context()
+            if scratch.scene_tracker is not None
+            else None
+        )
         runtime = TurnRuntime(
             plan=plan,
             transaction=transaction,
             scratch=scratch,
             stats=stats,
             provider=provider,
+            pre_turn_scene_context=pre_turn_scene_context,
         )
         try:
             rp_modules = self._lifecycle.rp_module_service
@@ -110,6 +116,9 @@ class TurnRuntimeFactory:
                     player_character=plan.execution.player_character,
                     adjudication_context=plan.adjudication_context,
                     message_mode=plan.request.mode,
+                    run_state_updates=(
+                        plan.execution.policy.run_status_preflight_state_updates
+                    ),
                 )
             runtime.preflight_outcome = self._status_preflight.outcome_state(
                 scratch,

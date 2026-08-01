@@ -37,9 +37,14 @@ class SceneTracker:
     }
     MAX_ATTRS = 8
     """场景属性总数上限（含默认属性），超出后 set_attr 返回错误。"""
-    RUNTIME_GUIDANCE = (
-        "（scene 数据可能不准确，需根据上下文内容裁定是否使用工具更新，"
-        "需遵循核心状态同步协议。）"
+    START_SNAPSHOT_GUIDANCE = (
+        "（这是当前状态处理开始时的 Scene 起始快照。结合本轮输入或所给历史核验；"
+        "仅在事实明确、值实际变化且本轮提供对应工具时更新，并遵循核心状态同步协议。）"
+    )
+    PREFLIGHT_STAGED_GUIDANCE = (
+        "（这是状态预处理结合当前用户输入后已暂存的 Scene 工作快照，尚未提交。"
+        "已暂存值是本轮权威值，不得重复写；仅在仍有明确遗漏且本轮提供对应工具时继续更新，"
+        "并遵循核心状态同步协议。）"
     )
 
     def __init__(self, *, allow_runtime_key_changes: bool = False) -> None:
@@ -247,14 +252,23 @@ class SceneTracker:
 
     # ── 上下文渲染 ──────────────────────────────────────────────────
 
-    def get_context(self) -> str:
+    def get_context(self, *, preflight_staged: bool = False) -> str:
         """渲染供 LLM 使用的 ``[scene]...[/scene]``。
 
         运行时提示只存在于本轮 LLM Context；持久化历史应使用
         :meth:`get_snapshot_context`，避免把提示词写入消息正文。
         """
+        if not isinstance(preflight_staged, bool):
+            raise TypeError("preflight_staged must be a boolean")
         lines = self._snapshot_lines()
-        lines.extend(("", self.RUNTIME_GUIDANCE))
+        lines.extend((
+            "",
+            (
+                self.PREFLIGHT_STAGED_GUIDANCE
+                if preflight_staged
+                else self.START_SNAPSHOT_GUIDANCE
+            ),
+        ))
         update_rules = self._current_update_rules()
         if update_rules:
             lines.append("字段更新规则（满足对应条件时才更新）：")

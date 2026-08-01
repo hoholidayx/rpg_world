@@ -43,10 +43,18 @@ class TurnPreparation:
         request = runtime.plan.request
         scratch = runtime.scratch
         scene_tracker = scratch.scene_tracker
-        llm_scene_context = scene_tracker.get_context() if scene_tracker else None
-        persisted_scene_context = (
-            scene_tracker.get_snapshot_context() if scene_tracker else None
+        scene_preflight_staged = scratch.status_scratch.scene_changed
+        status_preflight_staged_table_ids = (
+            scratch.status_scratch.normal_status_changed_table_ids
         )
+        llm_scene_context = (
+            scene_tracker.get_context(
+                preflight_staged=scene_preflight_staged
+            )
+            if scene_tracker
+            else None
+        )
+        persisted_scene_context = runtime.pre_turn_scene_context
         stored_input = self._context_service.compose_scene_user_input(
             persisted_scene_context,
             request.text,
@@ -82,6 +90,9 @@ class TurnPreparation:
             user_input=request.text,
             rp_module_runtime=runtime.rp_module_runtime,
             turn_execution=runtime.plan.execution,
+            status_preflight_staged_table_ids=(
+                status_preflight_staged_table_ids
+            ),
             persistent_memory_snapshot=runtime.plan.persistent_memory,
             story_memory_snapshot=runtime.plan.story_memory,
         )

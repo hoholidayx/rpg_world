@@ -108,9 +108,18 @@ def _runtime(events: list[str]) -> SimpleNamespace:
             story_memory=(),
             plot_schedule=PlotScheduleSnapshot.disabled("test"),
         ),
-        scratch=SimpleNamespace(scene_tracker=None, status_manager=object()),
+        scratch=SimpleNamespace(
+            scene_tracker=None,
+            status_manager=object(),
+            status_scratch=SimpleNamespace(
+                scene_changed=False,
+                normal_status_changed=False,
+                normal_status_changed_table_ids=(),
+            ),
+        ),
         transaction=_Transaction(events),
         rp_module_runtime=None,
+        pre_turn_scene_context=None,
     )
 
 
@@ -214,7 +223,8 @@ async def test_turn_preparation_skips_fingerprint_when_verbose_is_disabled(
 async def test_turn_preparation_persists_scene_snapshot_without_runtime_guidance() -> None:
     class SceneTracker:
         @staticmethod
-        def get_context() -> str:
+        def get_context(*, preflight_staged: bool = False) -> str:
+            assert preflight_staged is False
             return "[scene]\n位置: 大厅\n\n（仅供 LLM 的提示）\n[/scene]"
 
         @staticmethod
@@ -247,6 +257,7 @@ async def test_turn_preparation_persists_scene_snapshot_without_runtime_guidance
     transaction = _Transaction(events)
     runtime = _runtime(events)
     runtime.scratch.scene_tracker = SceneTracker()
+    runtime.pre_turn_scene_context = SceneTracker.get_snapshot_context()
     runtime.transaction = transaction
     preparation = TurnPreparation(
         context_service=context_service,  # type: ignore[arg-type]
@@ -263,6 +274,68 @@ async def test_turn_preparation_persists_scene_snapshot_without_runtime_guidance
     assert context_service.current_user_message.content == (
         "[scene]\n位置: 大厅\n\n（仅供 LLM 的提示）\n[/scene]\ncurrent action"
     )
+
+
+@pytest.mark.asyncio
+async def test_turn_preparation_persists_pre_turn_scene_and_projects_staged_working_state() -> None:
+    class SceneTracker:
+        @staticmethod
+        def get_context(*, preflight_staged: bool = False) -> str:
+            assert preflight_staged is True
+            return "[scene]\n位置: 微信联系人列表\n\n（前置已暂存）\n[/scene]"
+
+    class ContextService:
+        def __init__(self) -> None:
+            self.context_kwargs: dict[str, object] = {}
+
+        @staticmethod
+        def compose_scene_user_input(scene_ctx, user_input: str) -> str:  # noqa: ANN001
+            if scene_ctx and user_input:
+                return f"{scene_ctx}\n{user_input}"
+            return scene_ctx or user_input
+
+        def build_transformed_context_model(self, **kwargs) -> RPGContext:  # noqa: ANN003
+            self.context_kwargs = dict(kwargs)
+            return RPGContext(
+                hot_history=HotHistoryLayer(messages=[kwargs["current_user_message"]])
+            )
+
+        @staticmethod
+        def runtime_sections_for_turn(**_kwargs) -> list[RPModuleRuntimeSection]:  # noqa: ANN003
+            return []
+
+    events: list[str] = []
+    context_service = ContextService()
+    runtime = _runtime(events)
+    runtime.pre_turn_scene_context = "[scene]\n位置: 会议室\n[/scene]"
+    runtime.scratch.scene_tracker = SceneTracker()
+    runtime.scratch.status_scratch = SimpleNamespace(
+        scene_changed=True,
+        normal_status_changed=True,
+        normal_status_changed_table_ids=(10, 18),
+    )
+    transaction = _Transaction(events)
+    runtime.transaction = transaction
+    preparation = TurnPreparation(
+        context_service=context_service,  # type: ignore[arg-type]
+        tool_service=_ToolService(events),  # type: ignore[arg-type]
+        memory_recall=_MemoryRecall(events),  # type: ignore[arg-type]
+    )
+
+    await preparation.build(runtime)  # type: ignore[arg-type]
+
+    assert transaction.staged_contents == [
+        "[scene]\n位置: 会议室\n[/scene]\ncurrent action"
+    ]
+    current = context_service.context_kwargs["current_user_message"]
+    assert isinstance(current, Message)
+    assert current.content == (
+        "[scene]\n位置: 微信联系人列表\n\n（前置已暂存）\n[/scene]\n"
+        "current action"
+    )
+    assert context_service.context_kwargs[
+        "status_preflight_staged_table_ids"
+    ] == (10, 18)
 
 
 @pytest.mark.asyncio

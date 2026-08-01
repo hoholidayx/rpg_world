@@ -125,6 +125,11 @@ def _scratch(*, with_scene_opportunity: bool = True):  # noqa: ANN201
         base_history=[],
         scene_tracker=_Scene(),
         status_manager=None,
+        status_scratch=SimpleNamespace(
+            scene_changed=False,
+            normal_status_changed=False,
+            normal_status_changed_table_ids=(),
+        ),
         plot_schedule_decisions=[],
         plot_schedule_injections=[],
         plot_scene_opportunity=(
@@ -190,6 +195,8 @@ async def test_soft_plot_candidate_stages_trigger_and_dynamic_injection() -> Non
 
     assert judge.calls == 1
     assert len(context.calls) == 1
+    assert context.calls[0]["scene_preflight_staged"] is False
+    assert context.calls[0]["status_preflight_staged_table_ids"] == ()
     assert scratch.plot_schedule_decisions[0].decision_status == "triggered"
     assert scratch.plot_schedule_decisions[0].event_snapshot["deadlineTime"] == {
         "year": 1,

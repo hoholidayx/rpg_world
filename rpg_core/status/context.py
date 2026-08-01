@@ -26,8 +26,12 @@ def prepare_status_context_tables(
     tables: Iterable[dict[str, object]],
     *,
     available_tool_names: Iterable[str] = (),
+    preflight_staged_table_ids: Iterable[int] = (),
 ) -> list[dict[str, object]]:
     tool_names = frozenset(str(name) for name in available_tool_names)
+    staged_table_ids = frozenset(
+        int(table_id) for table_id in preflight_staged_table_ids
+    )
     prepared: list[dict[str, object]] = []
     for source in tables:
         table = dict(source)
@@ -55,6 +59,7 @@ def prepare_status_context_tables(
         table["structure_writable"] = (
             STATUS_TABLE_EDIT_FIELDS_TOOL_NAME in tool_names
         )
+        table["preflight_staged"] = int(table.get("id", 0)) in staged_table_ids
         prepared.append(table)
     return prepared
 
@@ -63,14 +68,19 @@ def render_status_tables_context(
     tables: Iterable[dict[str, object]],
     *,
     available_tool_names: Iterable[str] = (),
+    preflight_staged_table_ids: Iterable[int] = (),
 ) -> str:
     prepared = prepare_status_context_tables(
         tables,
         available_tool_names=available_tool_names,
+        preflight_staged_table_ids=preflight_staged_table_ids,
     )
     if not prepared:
         return ""
-    return render_jinja_template("modules/status_tables.jinja", status_tables=prepared)
+    return render_jinja_template(
+        "modules/status_tables.jinja",
+        status_tables=prepared,
+    )
 
 
 def _character_name(table: dict[str, object]) -> str | object | None:

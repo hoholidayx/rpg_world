@@ -55,18 +55,23 @@ def test_scene_tracker_existing_table_round_trip():
     snapshot_context = tracker.get_snapshot_context()
     assert "9 年 8 月 7 日 12 时" in context
     assert "大厅" in context
-    assert "scene 数据可能不准确" in context
+    assert "Scene 起始快照" in context
     assert "遵循核心状态同步协议" in context
     assert "角色明确抵达新地点时更新" in context
     assert "9 年 8 月 7 日 12 时" in snapshot_context
     assert "大厅" in snapshot_context
-    assert "scene 数据可能不准确" not in snapshot_context
+    assert "Scene 起始快照" not in snapshot_context
     assert "遵循核心状态同步协议" not in snapshot_context
     assert "角色明确抵达新地点时更新" not in snapshot_context
     assert snapshot_context.endswith("[/scene]")
     assert "StatusSubAgent" not in context
     assert "scene_time" not in context
     assert "no-op" not in context
+
+    staged_context = tracker.get_context(preflight_staged=True)
+    assert "已暂存的 Scene 工作快照" in staged_context
+    assert "已暂存值是本轮权威值，不得重复写" in staged_context
+    assert "Scene 起始快照" not in staged_context
 
 
 def test_scene_tracker_exports_and_restores_time_state():

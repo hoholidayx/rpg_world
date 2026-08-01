@@ -109,7 +109,10 @@ def test_fixed_layer_assembler_merges_core_knowledge_and_module_sections():
     assert fixed_layer.lorebook_entries == lorebook_entries
     assert fixed_layer.characters == characters
     core_content = fixed_layer.sections[0].content
-    assert "本轮回复前的权威运行时快照" in core_content
+    assert "当前 turn 的权威运行时工作快照" in core_content
+    assert "相对本轮输入的阶段由对应动态段明确" in core_content
+    assert "已由状态预处理暂存的变化" in core_content
+    assert "只核验与本轮输入及后果相关" in core_content
     assert "输出任何 RP 正文前调用对应状态工具" in core_content
     assert "工具调用轮不得夹带 RP 正文" in core_content
     assert "不得询问玩家是否需要标记、记录或更新状态" in core_content

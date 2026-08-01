@@ -15,7 +15,11 @@ from rpg_core.agent.sub_agents import StatusSubAgentPreflightOutcome
 from rpg_core.session import SessionManager
 
 
-def _plan(mode: TurnMode = TurnMode.IC) -> TurnExecutionPlan:
+def _plan(
+    mode: TurnMode = TurnMode.IC,
+    *,
+    preflight_state_updates: bool = True,
+) -> TurnExecutionPlan:
     request = TurnRequest.create("行动", mode=mode)
     return TurnExecutionPlan(
         execution=TurnExecutionSnapshot(
@@ -23,7 +27,10 @@ def _plan(mode: TurnMode = TurnMode.IC) -> TurnExecutionPlan:
             narrative_style_id=None,
             narrative_style_name="",
             narrative_style_prompt="",
-            policy=TurnExecutionPolicy.for_mode(mode),
+            policy=TurnExecutionPolicy.for_mode(
+                mode,
+                preflight_state_updates=preflight_state_updates,
+            ),
         ),
         main_llm=SimpleNamespace(effective_provider_key="main"),
         rp_modules=SimpleNamespace(modules=()),
@@ -51,9 +58,11 @@ class _StatusHook:
     def __init__(self) -> None:
         self.calls = 0
         self.error: BaseException | None = None
+        self.kwargs: dict[str, object] = {}
 
-    async def run(self, **_kwargs):  # noqa: ANN201
+    async def run(self, **kwargs):  # noqa: ANN201
         self.calls += 1
+        self.kwargs = dict(kwargs)
         if self.error is not None:
             raise self.error
         return None
@@ -140,6 +149,48 @@ async def test_ooc_runtime_skips_status_preflight() -> None:
     try:
         assert status.calls == 0
         assert runtime.scratch.message_scratch.mode == "ooc"
+    finally:
+        runtime.discard()
+        runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_main_state_update_variant_keeps_status_then_plot_preflight_order() -> None:
+    session = SessionManager(history_enabled=False)
+    order: list[str] = []
+
+    class StatusHook(_StatusHook):
+        async def run(self, **kwargs):  # noqa: ANN201
+            order.append("status")
+            return await super().run(**kwargs)
+
+    class PlotHook:
+        @staticmethod
+        async def run(**_kwargs) -> None:  # noqa: ANN003
+            order.append("plot")
+
+    status = StatusHook()
+
+    async def provider_for(*_args, **_kwargs):  # noqa: ANN202
+        return object()
+
+    factory = TurnRuntimeFactory(
+        lifecycle=_lifecycle(session),
+        context_service=SimpleNamespace(
+            enforce_window_threshold=lambda *_args, **_kwargs: None
+        ),
+        model_runtime=SimpleNamespace(provider_for=provider_for),
+        status_preflight=status,
+        plot_scheduling_preflight=PlotHook(),
+    )
+
+    runtime = await factory.create(
+        _plan(preflight_state_updates=False)
+    )
+    try:
+        assert order == ["status", "plot"]
+        assert status.kwargs["run_state_updates"] is False
+        assert runtime.pre_turn_scene_context is None
     finally:
         runtime.discard()
         runtime.close()

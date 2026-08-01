@@ -17,6 +17,7 @@ from rpg_data.model.status import (
 )
 from rpg_core.agent.turn.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
 from rpg_core.agent.sub_agents import (
+    OutcomeDecision,
     StatusSubAgent,
     StatusSubAgentRecordStatus,
     SubAgentContext,
@@ -605,10 +606,14 @@ def test_status_scratch_removes_net_no_op_document() -> None:
 
     runtime.runtime_set_existing_values(1, [("生命", "8")])
     assert scratch.change_token
+    assert scratch.normal_status_changed is True
+    assert scratch.normal_status_changed_table_ids == (1,)
     runtime.runtime_set_existing_values(1, [("生命", "10")])
 
     assert scratch.change_token == ()
     assert scratch.staged_changes == []
+    assert scratch.normal_status_changed is False
+    assert scratch.normal_status_changed_table_ids == ()
 
 
 def test_status_scratch_tracks_only_net_active_scene_changes() -> None:
@@ -628,6 +633,7 @@ def test_status_scratch_tracks_only_net_active_scene_changes() -> None:
 
     runtime.runtime_set_existing_values(1, [("生命", "8")])
     assert scratch.scene_changed is False
+    assert scratch.normal_status_changed is True
 
     runtime.runtime_set_key_value(2, "位置", "城堡")
     assert scratch.scene_changed is True
@@ -1339,6 +1345,45 @@ async def test_fixed_preflight_stops_after_staging_outcome() -> None:
     assert outcome_tool.calls == 1
     assert scratch.staged_changes == []
     assert manager.documents[1].row_for_key("生命").value == "10"
+
+
+@pytest.mark.asyncio
+async def test_outcome_only_preflight_does_not_route_or_update_state() -> None:
+    manager = FakeRuntimeStatusManager()
+    scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, _messages, *, tools):  # noqa: ANN001
+            self.calls += 1
+            assert [schema["function"]["name"] for schema in tools] == [
+                NARRATIVE_OUTCOME_TOOL_NAME
+            ]
+            return response()
+
+    provider = Provider()
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([_OutcomeTool()])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent._get_provider = lambda: _async_value(provider)  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="status",
+        scene_context="scene",
+        context_tables=runtime.list_context_tables(),
+        user_input="我接受她的好友邀请。",
+    )
+
+    assert provider.calls == 1
+    assert result.outcome_decision is OutcomeDecision.NOT_REQUIRED
+    assert result.route is None
+    assert result.records == []
+    assert result.updated is False
+    assert scratch.staged_changes == []
 
 
 @pytest.mark.asyncio
