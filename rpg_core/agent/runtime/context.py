@@ -168,6 +168,31 @@ class AgentContextService:
         persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
         story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
     ) -> list[Message]:
+        return self.build_transformed_context_model(
+            current_user_message=current_user_message,
+            status_manager=status_manager,
+            scene_tracker=scene_tracker,
+            user_input=user_input,
+            rp_module_runtime=rp_module_runtime,
+            turn_execution=turn_execution,
+            persistent_memory_snapshot=persistent_memory_snapshot,
+            story_memory_snapshot=story_memory_snapshot,
+        ).to_message_objects()
+
+    def build_transformed_context_model(
+        self,
+        *,
+        current_user_message: Message | None = None,
+        status_manager: "StatusManager | None" = None,
+        scene_tracker: "SceneTracker | None" = None,
+        user_input: str = "",
+        rp_module_runtime: "RPModuleTurnRuntime | None" = None,
+        turn_execution: TurnExecutionSnapshot | None = None,
+        persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
+        story_memory_snapshot: tuple["StoryMemoryFact", ...] = (),
+    ) -> "RPGContext":
+        """Build the structured main Context retained across tool rounds."""
+
         context = self.build_main_context(
             current_user_message=current_user_message,
             status_manager=status_manager,
@@ -179,9 +204,8 @@ class AgentContextService:
             persistent_memory_snapshot=persistent_memory_snapshot,
             story_memory_snapshot=story_memory_snapshot,
         )
-        messages = context.to_message_objects()
         self._log_verbose_context(context)
-        return messages
+        return context
 
     def build_plot_judge_messages(
         self,
@@ -294,7 +318,7 @@ class AgentContextService:
                 if scene_tracker is None
                 else scene_tracker
             ),
-            rp_module_sections=self._runtime_sections(
+            rp_module_sections=self.runtime_sections_for_turn(
                 user_input=user_input,
                 include_staged_turn=include_staged_turn_runtime,
                 rp_module_runtime=rp_module_runtime,
@@ -680,7 +704,7 @@ class AgentContextService:
             )
         return assembler.assemble()
 
-    def _runtime_sections(
+    def runtime_sections_for_turn(
         self,
         *,
         user_input: str,

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.adjudication import AdjudicationContextSnapshot
     from rpg_core.agent.telemetry import TurnStats
     from rpg_core.agent.turn.runner import ToolCallRecord
+    from rpg_core.agent.turn.projection import MainRoundProjection
     from rpg_core.tooling.registry import ToolRegistry
     from rpg_core.context.models import (
         Message,
@@ -148,6 +149,7 @@ class PreparedTurn:
     messages: list["Message"]
     tool_registry: "ToolRegistry | None"
     schemas: list[dict] | None
+    round_projection: "MainRoundProjection | None" = None
 
 
 @dataclass(frozen=True)

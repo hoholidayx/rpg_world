@@ -28,6 +28,7 @@ from rpg_core.tooling.base import BaseTool
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SceneTracker
+from rpg_core.session.modes import TurnMode
 from rpg_core.status.tools import (
     StatusTableEditFieldsTool,
     StatusTableSetValuesTool,
@@ -1338,6 +1339,101 @@ async def test_fixed_preflight_stops_after_staging_outcome() -> None:
     assert outcome_tool.calls == 1
     assert scratch.staged_changes == []
     assert manager.documents[1].row_for_key("生命").value == "10"
+
+
+@pytest.mark.asyncio
+async def test_gm_confirmed_fact_does_not_re_adjudicate_old_history() -> None:
+    manager = FakeRuntimeStatusManager()
+    scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        def __init__(self) -> None:
+            self.stages: list[str] = []
+
+        async def chat(self, messages, *, tools):  # noqa: ANN001
+            names = {schema["function"]["name"] for schema in tools}
+            user_content = str(messages[-1]["content"])
+            if names == {NARRATIVE_OUTCOME_TOOL_NAME}:
+                self.stages.append("outcome")
+                assert "本轮是 GM 指令" in user_content
+                assert "已确认事实" in user_content
+                assert "只裁定当前输入" in str(messages[0]["content"])
+                assert "课件纸是否会被发现仍未确定" in user_content
+                assert "固定推进三十分钟" in user_content
+                return response()
+            if names == {"select_status_targets"}:
+                self.stages.append("route")
+                return response()
+            raise AssertionError(f"unexpected schemas: {names}")
+
+    provider = Provider()
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([
+        _OutcomeTool(),
+        StatusTableSetValuesTool(runtime),
+    ])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent._get_provider = lambda: _async_value(provider)  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[Message(Role.ASSISTANT, "课件纸是否会被发现仍未确定")],
+        state_context="status",
+        scene_context="scene",
+        context_tables=runtime.list_context_tables(),
+        user_input="以GM已确认事实把同一侧走廊场景固定推进三十分钟。",
+        message_mode=TurnMode.GM,
+    )
+
+    assert result.outcome_requested is False
+    assert result.outcome_staged is False
+    assert result.failed is False
+    assert provider.stages == ["outcome", "route"]
+
+
+@pytest.mark.asyncio
+async def test_gm_explicitly_random_external_reaction_still_adjudicates() -> None:
+    manager = FakeRuntimeStatusManager()
+    scratch, runtime = _scratch_runtime(manager)
+    outcome_tool = _OutcomeTool()
+
+    class Provider:
+        async def chat(self, messages, *, tools):  # noqa: ANN001
+            assert [schema["function"]["name"] for schema in tools] == [
+                NARRATIVE_OUTCOME_TOOL_NAME
+            ]
+            assert "本轮是 GM 指令" in str(messages[-1]["content"])
+            return response(tool_calls=[{
+                "function": {
+                    "name": NARRATIVE_OUTCOME_TOOL_NAME,
+                    "arguments": json.dumps({
+                        "reason": "随机决定工作人员是否注意到走廊里的异常",
+                    }, ensure_ascii=False),
+                },
+            }])
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([
+        outcome_tool,
+        StatusTableSetValuesTool(runtime),
+    ])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="status",
+        scene_context="scene",
+        context_tables=runtime.list_context_tables(),
+        user_input="以GM指令随机决定工作人员是否注意到走廊里的异常。",
+        message_mode=TurnMode.GM,
+    )
+
+    assert result.outcome_requested is True
+    assert result.outcome_staged is True
+    assert result.failed is False
+    assert outcome_tool.calls == 1
 
 
 def test_status_sub_agent_turn_scope_only_exposes_mounted_tools() -> None:

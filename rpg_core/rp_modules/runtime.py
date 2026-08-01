@@ -10,6 +10,7 @@ from rpg_core.rp_modules.base import RPModule
 from rpg_core.rp_modules.constants import RP_MODULE_NARRATIVE_OUTCOME_NAME
 from rpg_core.rp_modules.models import ModuleContextRequest, RPModuleSelectionSnapshot
 from rpg_core.rp_modules.narrative_outcome import NarrativeOutcomeModule
+from rpg_core.session.modes import TurnMode
 
 if TYPE_CHECKING:
     from rpg_core.agent.turn.transaction import TurnScratch
@@ -27,15 +28,20 @@ class RPModuleTurnRuntime:
         self._modules = {module.name: module for module in modules}
         self._bound_scratch: TurnScratch | None = None
         self._validate_tool_names()
+        fixed_sections: list[FixedLayerSection] = []
+        for module in self.enabled_modules():
+            fixed_sections.extend(module.get_fixed_sections())
+        self._fixed_sections = tuple(
+            sorted(fixed_sections, key=lambda section: (section.priority, section.id))
+        )
 
     def enabled_modules(self) -> list[RPModule]:
         return [self._modules[name] for name in sorted(self._modules)]
 
     def get_fixed_sections(self) -> list[FixedLayerSection]:
-        sections: list[FixedLayerSection] = []
-        for module in self.enabled_modules():
-            sections.extend(module.get_fixed_sections())
-        return sorted(sections, key=lambda section: (section.priority, section.id))
+        """Return the immutable fixed contribution captured before turn binding."""
+
+        return list(self._fixed_sections)
 
     def get_runtime_sections(
         self,
@@ -52,18 +58,29 @@ class RPModuleTurnRuntime:
             tools.extend(module.get_tools())
         return tools
 
-    def get_main_agent_tools(self) -> list[BaseTool]:
+    def get_main_agent_tools(
+        self,
+        user_input: str = "",
+        message_mode: TurnMode | str = TurnMode.NEUTRAL,
+    ) -> list[BaseTool]:
         """Return turn-sensitive tools exposed to the main Agent."""
         tools: list[BaseTool] = []
         for module in self.enabled_modules():
-            tools.extend(module.get_main_agent_tools())
+            if isinstance(module, NarrativeOutcomeModule):
+                tools.extend(module.get_main_agent_tools(user_input, message_mode))
+            else:
+                tools.extend(module.get_main_agent_tools())
         return tools
 
-    def get_status_preflight_tools(self, user_input: str) -> list[BaseTool]:
+    def get_status_preflight_tools(
+        self,
+        user_input: str,
+        message_mode: TurnMode | str = TurnMode.NEUTRAL,
+    ) -> list[BaseTool]:
         module = self._modules.get(RP_MODULE_NARRATIVE_OUTCOME_NAME)
         if not isinstance(module, NarrativeOutcomeModule):
             return []
-        if not module.should_offer_status_preflight(user_input):
+        if not module.should_offer_status_preflight(user_input, message_mode):
             return []
         return module.get_tools()
 

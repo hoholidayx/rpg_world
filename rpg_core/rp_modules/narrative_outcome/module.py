@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import json
 import random
-import re
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from rpg_core.agent.tools.state import resolve_state_tool_set
-from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
+from rpg_core.context import RPModuleRuntimeSection
 from rpg_core.rp_modules.base import RPModule
 from rpg_core.rp_modules.constants import (
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
-    RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     RP_MODULE_NARRATIVE_OUTCOME_SOURCE,
     RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
 )
@@ -23,56 +21,19 @@ from rpg_core.rp_modules.narrative_outcome.tools import (
     NarrativeOutcomeSampler,
     NarrativeOutcomeTool,
 )
+from rpg_core.rp_modules.narrative_outcome.intent import (
+    NarrativeOutcomeEligibility,
+    has_explicit_random_intent,
+    resolve_narrative_outcome_eligibility,
+)
 from rpg_core.rp_modules.narrative_outcome.models import NarrativeOutcomeSelection
 from rpg_core.settings import NarrativeOutcomeModuleSettings
+from rpg_core.session.modes import TurnMode
 from rpg_data.model.narrative_outcome import NARRATIVE_OUTCOME_SOURCE_CONFIG
 
 if TYPE_CHECKING:
     from rpg_core.agent.turn.transaction import TurnScratch
 
-
-_EXPLICIT_RANDOM_CUES = (
-    "掷骰",
-    "投骰",
-    "扔骰",
-    "骰一下",
-    "骰个",
-    "骰子",
-    "检定",
-    "碰碰运气",
-    "碰运气",
-    "试试运气",
-    "试试手气",
-    "交给运气",
-    "看运气",
-    "看手气",
-    "随机裁定",
-    "随机决定",
-)
-_NEGATED_RANDOM_CUES = (
-    "不要掷骰",
-    "不用掷骰",
-    "别掷骰",
-    "无需掷骰",
-    "不需要掷骰",
-    "不要骰子",
-    "不用骰子",
-    "不要检定",
-    "不用检定",
-    "取消检定",
-)
-_DICE_EXPRESSION_RE = re.compile(
-    r"(?<![A-Za-z0-9_])(?:\d+)?d\d+(?:[+-]\d+)?(?![A-Za-z0-9_])",
-    re.IGNORECASE,
-)
-_ENGLISH_RANDOM_CUE_RE = re.compile(
-    r"\b(?:roll|dice|skill\s+check|ability\s+check|saving\s+throw)\b",
-    re.IGNORECASE,
-)
-_NEGATED_ENGLISH_RANDOM_CUE_RE = re.compile(
-    r"\b(?:do\s+not|don't|dont|no|without)\s+(?:roll|dice|skill\s+check|ability\s+check)\b",
-    re.IGNORECASE,
-)
 
 class NarrativeOutcomeModule(RPModule):
     """Choose a five-level story branch without exposing random mechanics."""
@@ -97,11 +58,22 @@ class NarrativeOutcomeModule(RPModule):
         self._active_scratch: TurnScratch | None = None
         self._tool = NarrativeOutcomeTool(self)
 
-    def get_fixed_sections(self) -> list[FixedLayerSection]:
-        scratch = self._active_scratch
-        if scratch is not None and scratch.narrative_outcome is not None:
-            return []
+    def _eligibility(
+        self,
+        user_input: str,
+        message_mode: TurnMode | str,
+    ) -> NarrativeOutcomeEligibility:
+        return resolve_narrative_outcome_eligibility(
+            user_input,
+            message_mode=message_mode,
+            auto_adjudication_enabled=self.settings.auto_adjudication_enabled,
+        )
 
+    def _pending_runtime_content(
+        self,
+        request: ModuleContextRequest,
+        eligibility: NarrativeOutcomeEligibility,
+    ) -> str:
         if self.settings.auto_adjudication_enabled:
             trigger_rule = (
                 "- 每轮叙事前，必须结合用户完整语义、当前场景和状态判断是否存在外部实质变数。"
@@ -117,34 +89,39 @@ class NarrativeOutcomeModule(RPModule):
                 "- 自动剧情裁定已关闭。仅当用户明确要求掷骰、检定、随机决定或把结果交给运气时，"
                 "必须调用 rp_story_outcome；一般隐式不确定性不自动裁定。"
             )
-
-        return [
-            FixedLayerSection(
-                id=RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
-                title="剧情分支随机裁定",
-                source=RP_MODULE_NARRATIVE_OUTCOME_SOURCE,
-                priority=80,
-                content=(
-                    "- rp_story_outcome 是自然 RP 中唯一的随机剧情裁定工具。"
-                    "不要调用或模拟低层骰子、表达式、DC、修正值、概率或随机数。\n"
-                    f"{trigger_rule}\n"
-                    "- 用户明确要求掷骰、检定、碰碰运气、看能不能或随机决定外部结果时，"
-                    "不得只建议、询问或口头模拟，必须在决定结果前调用 rp_story_outcome。\n"
-                    "- 每个 turn 最多裁定一个最关键的外部变数；reason 必须完整描述本次裁定的整体目标边界，"
-                    "不得只写其中一个子步骤；actor 仅在明确时填写。\n"
-                    "- 工具返回结果后，reason 是不可缩小的整体目标，必须把 outcomeCode 和 "
-                    "narrativeGuidance 作为本轮事实；不得为匹配结果等级而改写为局部子目标，"
-                    "也不得改判、弱化、重复抽取或向玩家透露内部随机细节。\n"
-                    "- 确定会发生的动作、无关紧要的细节、纯角色表达，以及玩家角色的内心、选择或台词"
-                    "不裁定。裁定世界后果，不替玩家角色做决定。"
-                ),
+        explicit_rule = (
+            "- 本轮已检测到用户明确把外部结果交给随机裁定；必须在生成结果前调用且只调用一次 "
+            "rp_story_outcome(reason, actor?)，不得先口头决定结果。\n"
+            if eligibility.explicit_random
+            else ""
+        )
+        if eligibility.explicit_unknown_external and not eligibility.explicit_random:
+            explicit_rule = (
+                "- 本轮已检测到用户明确保留未知外部结果；必须在生成该结果前调用且只调用一次 "
+                "rp_story_outcome(reason, actor?)，不得先口头决定结果。\n"
             )
-        ]
+        return (
+            f"{explicit_rule}"
+            "- rp_story_outcome 是自然 RP 中唯一的随机剧情裁定工具。"
+            "不要调用或模拟低层骰子、表达式、DC、修正值、概率或随机数。\n"
+            f"{trigger_rule}\n"
+            "- 用户明确要求掷骰、检定、碰碰运气、看能不能或随机决定外部结果时，"
+            "不得只建议、询问或口头模拟，必须在决定结果前调用 rp_story_outcome。\n"
+            "- 每个 turn 最多裁定一个最关键的外部变数；reason 必须完整描述本次裁定的整体目标边界，"
+            "不得只写其中一个子步骤；actor 仅在明确时填写。\n"
+            "- 工具返回结果后，reason 是不可缩小的整体目标，必须把 outcomeCode 和 "
+            "narrativeGuidance 作为本轮事实；不得为匹配结果等级而改写为局部子目标，"
+            "也不得改判、弱化、重复抽取或向玩家透露内部随机细节。\n"
+            "- 确定会发生的动作、无关紧要的细节、纯角色表达，以及玩家角色的内心、选择或台词"
+            "不裁定。裁定世界后果，不替玩家角色做决定。"
+        )
 
     def get_runtime_sections(
         self,
         request: ModuleContextRequest,
     ) -> list[RPModuleRuntimeSection]:
+        if TurnMode(request.message_mode) is TurnMode.OOC:
+            return []
         scratch = self._active_scratch if request.include_staged_turn else None
         staged = scratch.narrative_outcome if scratch is not None else None
         if staged is not None:
@@ -186,44 +163,48 @@ class NarrativeOutcomeModule(RPModule):
                     ),
                 )
             ]
-        if not self._has_explicit_random_intent(request.user_input):
+        eligibility = self._eligibility(request.user_input, request.message_mode)
+        if not eligibility.eligible:
             return []
         return [
             RPModuleRuntimeSection(
                 id=RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
-                title="本轮剧情裁定指令",
+                title="剧情分支随机裁定",
                 source=RP_MODULE_NARRATIVE_OUTCOME_SOURCE,
                 priority=80,
-                content=(
-                    "用户本轮已明确把外部结果交给随机裁定。必须在生成结果前调用且只调用 "
-                    "rp_story_outcome(reason, actor?)。不要询问表达式、DC、难度或其它参数；"
-                    "不要先口头决定结果，也不要为同一 turn 重复抽取。"
-                ),
+                content=self._pending_runtime_content(request, eligibility),
             )
         ]
 
     def get_tools(self):
         return [self._tool]
 
-    def get_main_agent_tools(self):
+    def get_main_agent_tools(
+        self,
+        user_input: str = "",
+        message_mode: TurnMode | str = TurnMode.NEUTRAL,
+    ):
         scratch = self._active_scratch
         if scratch is not None and scratch.narrative_outcome is not None:
             return []
+        if not self._eligibility(user_input, message_mode).eligible:
+            return []
         return self.get_tools()
 
-    def should_offer_status_preflight(self, user_input: str) -> bool:
-        """Respect auto-adjudication while still handling explicit random intent."""
-        return (
-            self.settings.auto_adjudication_enabled
-            or self._has_explicit_random_intent(user_input)
-        )
+    def should_offer_status_preflight(
+        self,
+        user_input: str,
+        message_mode: TurnMode | str = TurnMode.NEUTRAL,
+    ) -> bool:
+        """Return the same deterministic eligibility used by prompt and main tools."""
+        return self._eligibility(user_input, message_mode).eligible
 
     def status(self) -> ModuleStatus:
         return ModuleStatus(
             name=self.name,
             enabled=self.settings.enabled,
             tools=(self._tool.name,),
-            fixed_section_ids=(RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,),
+            fixed_section_ids=(),
             config_summary={
                 "auto_adjudication_enabled": self.settings.auto_adjudication_enabled,
                 "default_weights": self.settings.default_weights.to_dict(),
@@ -277,17 +258,4 @@ class NarrativeOutcomeModule(RPModule):
 
     @staticmethod
     def _has_explicit_random_intent(user_input: str) -> bool:
-        text = str(user_input or "").strip()
-        if not text:
-            return False
-        compact = re.sub(r"\s+", "", text).casefold()
-        if any(cue in compact for cue in _NEGATED_RANDOM_CUES):
-            return False
-        if _NEGATED_ENGLISH_RANDOM_CUE_RE.search(text):
-            return False
-        if any(cue in compact for cue in _EXPLICIT_RANDOM_CUES):
-            return True
-        return bool(
-            _DICE_EXPRESSION_RE.search(text)
-            or _ENGLISH_RANDOM_CUE_RE.search(text)
-        )
+        return has_explicit_random_intent(user_input)

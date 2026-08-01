@@ -64,6 +64,7 @@ from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SCENE_TOOL_NAMES
 from rpg_core.session.manager import SessionManager
+from rpg_core.session.modes import TurnMode, normalize_turn_mode
 from rpg_core.settings import settings
 from rpg_core.status.tools import (
     STATUS_TABLE_EDIT_FIELDS_TOOL_NAME,
@@ -219,6 +220,7 @@ class StatusSubAgent(BaseSubAgent):
         player_character: "TurnPlayerCharacterSnapshot | None" = None,
         adjudication_context: AdjudicationContextSnapshot | None = None,
         lookup_tools: LookupToolSet | None = None,
+        message_mode: TurnMode | str = TurnMode.NEUTRAL,
     ) -> StatusSubAgentResult:
         """Run the fixed outcome -> route -> selected-update pipeline."""
         if max_history_rounds is None:
@@ -263,6 +265,7 @@ class StatusSubAgent(BaseSubAgent):
                 adjudication_context=adjudication_context,
                 lookup_tools=lookup_tools,
                 max_lookup_tool_rounds=max_lookup_tool_rounds,
+                message_mode=normalize_turn_mode(message_mode),
             )
             result.outcome_decision = outcome
             if outcome is not OutcomeDecision.NOT_REQUIRED:
@@ -549,6 +552,7 @@ class StatusSubAgent(BaseSubAgent):
         adjudication_context: AdjudicationContextSnapshot,
         lookup_tools: LookupToolSet | None,
         max_lookup_tool_rounds: int,
+        message_mode: TurnMode,
     ) -> OutcomeDecision:
         outcome_schema = self._schemas_for_names({NARRATIVE_OUTCOME_TOOL_NAME})
         if not outcome_schema:
@@ -568,6 +572,8 @@ class StatusSubAgent(BaseSubAgent):
             adjudication_context=adjudication_context,
             pipeline_prompt=OUTCOME_ONLY_SYSTEM_PROMPT,
             user_content=(
+                "## Current Turn Mode and Authority\n\n"
+                f"{self._outcome_authority_guidance(message_mode)}\n\n"
                 f"## Current State\n\n{state_context}\n\n"
                 f"## Recent Conversation\n\n{recent}\n\n"
                 f"## User action\n{user_input}\n\n"
@@ -633,6 +639,20 @@ class StatusSubAgent(BaseSubAgent):
             max(len(calls) - 1, 0),
         )
         return decision
+
+    @staticmethod
+    def _outcome_authority_guidance(message_mode: TurnMode) -> str:
+        if message_mode is TurnMode.GM:
+            return (
+                "本轮是 GM 指令。用户明确声明为‘已确认事实’、‘固定推进’或直接给定的"
+                "时间、Scene、NPC 与世界事实具有本轮主持权限，不存在待随机决定的结果，"
+                "不得调用 rp_story_outcome。只有 GM 明确保留外部结果未定、要求随机决定，"
+                "或当前输入本身仍要求判断未知外部反应时才裁定。"
+            )
+        return (
+            f"本轮模式为 {message_mode.value}。当前输入表达玩家角色的行动、意图或台词；"
+            "已明确的自身行为不裁定，只判断尚未确定的外部结果是否存在实质分支。"
+        )
 
     async def _route_status(
         self,

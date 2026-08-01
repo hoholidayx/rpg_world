@@ -804,7 +804,11 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
     assert not any(name.startswith("scene_") for name in ooc_tool_names)
     assert "本轮未提供普通状态写入工具" in ooc_content
 
-    gm_reply = await agent.send("推进场景", mode="gm", narrative_style_id=style.id)
+    gm_reply = await agent.send(
+        "以GM已确认事实固定推进场景。",
+        mode="gm",
+        narrative_style_id=style.id,
+    )
     gm_call = scripted_llm_manager.main_provider().calls[-1]
     gm_content = "\n".join(str(message.get("content") or "") for message in gm_call.messages)
     gm_tool_names = {
@@ -812,15 +816,14 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
         for schema in (gm_call.tools or [])
     }
     assert gm_reply.committed_turn_id == 2
-    assert len(scripted_llm_manager.status.calls) == status_calls_before + 2
+    assert len(scripted_llm_manager.status.calls) == status_calls_before + 1
     assert [
         {
             str(schema.get("function", {}).get("name", ""))
             for schema in (call.tools or [])
         }
-        for call in scripted_llm_manager.status.calls[-2:]
+        for call in scripted_llm_manager.status.calls[-1:]
     ] == [
-        {"rp_story_outcome"},
         {"select_status_targets"},
     ]
     assert lookup_tool_names.isdisjoint(gm_tool_names)
@@ -831,12 +834,67 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
         "status_table_edit_fields",
         "status_table_set_values",
     }.issubset(gm_tool_names)
+    assert "rp_story_outcome" not in gm_tool_names
+    assert "剧情分支随机裁定" not in gm_content
     assert "本轮实际提供 status_table_edit_fields" in gm_content
     assert "COMPOSER_STYLE_PROMPT" in gm_content
     rows = integration_data_gateway.messages.list(session_id)
     assert [row.mode for row in rows] == ["ooc", "ooc", "gm", "gm"]
     assert all(row.summary_processed and row.summary_batch_id is None for row in rows[:2])
     assert all(row.story_memory_processed for row in rows[:2])
+
+
+@pytest.mark.asyncio
+async def test_gm_explicit_random_intent_keeps_outcome_available_end_to_end(
+    integration_agent_factory,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    session_id = "integration_gm_random_outcome"
+    agent = await integration_agent_factory(session_id, with_status=True)
+    scripted_llm_manager.status.queue_chat(
+        response(
+            tool_calls=[
+                tool_call(
+                    "rp_story_outcome",
+                    json.dumps(
+                        {
+                            "reason": "随机决定工作人员是否注意到走廊里的异常",
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            ],
+            model="status-model",
+        )
+    )
+
+    reply = await agent.send(
+        "以GM指令随机决定工作人员是否注意到走廊里的异常。",
+        mode="gm",
+    )
+
+    assert reply.committed_turn_id == 1
+    assert len(scripted_llm_manager.status.calls) == 1
+    status_tool_names = {
+        schema["function"]["name"]
+        for schema in scripted_llm_manager.status.calls[0].tools or []
+    }
+    assert status_tool_names == {"rp_story_outcome"}
+    main_call = scripted_llm_manager.main_provider().calls[-1]
+    main_tool_names = {
+        schema["function"]["name"] for schema in main_call.tools or []
+    }
+    assert "rp_story_outcome" not in main_tool_names
+    assert "本轮裁定已完成，直接执行以下最终结果" in "\n".join(
+        str(message.get("content") or "") for message in main_call.messages
+    )
+    outcome = integration_data_gateway.narrative_outcomes.get_for_turn(
+        session_id,
+        1,
+    )
+    assert outcome is not None
+    assert outcome.reason == "随机决定工作人员是否注意到走廊里的异常"
 
 
 @pytest.mark.asyncio

@@ -71,7 +71,7 @@ class NarrativeOutcomeTool(BaseTool):
     description = (
         "裁定一个存在外部实质变数、且不同结果会改变剧情走向的行动或场景决策。"
         "只提供裁定原因和可选行动者；工具内部处理全部随机细节，并返回唯一且必须遵循的五级剧情结果。"
-        "同一 turn 重复调用只会返回第一次结果。"
+        "每个 turn 只允许成功调用一次；结果产生后，本工具会从该 turn 的后续调用中移除。"
     )
 
     def __init__(self, module) -> None:

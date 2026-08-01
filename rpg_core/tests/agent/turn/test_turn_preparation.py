@@ -13,12 +13,15 @@ from rpg_core.agent.turn.preparation import TurnPreparation
 from rpg_core.context.builder import RPGContextBuilder
 from rpg_core.context.config import RPGContextConfig
 from rpg_core.context.models import (
+    HotHistoryLayer,
     Message,
+    RPGContext,
     Role,
     RPModuleRuntimePlacement,
     RPModuleRuntimeSection,
 )
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshot
+from rpg_core.session.modes import TurnMode
 
 
 class _ContextService:
@@ -30,12 +33,18 @@ class _ContextService:
         self.events.append("compose")
         return user_input
 
-    def build_transformed_context(self, **_kwargs) -> list[Message]:  # noqa: ANN003
+    def build_transformed_context_model(self, **_kwargs) -> RPGContext:  # noqa: ANN003
         self.events.append("context")
-        return [
-            Message(Role.SYSTEM, "system body must stay private"),
-            Message(Role.USER, "user body must stay private"),
-        ]
+        return RPGContext(
+            hot_history=HotHistoryLayer(messages=[
+                Message(Role.SYSTEM, "system body must stay private"),
+                Message(Role.USER, "user body must stay private"),
+            ])
+        )
+
+    @staticmethod
+    def runtime_sections_for_turn(**_kwargs) -> list[RPModuleRuntimeSection]:  # noqa: ANN003
+        return []
 
 
 class _ToolService:
@@ -93,7 +102,7 @@ def _runtime(events: list[str]) -> SimpleNamespace:
     execution = SimpleNamespace(player_character=None)
     return SimpleNamespace(
         plan=SimpleNamespace(
-            request=SimpleNamespace(text="current action"),
+            request=SimpleNamespace(text="current action", mode=TurnMode.NEUTRAL),
             execution=execution,
             persistent_memory=(),
             story_memory=(),
@@ -222,9 +231,15 @@ async def test_turn_preparation_persists_scene_snapshot_without_runtime_guidance
                 return f"{scene_ctx}\n{user_input}"
             return scene_ctx or user_input
 
-        def build_transformed_context(self, **kwargs) -> list[Message]:  # noqa: ANN003
+        def build_transformed_context_model(self, **kwargs) -> RPGContext:  # noqa: ANN003
             self.current_user_message = kwargs["current_user_message"]
-            return [self.current_user_message]
+            return RPGContext(
+                hot_history=HotHistoryLayer(messages=[self.current_user_message])
+            )
+
+        @staticmethod
+        def runtime_sections_for_turn(**_kwargs) -> list[RPModuleRuntimeSection]:  # noqa: ANN003
+            return []
 
     events: list[str] = []
     context_service = ContextService()
@@ -261,19 +276,22 @@ async def test_turn_preparation_keeps_plot_suffix_out_of_staged_user_message() -
             assert scene_ctx is None
             return user_input
 
-        def build_transformed_context(self, **kwargs) -> list[Message]:  # noqa: ANN003
-            context = self.builder.build(
+        def build_transformed_context_model(self, **kwargs) -> RPGContext:  # noqa: ANN003
+            return self.builder.build(
                 current_user_message=kwargs["current_user_message"],
-                rp_module_sections=[
-                    RPModuleRuntimeSection(
-                        id="engine_plot_directive",
-                        title="剧情指令",
-                        content="1. 事件标题：雨夜来信\n   剧情指令：信使进入门厅。",
-                        placement=RPModuleRuntimePlacement.USER_SUFFIX,
-                    )
-                ],
+                rp_module_sections=self.runtime_sections_for_turn(),
             )
-            return context.to_message_objects()
+
+        @staticmethod
+        def runtime_sections_for_turn(**_kwargs) -> list[RPModuleRuntimeSection]:  # noqa: ANN003
+            return [
+                RPModuleRuntimeSection(
+                    id="engine_plot_directive",
+                    title="剧情指令",
+                    content="1. 事件标题：雨夜来信\n   剧情指令：信使进入门厅。",
+                    placement=RPModuleRuntimePlacement.USER_SUFFIX,
+                )
+            ]
 
     events: list[str] = []
     transaction = _Transaction(events)
@@ -347,6 +365,7 @@ async def test_main_initial_fingerprint_is_not_repeated_for_tool_rounds(
         prepared.tool_registry,  # type: ignore[arg-type]
         prepared.messages,
         prepared.schemas,
+        round_projection=prepared.round_projection,
     )
 
     assert reply == "done"

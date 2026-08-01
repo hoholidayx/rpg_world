@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -19,6 +20,9 @@ from rpg_core.agent.tools.lookup import SENSITIVE_LOOKUP_TOOL_NAMES
 from rpg_core.context.models import Message, Role
 from rpg_core.settings import settings
 from rpg_core.tooling.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from rpg_core.agent.turn.projection import MainRoundProjection
 
 _TAG = "[MainAgent]"
 _TOOL_RESULT_LOG_LIMIT = 200
@@ -41,7 +45,11 @@ async def _execute_tool_call(
     tool_registry: ToolRegistry | None,
     name: str,
     arguments: str,
+    *,
+    round_projection: "MainRoundProjection | None" = None,
 ) -> str:
+    if round_projection is not None:
+        return await round_projection.execute_tool(name, arguments)
     if tool_registry is None:
         return f"Error: unknown tool {name!r}"
     return await tool_registry.execute(name, arguments)
@@ -119,6 +127,7 @@ async def run_chat_loop(
     messages: list[Message],
     schemas: list[dict] | None,
     turn_stats: TurnStats | None = None,
+    round_projection: "MainRoundProjection | None" = None,
 ) -> tuple[str, list[ToolCallRecord]]:
     """Chat interaction loop — LLM call + optional tool-call loop.
 
@@ -148,13 +157,24 @@ async def run_chat_loop(
     max_calls = settings.max_tool_calls
     tool_call_count = 0
     records: list[ToolCallRecord] = []
+    transcript: list[Message] = []
 
     while tool_call_count < max_calls:
         # ── LLM call with timing (convert Message → dict at provider boundary) ──
         t0 = time.monotonic()
-        msgs_dict = [m.to_dict() for m in messages]
+        round_messages = (
+            round_projection.messages_for_round(transcript)
+            if round_projection is not None
+            else messages
+        )
+        round_schemas = (
+            round_projection.schemas_for_round()
+            if round_projection is not None
+            else schemas
+        )
+        msgs_dict = [m.to_dict() for m in round_messages]
         result = require_llm_response(
-            await provider.chat(msgs_dict, tools=schemas),
+            await provider.chat(msgs_dict, tools=round_schemas),
             "rpg_core.main_chat_loop",
         )
         duration_ms = (time.monotonic() - t0) * 1000
@@ -199,7 +219,10 @@ async def run_chat_loop(
             reasoning_content=result.reasoning_content,
         )
         asst_msg = asst_msg_obj.to_dict()
-        messages.append(asst_msg_obj)
+        if round_projection is not None:
+            transcript.append(asst_msg_obj)
+        else:
+            messages.append(asst_msg_obj)
 
         # Execute tools and collect results
         tool_results = []
@@ -213,7 +236,12 @@ async def run_chat_loop(
                     _tool_log_value(name, args),
                 )
 
-            tool_result = await _execute_tool_call(tool_registry, name, args)
+            tool_result = await _execute_tool_call(
+                tool_registry,
+                name,
+                args,
+                round_projection=round_projection,
+            )
 
             if settings.verbose_logging:
                 logger.info(
@@ -228,7 +256,10 @@ async def run_chat_loop(
 
             tool_msg_obj = Message(role=Role.TOOL, content=str(tool_result), tool_call_id=tc["id"])
             tool_msg = tool_msg_obj.to_dict()
-            messages.append(tool_msg_obj)
+            if round_projection is not None:
+                transcript.append(tool_msg_obj)
+            else:
+                messages.append(tool_msg_obj)
             tool_results.append(tool_msg)
 
         records.append(ToolCallRecord(
@@ -251,6 +282,7 @@ async def run_chat_loop_stream(
     messages: list[Message],
     schemas: list[dict] | None,
     turn_stats: TurnStats | None = None,
+    round_projection: "MainRoundProjection | None" = None,
 ) -> AsyncIterator[AgentStreamEvent]:
     """Streaming variant of ``run_chat_loop()``.
 
@@ -264,6 +296,7 @@ async def run_chat_loop_stream(
     max_calls = settings.max_tool_calls
     tool_call_count = 0
     records: list[ToolCallRecord] = []
+    transcript: list[Message] = []
 
     while tool_call_count < max_calls:
         yield AgentStreamEvent(
@@ -281,9 +314,19 @@ async def run_chat_loop_stream(
 
         t0 = time.monotonic()
 
-        msgs_dict = [m.to_dict() for m in messages]
+        round_messages = (
+            round_projection.messages_for_round(transcript)
+            if round_projection is not None
+            else messages
+        )
+        round_schemas = (
+            round_projection.schemas_for_round()
+            if round_projection is not None
+            else schemas
+        )
+        msgs_dict = [m.to_dict() for m in round_messages]
         try:
-            async for chunk in provider.chat_stream(msgs_dict, tools=schemas):
+            async for chunk in provider.chat_stream(msgs_dict, tools=round_schemas):
                 # ── text ────────────────────────────────────────────
                 if chunk.content:
                     yield AgentStreamEvent(
@@ -422,7 +465,10 @@ async def run_chat_loop_stream(
             reasoning_content=reasoning_text,
         )
         asst_msg = asst_msg_obj.to_dict()
-        messages.append(asst_msg_obj)
+        if round_projection is not None:
+            transcript.append(asst_msg_obj)
+        else:
+            messages.append(asst_msg_obj)
 
         # ── Execute tools ─────────────────────────────────────────
         tool_results: list[dict] = []
@@ -436,7 +482,12 @@ async def run_chat_loop_stream(
                     _tool_log_value(name, args),
                 )
 
-            tool_result = await _execute_tool_call(tool_registry, name, args)
+            tool_result = await _execute_tool_call(
+                tool_registry,
+                name,
+                args,
+                round_projection=round_projection,
+            )
 
             if settings.verbose_logging:
                 logger.info(
@@ -452,7 +503,10 @@ async def run_chat_loop_stream(
             result_str = str(tool_result)
             tool_msg_obj = Message(role=Role.TOOL, content=result_str, tool_call_id=tc["id"])
             tool_msg = tool_msg_obj.to_dict()
-            messages.append(tool_msg_obj)
+            if round_projection is not None:
+                transcript.append(tool_msg_obj)
+            else:
+                messages.append(tool_msg_obj)
             tool_results.append(tool_msg)
 
             yield AgentStreamEvent(

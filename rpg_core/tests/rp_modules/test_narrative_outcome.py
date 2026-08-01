@@ -203,7 +203,9 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
         module.unbind_turn(scratch)  # type: ignore[arg-type]
 
     assert fixed_sections == []
-    assert inspection_sections == []
+    assert len(inspection_sections) == 1
+    assert "剧情分支随机裁定" in inspection_sections[0].title
+    assert "本轮裁定已完成" not in inspection_sections[0].content
     assert len(sections) == 1
     content = sections[0].content
     assert '"outcomeCode":"setback"' in content
@@ -227,6 +229,30 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
     assert "StatusSubAgent" not in content
     assert "sample" not in content
     assert "weights" not in content
+
+
+def test_staged_outcome_removes_main_tool_but_keeps_underlying_idempotency() -> None:
+    module = NarrativeOutcomeModule(
+        session_id="s1",
+        rng=_SequenceRng(6),  # type: ignore[arg-type]
+    )
+    scratch = SimpleNamespace(
+        turn_id=12,
+        narrative_outcome_selection=None,
+        narrative_outcome=None,
+        scene_tracker=None,
+        status_manager=None,
+    )
+    module.bind_turn(scratch)  # type: ignore[arg-type]
+    try:
+        assert [tool.name for tool in module.get_main_agent_tools()] == [
+            "rp_story_outcome"
+        ]
+        first = module.adjudicate(reason="说服守卫")
+        assert module.get_main_agent_tools() == []
+        assert module.adjudicate(reason="不应覆盖") is first
+    finally:
+        module.unbind_turn(scratch)  # type: ignore[arg-type]
 
 
 def test_staged_outcome_lists_opted_in_scene_tools_without_normal_writer() -> None:

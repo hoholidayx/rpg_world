@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 OUTCOME_ONLY_SYSTEM_PROMPT = (
-    "你是 RPG 剧情裁定门禁。只判断当前玩家行动是否存在外部实质变数。\n"
+    "你是 RPG 剧情裁定门禁。只判断当前用户输入是否存在外部实质变数。\n"
     "需要裁定时只调用一次 rp_story_outcome；不需要时不调用任何工具。\n"
+    "只裁定当前输入，不得重新裁定近期历史里的旧行动或悬念。"
     "不得更新状态、不得虚构结果。"
 )
 

@@ -12,6 +12,11 @@ from rpg_core.rp_modules.narrative_outcome.ledger import (
     NarrativeOutcomeLedgerDataPort,
     NarrativeOutcomeLedgerService,
 )
+from rpg_core.rp_modules.narrative_outcome.intent import (
+    NarrativeOutcomeEligibility,
+    NarrativeOutcomeEligibilityReason,
+    resolve_narrative_outcome_eligibility,
+)
 from rpg_core.rp_modules.narrative_outcome.tools import (
     NARRATIVE_OUTCOME_TOOL_NAME,
     NarrativeOutcomeSampler,
@@ -22,6 +27,8 @@ __all__ = [
     "NARRATIVE_OUTCOME_TOOL_NAME",
     "NARRATIVE_OUTCOME_DEFINITIONS",
     "NarrativeOutcomeDefinition",
+    "NarrativeOutcomeEligibility",
+    "NarrativeOutcomeEligibilityReason",
     "NarrativeOutcomeLedgerConflictError",
     "NarrativeOutcomeLedgerDataPort",
     "NarrativeOutcomeLedgerService",
@@ -30,4 +37,5 @@ __all__ = [
     "NarrativeOutcomeSampler",
     "NarrativeOutcomeTool",
     "StagedNarrativeOutcome",
+    "resolve_narrative_outcome_eligibility",
 ]

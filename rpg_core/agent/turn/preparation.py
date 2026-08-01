@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from rpg_core.agent.turn.models import PreparedTurn
+from rpg_core.agent.turn.projection import MainRoundProjection
 from rpg_core.context.fingerprint import (
     build_request_fingerprint,
     request_fingerprint_log_values,
@@ -74,7 +75,7 @@ class TurnPreparation:
             scene_tracker=scratch.scene_tracker,
         )
 
-        messages = self._context_service.build_transformed_context(
+        base_context = self._context_service.build_transformed_context_model(
             current_user_message=current_user_message,
             status_manager=scratch.status_manager,
             scene_tracker=scratch.scene_tracker,
@@ -92,15 +93,30 @@ class TurnPreparation:
             turn_scratch=scratch,
             plot_schedule_snapshot=runtime.plan.plot_schedule,
         )
-        schemas = self._tool_service.main_schemas(
-            tool_registry,
-            rp_module_runtime=runtime.rp_module_runtime,
+        projection = MainRoundProjection(
+            base_context=base_context,
+            runtime_sections=lambda: self._context_service.runtime_sections_for_turn(
+                user_input=request.text,
+                include_staged_turn=True,
+                rp_module_runtime=runtime.rp_module_runtime,
+                turn_execution=runtime.plan.execution,
+            ),
+            tool_registry=tool_registry,
+            schemas=lambda: self._tool_service.main_schemas(
+                tool_registry,
+                rp_module_runtime=runtime.rp_module_runtime,
+                user_input=request.text,
+                message_mode=request.mode,
+            ),
         )
+        messages = projection.messages_for_round(())
+        schemas = projection.schemas_for_round()
         self._log_request_fingerprint(messages, schemas)
         return PreparedTurn(
             messages=messages,
             tool_registry=tool_registry,
             schemas=schemas,
+            round_projection=projection,
         )
 
     @staticmethod

@@ -213,6 +213,8 @@ Outcome、Route、每个隔离 Update 与每个软 Plot 候选都从同一个不
 
 Outcome 和 Route 可以看到当前 scene、所有可进入 LLM Context 的 normal session 状态表、最近最多 5 个已存在 turn 的独立历史窗口和当前原始 user input。每个 Update 只看到自己的 scene 或单表目标；软 Plot 看到当前 scratch scene/普通状态表、最近 N 个完整可推进世界 turn、当前输入和本轮已接受的其它调度候选。强制 Plot 在到期后直接暂存，不调用 Judge，因而也不获得裁定 Context 或查询工具。
 
+Outcome 只裁定当前原始输入，不能把近期历史里的旧行动或未决悬念当成本轮目标重新抽取。在进入 Provider 之前，共享的确定性 eligibility 门禁已经同时决定 Status Outcome schema、主 Agent 工具和 Narrative Outcome 动态 section 是否存在：OOC 始终关闭；GM 默认关闭，只有明确随机/检定/运气或明确保留未知外部反应时开放；“已确认事实”“固定推进”和事实更正类输入默认关闭。强随机或明确未知外部结果的表达优先于同一句中的事实关键词，避免混合输入被错误跳过。`neutral | ic` 在自动裁定开启时仍可进入语义判断，但明确的事实更正同样直接跳过 Outcome。只有门禁开放后，Outcome Provider 才会获得当前 `message_mode` 的补充权限说明。
+
 StatusSubAgent 不使用主 Agent 的 `summary_processed` 历史过滤。它直接从本 turn `base_history` 取最近 turn，跳过 system message，并将单条内容限制在前 500 个字符。这个窗口会随 turn 滚动；当前实现优先保证近期判断语义，没有额外的历史归纳预处理层。
 
 `agent.lookup_tools.enabled` 默认关闭，因此 Outcome、Route、每个 Update 与每个软 Plot 候选默认只使用上述近期窗口，不获得组合 LookupToolSet。开启后，`summary_search` / `summary_read` 用于快速定位派生归纳，`history_search` / `history_read` 用于核对 SQL 原始 turn；每个阶段分别拥有 `agent.adjudication.max_lookup_tool_rounds`（默认 5）轮独立预算，四个工具共同消耗这一个额度。任一响应中的一个或多个查询调用合计消耗一轮；查询结果和临时 assistant `reasoning_content`/tool transcript 只回传给该阶段的下一次 Provider 请求，不写消息、Summary 或 Memory。若同一响应混用查询与终结工具，查询照常执行，但终结工具不执行，模型必须读取结果后重新单独决定。预算耗尽后再允许一次只含终结 schema 的 Provider 调用。
@@ -221,7 +223,7 @@ StatusSubAgent 不使用主 Agent 的 `summary_processed` 历史过滤。它直�
 
 ### 阶段 A：Outcome 判定
 
-只有当前 RP Module 快照提供 Narrative Outcome，且模块允许自动裁定或检测到明确随机意图时，Outcome 阶段才获得唯一终结工具：
+只有当前 RP Module 快照提供 Narrative Outcome，且共享 eligibility 判定为开放时，Outcome 阶段才获得唯一终结工具；否则不会发起 Outcome Provider 调用，直接进入 Route。自动裁定开启时 `neutral | ic` 的普通世界行动可进入语义判断，GM 仍需明确随机或未知外部结果：
 
 ```text
 rp_story_outcome(reason, actor?)
@@ -237,7 +239,7 @@ rp_story_outcome(reason, actor?)
 
 同一 turn 最多暂存一条结果。若模型返回多个纯 outcome 调用，只执行第一个，其余作为重复调用诊断；底层工具本身也会幂等复用 scratch 中的第一条结果。若一次响应混入任何非 outcome 工具，则不执行混合批次并进入 `FALLBACK`。
 
-Outcome 一旦 `STAGED`，本轮主 Context 不再注入 Narrative Outcome fixed section；结果只通过 `RP_MODULES` runtime section 进入主 Agent，包含公开的 `outcomeCode`、label、`narrativeGuidance`、reason 和可选 actor。该 section 使用简短无序条目要求直接执行最终结果，并从统一的 turn-local 状态工具集合中精确列出本轮实际存在的方法；未注册的方法不会出现在提示词中，没有任何可写字段时则明确说明本轮没有状态写入工具。`rp_story_outcome` 同时从主 Agent schema 和可执行 registry 移除，主 Agent 不能改判、重抽或重复执行；底层工具幂等只保留给预裁定边界内部使用。若 Outcome 未预裁定或进入 `FALLBACK`，主 Agent 则继续获得明确写出 `rp_story_outcome` 的原 fixed contract 与补判工具。
+Narrative Outcome 无论待裁定还是已裁定都不进入 Fixed Layer。eligibility 开放且未预裁定或进入 `FALLBACK` 时，完整裁定契约通过 Hot History 后的 `RP_MODULES` runtime section 注入，并提供补判工具；eligibility 关闭时 section、Status 工具和主 Agent 工具三者同时缺席。`STAGED` 时，同一个动态 section 被最终结果替换，包含公开的 `outcomeCode`、label、`narrativeGuidance`、reason 和可选 actor。最终结果 section 精确列出本轮实际存在的状态方法；未注册的方法不会出现在提示词中，没有可写字段时明确说明本轮没有状态写入工具。预裁定成功后 `rp_story_outcome` 不进入主 Agent schema 或可执行 registry，主 Agent 不能改判、重抽或重复执行；底层幂等只保留为内部最后防线。
 
 ### 阶段 B：状态目标 Route
 
@@ -351,9 +353,11 @@ turn 仍由正式剧情历史重建 Context，并开始新的 Provider 推理链
 
 Status preflight 的结果决定主 Agent 能看到什么：
 
-- `STAGED`：主 Context 注入最终裁定，并从 schema 与可执行 registry 移除 outcome 工具；主 Agent 只能遵循结果。
+- `STAGED`：主 Context 注入最终裁定，并从 schema 与执行能力移除 outcome 工具；主 Agent 只能遵循结果。
 - `NONE`：没有预裁定；若 Narrative Outcome 模块允许，主 Agent 仍可调用 `rp_story_outcome` 补判。
 - `FALLBACK`：预判不可靠，主 Agent 保留同一 outcome 工具完成补判。
+
+补判第一次成功后，runner 在 turn 内重新投影动态 Context 和 schema：最终 Outcome 指令取代待裁定契约，工具立即消失。底层 sampler 的幂等行为不构成对 LLM 的重复调用权限。
 
 scene/status 工具仍绑定到同一个 turn scratch。主 Agent 可以补做预路由遗漏或目标失败后的确定状态同步；普通表工具允许更新任意可见 normal key 的 value，也可在已有 normal 表内创建、改名或删除字段，默认 scene 工具仍只接受已有 key。该补写是机会性的，不承诺一定修复预处理失败。
 
@@ -429,6 +433,8 @@ scene 工具注册和执行权限如下：
 5. 使用相同 scratch 资源构建可执行工具 registry 和模型可见 schema。
 6. `verbose_logging` 开启时，在首次主 LLM 调用前输出一次最终 messages/schemas 指纹；同步与流式共用该 preparation，后续工具 round 不重复。
 
+Preparation 同时保留结构化 Context 作为本 turn 的稳定基底。主 runner 每次 Provider round 都重新计算 scratch-sensitive 的 `RP_MODULES`、runtime suffix 和可见 schema；Fixed、Memory、Summary、Hot History、Story/Status/Recall 与当前原始输入仍来自同一基底。若主 Agent 首轮自行调用 `rp_story_outcome`，工具成功后下一 round 会看到最终 Outcome section，并且看不到该工具。执行同批每个 tool call 前也会重新核对当前 schema allowlist，因此第一次 Outcome 后同一响应里的第二次 Outcome 会立即返回 unknown tool，而不会等到下一 Provider round。
+
 主 Context 的结构化层顺序是：
 
 ```text
@@ -483,7 +489,7 @@ mark/clear、手动 consume 和 Scene 机会 consume/replace 都是 `TurnScratch
 
 普通 `STATUS_TABLES` 展示运行时表 ID、表名、description、完整 KV 和逐字段 `updateRule`。角色绑定表按 `characterName` 分组，但绑定只帮助模型理解归属，不改变普通工具的 ID/key 校验方式。
 
-如果 StatusSubAgent 已暂存 Outcome，`RP_MODULES` 会在主 Agent 第一次调用前给出该结果和状态同步边界。主 runner 可以进行多轮工具调用；最终 assistant `content` 是回复、SSE、历史和数据库的唯一正文真源。
+如果 StatusSubAgent 已暂存 Outcome，`RP_MODULES` 会在主 Agent 第一次调用前给出该结果和状态同步边界。若由主 Agent 补判，则下一工具 round 立即用同一动态位置替换为最终结果并收窄 schema/执行 allowlist。主 runner 可以进行多轮工具调用；最终 assistant `content` 是回复、SSE、历史和数据库的唯一正文真源。
 
 ## 提交、回复与后置任务
 

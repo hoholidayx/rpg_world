@@ -83,7 +83,11 @@ class _Tools:
     lookup_tools = None
 
     @staticmethod
-    def narrative_outcome_tools(_input, _runtime):  # noqa: ANN001, ANN205
+    def narrative_outcome_tools(  # noqa: ANN205
+        _input,  # noqa: ANN001
+        _runtime,  # noqa: ANN001
+        _message_mode,  # noqa: ANN001
+    ):
         return []
 
     @staticmethod

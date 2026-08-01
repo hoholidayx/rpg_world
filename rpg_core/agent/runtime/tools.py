@@ -135,7 +135,20 @@ class AgentToolService:
                     continue
                 registry.register(tool)
         if rp_module_runtime is not None and policy.expose_rp_modules:
-            registry.register_all(rp_module_runtime.get_main_agent_tools())
+            registry.register_all(
+                rp_module_runtime.get_main_agent_tools(
+                    (
+                        turn_execution.request.text
+                        if turn_execution is not None
+                        else ""
+                    ),
+                    (
+                        turn_execution.request.mode
+                        if turn_execution is not None
+                        else TurnMode.NEUTRAL
+                    ),
+                )
+            )
         if (
             policy.expose_plot_sandbox_tools
             and turn_scratch is not None
@@ -165,6 +178,8 @@ class AgentToolService:
         registry: ToolRegistry | None,
         *,
         rp_module_runtime: "RPModuleTurnRuntime | None",
+        user_input: str = "",
+        message_mode: TurnMode | str = TurnMode.NEUTRAL,
     ) -> list[dict] | None:
         if registry is None:
             return None
@@ -173,7 +188,11 @@ class AgentToolService:
             return schemas or None
         module_tool_names = {tool.name for tool in rp_module_runtime.get_tools()}
         exposed_module_tool_names = {
-            tool.name for tool in rp_module_runtime.get_main_agent_tools()
+            tool.name
+            for tool in rp_module_runtime.get_main_agent_tools(
+                user_input,
+                message_mode,
+            )
         }
         filtered = [
             schema
@@ -207,11 +226,15 @@ class AgentToolService:
     def narrative_outcome_tools(
         user_input: str,
         rp_module_runtime: "RPModuleTurnRuntime | None",
+        message_mode: TurnMode | str = TurnMode.NEUTRAL,
     ) -> list[BaseTool]:
         if rp_module_runtime is None:
             return []
         return [
             tool
-            for tool in rp_module_runtime.get_status_preflight_tools(user_input)
+            for tool in rp_module_runtime.get_status_preflight_tools(
+                user_input,
+                message_mode,
+            )
             if tool.name == NARRATIVE_OUTCOME_TOOL_NAME
         ]

@@ -10,7 +10,6 @@ from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_MESSAGE_MODE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
-    RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
     RP_MODULE_PLOT_SCHEDULER_NAME,
     RP_MODULE_PLOT_SCHEDULER_SECTION_ID,
@@ -48,10 +47,14 @@ def test_registry_loads_default_modules(tmp_path):
     ]
     assert [section.id for section in runtime.get_fixed_sections()] == [
         RP_MODULE_PLOT_SCHEDULER_SECTION_ID,
-        RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     ]
     assert [tool.name for tool in runtime.get_tools()] == ["rp_story_outcome"]
-    assert runtime.get_runtime_sections(ModuleContextRequest(session_id="s_forest001")) == []
+    assert [
+        section.id
+        for section in runtime.get_runtime_sections(
+            ModuleContextRequest(session_id="s_forest001")
+        )
+    ] == [RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID]
     assert [command.name for command in registry.get_commands("s_forest001")] == [
         "/rp_modules",
         "/rp_module",
@@ -89,7 +92,6 @@ def test_registry_keeps_narrative_module_and_framework_commands_when_dice_disabl
     ]
     assert [section.id for section in runtime.get_fixed_sections()] == [
         RP_MODULE_PLOT_SCHEDULER_SECTION_ID,
-        RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     ]
     assert [command.name for command in registry.get_commands("s_forest001")] == [
         "/rp_modules",
@@ -101,7 +103,7 @@ def test_registry_keeps_narrative_module_and_framework_commands_when_dice_disabl
     assert selected.effective_config["default_dc"] == 12
 
 
-def test_narrative_fixed_contract_uses_semantic_scene_gate(tmp_path):
+def test_narrative_dynamic_contract_uses_semantic_scene_gate(tmp_path):
     _registry, _snapshot, runtime = _runtime(
         tmp_path,
         RPModuleSettings(
@@ -113,9 +115,16 @@ def test_narrative_fixed_contract_uses_semantic_scene_gate(tmp_path):
 
     content = next(
         section.content
-        for section in runtime.get_fixed_sections()
-        if section.id == RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+        for section in runtime.get_runtime_sections(
+            ModuleContextRequest(session_id="s_forest001", user_input="我尝试说服守卫")
+        )
+        if section.id == RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID
     )
+    assert runtime.get_fixed_sections() == [
+        section
+        for section in runtime.get_fixed_sections()
+        if section.id == RP_MODULE_PLOT_SCHEDULER_SECTION_ID
+    ]
 
     assert "每轮叙事前" in content
     assert "用户完整语义、当前场景和状态" in content
@@ -129,7 +138,7 @@ def test_narrative_fixed_contract_uses_semantic_scene_gate(tmp_path):
     assert "当前 scene 与普通状态表" not in content
 
 
-def test_narrative_fixed_contract_disables_only_implicit_auto_adjudication(tmp_path):
+def test_narrative_dynamic_contract_disables_only_implicit_auto_adjudication(tmp_path):
     _registry, _snapshot, runtime = _runtime(
         tmp_path,
         RPModuleSettings(
@@ -139,12 +148,25 @@ def test_narrative_fixed_contract_disables_only_implicit_auto_adjudication(tmp_p
         ),
     )
 
-    content = next(
-        section.content
-        for section in runtime.get_fixed_sections()
-        if section.id == RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+    ordinary_sections = runtime.get_runtime_sections(
+        ModuleContextRequest(session_id="s_forest001", user_input="我向守卫点头")
+    )
+    explicit_sections = runtime.get_runtime_sections(
+        ModuleContextRequest(
+            session_id="s_forest001",
+            user_input="请为这次潜行做一次检定",
+        )
     )
 
+    assert all(
+        section.id != RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID
+        for section in ordinary_sections
+    )
+    content = next(
+        section.content
+        for section in explicit_sections
+        if section.id == RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID
+    )
     assert "自动剧情裁定已关闭" in content
     assert "用户明确要求" in content
     assert "每轮叙事前" not in content
@@ -168,6 +190,44 @@ def test_status_preflight_respects_auto_adjudication_setting(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("user_input", "message_mode", "expected"),
+    [
+        ("以GM已确认事实固定推进三十分钟。", "gm", False),
+        ("推进场景。", "gm", False),
+        ("让主管查看申请并按现场情况回应。", "gm", False),
+        ("更正刚才已确认的事项名称。", "neutral", False),
+        ("以GM指令随机决定工作人员是否注意到异常。", "gm", True),
+        ("结果保持未知，由颜沁自己决定是否回应。", "gm", True),
+        ("以GM已确认事实推进，但随机决定门外是否有人。", "gm", True),
+        ("请掷骰决定结果。", "ooc", False),
+    ],
+)
+def test_narrative_eligibility_keeps_prompt_and_tools_in_lockstep(
+    user_input: str,
+    message_mode: str,
+    expected: bool,
+    tmp_path,
+) -> None:
+    _registry, _snapshot, runtime = _runtime(tmp_path)
+    request = ModuleContextRequest(
+        session_id="s_forest001",
+        user_input=user_input,
+        message_mode=message_mode,
+    )
+
+    has_section = any(
+        section.id == RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID
+        for section in runtime.get_runtime_sections(request)
+    )
+    status_tools = runtime.get_status_preflight_tools(user_input, message_mode)
+    main_tools = runtime.get_main_agent_tools(user_input, message_mode)
+
+    assert has_section is expected
+    assert ("rp_story_outcome" in {tool.name for tool in status_tools}) is expected
+    assert ("rp_story_outcome" in {tool.name for tool in main_tools}) is expected
+
+
+@pytest.mark.parametrize(
     "user_input",
     [
         "我想碰碰运气，看能不能在附近找到其他线索",
@@ -186,19 +246,23 @@ def test_narrative_explicit_random_intent_adds_turn_directive(user_input: str, t
     assert [section.id for section in sections] == [
         RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID
     ]
-    assert "本轮已明确把外部结果交给随机裁定" in sections[0].content
+    assert "本轮已检测到用户明确把外部结果交给随机裁定" in sections[0].content
     assert "rp_story_outcome(reason, actor?)" in sections[0].content
-    assert "不要询问表达式、DC" in sections[0].content
+    assert "表达式、DC、修正值" in sections[0].content
 
 
-def test_narrative_ordinary_roleplay_does_not_add_turn_directive(tmp_path):
+def test_narrative_ordinary_roleplay_gets_dynamic_contract_without_force_marker(tmp_path):
     _registry, _snapshot, runtime = _runtime(tmp_path)
 
     sections = runtime.get_runtime_sections(
         ModuleContextRequest(session_id="s_forest001", user_input="我向 Alice 点头问好。")
     )
 
-    assert sections == []
+    assert [section.id for section in sections] == [
+        RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID
+    ]
+    assert "每轮叙事前" in sections[0].content
+    assert "本轮已检测到用户明确" not in sections[0].content
 
 
 @pytest.mark.parametrize(
@@ -216,7 +280,25 @@ def test_narrative_negated_or_plain_check_text_does_not_force_turn_directive(use
         ModuleContextRequest(session_id="s_forest001", user_input=user_input)
     )
 
-    assert sections == []
+    assert [section.id for section in sections] == [
+        RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID
+    ]
+    assert "本轮已检测到用户明确" not in sections[0].content
+
+
+def test_narrative_contract_is_absent_from_ooc_runtime(tmp_path):
+    _registry, _snapshot, runtime = _runtime(tmp_path)
+
+    sections = runtime.get_runtime_sections(ModuleContextRequest(
+        session_id="s_forest001",
+        user_input="讨论一下裁定规则",
+        message_mode="ooc",
+    ))
+
+    assert all(
+        section.id != RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID
+        for section in sections
+    )
 
 
 def test_registry_rejects_duplicate_public_tool_names(monkeypatch, tmp_path):
@@ -309,8 +391,10 @@ def test_snapshot_merges_story_and_session_config_with_story_capability_ceiling(
     disabled_runtime = registry.create_runtime(second)
     assert "rp_story_outcome" not in [tool.name for tool in disabled_runtime.get_tools()]
     assert all(
-        section.id != RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
-        for section in disabled_runtime.get_fixed_sections()
+        section.id != RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID
+        for section in disabled_runtime.get_runtime_sections(
+            ModuleContextRequest(session_id="s_forest001")
+        )
     )
 
 

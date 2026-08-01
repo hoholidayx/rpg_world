@@ -65,10 +65,18 @@ class _RPRuntime:
     def get_tools(self) -> list[BaseTool]:
         return [self.outcome, self.visible]
 
-    def get_main_agent_tools(self) -> list[BaseTool]:
+    def get_main_agent_tools(
+        self,
+        _user_input: str = "",
+        _message_mode: TurnMode | str = TurnMode.NEUTRAL,
+    ) -> list[BaseTool]:
         return [self.visible]
 
-    def get_status_preflight_tools(self, _user_input: str) -> list[BaseTool]:
+    def get_status_preflight_tools(
+        self,
+        _user_input: str,
+        _message_mode: TurnMode | str = TurnMode.NEUTRAL,
+    ) -> list[BaseTool]:
         return [self.outcome]
 
 

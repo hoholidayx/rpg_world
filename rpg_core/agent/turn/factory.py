@@ -109,6 +109,7 @@ class TurnRuntimeFactory:
                     rp_module_runtime=runtime.rp_module_runtime,
                     player_character=plan.execution.player_character,
                     adjudication_context=plan.adjudication_context,
+                    message_mode=plan.request.mode,
                 )
             runtime.preflight_outcome = self._status_preflight.outcome_state(
                 scratch,

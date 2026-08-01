@@ -16,7 +16,6 @@ from rpg_core.context.fixed_layer.contributors import (
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
-    RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
 )
 from tests.support.backend import ensure_integration_session
@@ -93,9 +92,8 @@ async def test_rp_modules_and_dice_commands_work_without_real_llm(
 
         ctx = agent._context_service.build_for_inspection("我想碰碰运气，看能不能在附近找到其他线索")
         fixed_content = ctx.render_layer(LayerType.FIXED) or ""
-        assert f"[{RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID}]" in fixed_content
         assert f"[{TEXT_OUTPUT_FORMAT_SECTION_ID}]" in fixed_content
-        assert "rp_story_outcome" in fixed_content
+        assert "rp_story_outcome" not in fixed_content
         assert "rp_dice_roll" not in fixed_content
         assert f"<{RP_OUTPUT_TAG_NARRATION}>" in fixed_content
         assert ctx.rp_modules.active is True

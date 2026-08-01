@@ -74,6 +74,7 @@ class TurnOrchestrator:
                 tool_registry=prepared.tool_registry,
                 messages=prepared.messages,
                 schemas=prepared.schemas,
+                round_projection=prepared.round_projection,
                 turn_stats=runtime.stats,
             )
             self._last_tool_records = records
@@ -138,6 +139,7 @@ class TurnOrchestrator:
                     tool_registry=prepared.tool_registry,
                     messages=prepared.messages,
                     schemas=prepared.schemas,
+                    round_projection=prepared.round_projection,
                     turn_stats=runtime.stats,
                 ):
                     if event.kind == StreamEventKind.DONE:
