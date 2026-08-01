@@ -7,7 +7,8 @@ import React, {
   useEffect,
   useState,
 } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { PLAY_STREAM_TIMEOUT_MS } from '@/lib/stream/streamTimeout'
 import {
   TURN_CANCEL_STATUS,
 } from '@/types/command'
@@ -191,6 +192,10 @@ describe('useSessionStreamTurn request ownership', () => {
       sessionId: 'session_1',
       requestId: 'request_1',
     })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('defensively rejects a second direct stream start', async () => {
@@ -420,9 +425,16 @@ describe('useSessionStreamTurn request ownership', () => {
     })
   })
 
-  it('refreshes authoritative state without showing stopped when generation is not running', async () => {
+  it('releases the local stream and shows a retryable error when generation is not running', async () => {
     const running = deferred<void>()
-    consumeChatStreamMock.mockReturnValue(running.promise)
+    let handlers!: StreamHandlers
+    consumeChatStreamMock.mockImplementation((
+      _payload: unknown,
+      nextHandlers: StreamHandlers,
+    ) => {
+      handlers = nextHandlers
+      return running.promise
+    })
     stopSessionStreamMock.mockResolvedValue({
       status: TURN_CANCEL_STATUS.NOT_RUNNING,
       sessionId: 'session_1',
@@ -446,10 +458,17 @@ describe('useSessionStreamTurn request ownership', () => {
       silent: true,
       preserveLocalMessages: true,
     })
-    expect(dependencies.showToast).toHaveBeenCalledWith('生成已结束，已刷新状态')
+    expect(dependencies.showToast).toHaveBeenCalledWith('生成已结束，但未收到完成确认，已刷新状态')
+    expect(handlers.signal?.aborted).toBe(true)
+    expect(result.current.stream.sending).toBe(false)
     expect(result.current.messages.find(
       (message) => message.id === 'assistant-1',
-    )?.content).not.toBe('已停止当前流式响应。')
+    )).toMatchObject({
+      status: SESSION_MESSAGE_STATUS.ERROR,
+    })
+    expect(result.current.messages.some(
+      (message) => message.role === SESSION_TIMELINE_ROLE.ERROR,
+    )).toBe(true)
 
     await act(async () => {
       running.resolve()
@@ -457,7 +476,7 @@ describe('useSessionStreamTurn request ownership', () => {
     })
   })
 
-  it('retains received text when a tolerant stream ends without a terminal event', async () => {
+  it('cancels the backend and reports an error when EOF arrives without a terminal event', async () => {
     consumeChatStreamMock.mockImplementation(async (
       _payload: unknown,
       handlers: StreamHandlers,
@@ -480,9 +499,58 @@ describe('useSessionStreamTurn request ownership', () => {
     expect(dependencies.refreshSessionData).toHaveBeenCalledWith(expect.objectContaining({
       preserveLocalMessages: true,
     }))
+    expect(stopSessionStreamMock).toHaveBeenCalledWith('session_1', expect.any(String))
     expect(result.current.messages.find(
       (message) => message.id === 'assistant-1',
-    )?.content).toBe('没有终态事件也不能丢失')
+    )).toMatchObject({
+      content: '没有终态事件也不能丢失',
+      status: SESSION_MESSAGE_STATUS.ERROR,
+    })
+    expect(result.current.messages.some(
+      (message) => message.role === SESSION_TIMELINE_ROLE.ERROR,
+    )).toBe(true)
+  })
+
+  it('cancels the backend and releases the local stream when the frontend timeout expires', async () => {
+    vi.useFakeTimers()
+    const running = deferred<void>()
+    let handlers!: StreamHandlers
+    consumeChatStreamMock.mockImplementation((
+      _payload: unknown,
+      nextHandlers: StreamHandlers,
+    ) => {
+      handlers = nextHandlers
+      return running.promise
+    })
+    const dependencies = createDependencies()
+    const { result } = renderHook(
+      () => useHarness('session_1', dependencies),
+      { wrapper: wrapper() },
+    )
+
+    let streamPromise!: Promise<void>
+    await act(async () => {
+      streamPromise = result.current.stream.streamLocalTurn(turnOptions(1))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PLAY_STREAM_TIMEOUT_MS)
+    })
+
+    expect(stopSessionStreamMock).toHaveBeenCalledWith('session_1', expect.any(String))
+    expect(handlers.signal?.aborted).toBe(true)
+    expect(result.current.stream.sending).toBe(false)
+    expect(result.current.messages.find(
+      (message) => message.id === 'assistant-1',
+    )).toMatchObject({
+      content: '已停止当前流式响应。',
+      status: SESSION_MESSAGE_STATUS.DONE,
+    })
+    expect(dependencies.showToast).toHaveBeenCalledWith('生成超时，已停止当前流式响应')
+
+    await act(async () => {
+      running.resolve()
+      await streamPromise
+    })
   })
 
   it('keeps partial text and reports a provider error without a success refresh', async () => {

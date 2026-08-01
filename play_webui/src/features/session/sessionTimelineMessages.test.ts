@@ -160,6 +160,33 @@ describe('unreconciledLocalMessages', () => {
 
     expect(unreconciledLocalMessages(historyMessages, [rawFallback])).toEqual([rawFallback])
   })
+
+  it('removes interrupted-stream diagnostics after the same turn is persisted', () => {
+    const historyMessages = mapHistoryToMessages({ turns: [turn], playerCharacter: player })
+    const assistant = historyMessages.find(
+      (message) => message.role === SESSION_TIMELINE_ROLE.ASSISTANT,
+    )!
+    const interruptedError = {
+      ...assistant,
+      id: 'local-error',
+      role: SESSION_TIMELINE_ROLE.ERROR,
+      content: '流式连接已结束，未收到完成确认。请重试。',
+      metadata: { reconcileWithPersistedTurn: true },
+      status: SESSION_MESSAGE_STATUS.ERROR,
+    }
+    const interruptedThinking = {
+      ...assistant,
+      id: 'local-thinking',
+      role: SESSION_TIMELINE_ROLE.THINKING,
+      metadata: { reconcileWithPersistedTurn: true },
+      status: SESSION_MESSAGE_STATUS.ERROR,
+    }
+
+    expect(unreconciledLocalMessages(
+      historyMessages,
+      [interruptedError, interruptedThinking],
+    )).toEqual([])
+  })
 })
 
 describe('parseNarrativeOutcomeToolResult', () => {

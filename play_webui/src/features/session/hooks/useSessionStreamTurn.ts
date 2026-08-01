@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { stopSessionStream } from '@/lib/api/chat'
 import { formatStreamErrorText } from '@/lib/stream/formatStreamError'
 import { consumeChatStream } from '@/lib/stream/sse'
+import { PLAY_STREAM_TIMEOUT_MS } from '@/lib/stream/streamTimeout'
 import { fromTurnUsage, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { TURN_CANCEL_STATUS } from '@/types/command'
 import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent } from '@/types/stream'
@@ -38,11 +39,37 @@ type ActiveStream = {
   source: SessionStreamSource
   assistantMessageId: string
   turnId: number
+  timelineAnchorTurnId: number
+  timelineGroupOrder: number
+}
+
+type ScheduledStreamTimeout = {
+  requestId: string
+  timer: ReturnType<typeof setTimeout>
 }
 
 type StreamRefreshRecovery = {
   sessionId: string
   options: RefreshSessionDataOptions
+}
+
+const UNCONFIRMED_STREAM_END_ERROR = '流式连接已结束，未收到完成确认。请重试。'
+const STOP_REQUEST_TIMEOUT_MS = 10_000
+
+async function stopSessionStreamWithDeadline(sessionId: string, requestId: string) {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      stopSessionStream(sessionId, requestId),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('停止请求超时'))
+        }, STOP_REQUEST_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export type StreamLocalTurnOptions = {
@@ -108,6 +135,7 @@ export function useSessionStreamTurn({
   const mountedRef = useRef(true)
   const stoppingRequestIdRef = useRef<string | null>(null)
   const stopSettledRequestIdsRef = useRef<Set<string>>(new Set())
+  const streamTimeoutRef = useRef<ScheduledStreamTimeout | null>(null)
   const nextTimelineGroupOrderRef = useRef(0)
   sessionIdRef.current = sessionId
 
@@ -115,6 +143,11 @@ export function useSessionStreamTurn({
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      const scheduledTimeout = streamTimeoutRef.current
+      if (scheduledTimeout) {
+        clearTimeout(scheduledTimeout.timer)
+        streamTimeoutRef.current = null
+      }
     }
   }, [])
 
@@ -127,6 +160,11 @@ export function useSessionStreamTurn({
     setStoppingRequestId(null)
     stoppingRequestIdRef.current = null
     stopSettledRequestIdsRef.current.clear()
+    const scheduledTimeout = streamTimeoutRef.current
+    if (scheduledTimeout) {
+      clearTimeout(scheduledTimeout.timer)
+      streamTimeoutRef.current = null
+    }
   }, [sessionId])
 
   useEffect(() => {
@@ -143,6 +181,11 @@ export function useSessionStreamTurn({
         queryKey: ['play-session-dream-evidence-history', active.sessionId],
         exact: true,
       })
+      const scheduledTimeout = streamTimeoutRef.current
+      if (scheduledTimeout?.requestId === active.requestId) {
+        clearTimeout(scheduledTimeout.timer)
+        streamTimeoutRef.current = null
+      }
       activeStreamRef.current = null
       active.controller.abort()
       void stopSessionStream(active.sessionId, active.requestId).catch((error) => {
@@ -157,7 +200,11 @@ export function useSessionStreamTurn({
     }
   }, [logger, queryClient, sessionId])
 
-  const markStreamStopped = useCallback((assistantMessageId: string, turnId: number) => {
+  const markStreamStopped = useCallback((
+    assistantMessageId: string,
+    turnId: number,
+    requestId: string,
+  ) => {
     setLocalMessages((current) =>
       current.filter((message) => !(
         message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.OUTCOME
@@ -175,6 +222,9 @@ export function useSessionStreamTurn({
                 canRetry: true,
                 canEdit: true,
               }
+          : message.metadata?.streamRequestId === requestId
+              && message.status === SESSION_MESSAGE_STATUS.STREAMING
+            ? { ...message, status: SESSION_MESSAGE_STATUS.DONE }
           : message,
       ),
     )
@@ -187,12 +237,46 @@ export function useSessionStreamTurn({
     requestId: string,
     timelineAnchorTurnId: number,
     timelineGroupOrder: number,
+    {
+      errorCode,
+      reconcileWithPersistedTurn = false,
+    }: {
+      errorCode?: string
+      reconcileWithPersistedTurn?: boolean
+    } = {},
   ) => {
     setLocalMessages((current) => [
       ...current.filter((message) => !(
         message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.OUTCOME
       )).map((message) =>
-        message.id === assistantMessageId ? { ...message, status: SESSION_MESSAGE_STATUS.ERROR } : message,
+        message.id === assistantMessageId
+          ? {
+              ...message,
+              status: SESSION_MESSAGE_STATUS.ERROR,
+              metadata: reconcileWithPersistedTurn
+                ? { ...message.metadata, reconcileWithPersistedTurn: true }
+                : message.metadata,
+            }
+          : message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.USER
+            ? {
+                ...message,
+                canRetry: true,
+                canEdit: true,
+                metadata: reconcileWithPersistedTurn
+                  ? { ...message.metadata, reconcileWithPersistedTurn: true }
+                  : message.metadata,
+              }
+            : message.metadata?.streamRequestId === requestId
+              ? {
+                  ...message,
+                  ...(message.status === SESSION_MESSAGE_STATUS.STREAMING
+                    ? { status: SESSION_MESSAGE_STATUS.ERROR }
+                    : {}),
+                  metadata: reconcileWithPersistedTurn
+                    ? { ...message.metadata, reconcileWithPersistedTurn: true }
+                    : message.metadata,
+                }
+              : message,
       ),
       {
         id: `local-error-${turnId}-${crypto.randomUUID()}`,
@@ -203,7 +287,11 @@ export function useSessionStreamTurn({
         seqInTurn: 5,
         role: SESSION_TIMELINE_ROLE.ERROR,
         content: errorText,
-        metadata: { streamRequestId: requestId },
+        metadata: {
+          streamRequestId: requestId,
+          ...(errorCode ? { errorCode } : {}),
+          ...(reconcileWithPersistedTurn ? { reconcileWithPersistedTurn: true } : {}),
+        },
         createdAt: new Date().toISOString(),
         speaker: errorSpeaker(),
         status: SESSION_MESSAGE_STATUS.ERROR,
@@ -422,38 +510,254 @@ export function useSessionStreamTurn({
         transportStatusCode: event.payload.statusCode,
         errorCode: event.payload.errorCode,
       })
-      setLocalMessages((current) => [
-        ...current.filter((message) => !(
-          message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.OUTCOME
-        )).map((message) =>
-          message.id === assistantMessageId ? { ...message, status: SESSION_MESSAGE_STATUS.ERROR } : message,
-        ),
-        {
-          id: `local-error-${turnId}-${crypto.randomUUID()}`,
-          turnId,
-          timelineGroupId: `stream:${requestId}`,
-          timelineAnchorTurnId,
-          timelineGroupOrder,
-          timelineItemOrder: event.eventId,
-          seqInTurn: 5,
-          role: SESSION_TIMELINE_ROLE.ERROR,
-          content: errorText,
-          metadata: {
-            streamRequestId: requestId,
-            errorCode: event.payload.errorCode,
-            errorMessage: event.payload.message,
-          },
-          createdAt: new Date().toISOString(),
-          speaker: errorSpeaker(),
-          status: SESSION_MESSAGE_STATUS.ERROR,
-          canCopy: Boolean(errorText.trim()),
-          canRetry: false,
-          canEdit: false,
-          canDelete: false,
-        },
-      ])
+      appendLocalStreamError(
+        assistantMessageId,
+        turnId,
+        errorText,
+        requestId,
+        timelineAnchorTurnId,
+        timelineGroupOrder,
+        { errorCode: event.payload.errorCode },
+      )
     }
-  }, [logger, setLastTurnUsage, setLocalMessages, setLocalTurnUsageByTurn])
+  }, [appendLocalStreamError, logger, setLastTurnUsage, setLocalMessages, setLocalTurnUsageByTurn])
+
+  const clearScheduledStreamTimeout = useCallback((requestId?: string) => {
+    const scheduledTimeout = streamTimeoutRef.current
+    if (!scheduledTimeout || (requestId && scheduledTimeout.requestId !== requestId)) return
+    clearTimeout(scheduledTimeout.timer)
+    streamTimeoutRef.current = null
+  }, [])
+
+  const releaseLocalStream = useCallback((active: ActiveStream) => {
+    clearScheduledStreamTimeout(active.requestId)
+    if (activeStreamRef.current?.requestId === active.requestId) activeStreamRef.current = null
+    if (sendingRequestIdRef.current === active.requestId) {
+      sendingRequestIdRef.current = null
+      if (mountedRef.current && sessionIdRef.current === active.sessionId) setSending(false)
+    }
+    active.controller.abort()
+  }, [clearScheduledStreamTimeout])
+
+  const reconcileUnconfirmedStream = useCallback(async (
+    active: ActiveStream,
+    errorText = UNCONFIRMED_STREAM_END_ERROR,
+  ) => {
+    stopSettledRequestIdsRef.current.add(active.requestId)
+    const currentActive = activeStreamRef.current
+    const ownsCurrentView = (
+      mountedRef.current
+      && sessionIdRef.current === active.sessionId
+      && (!currentActive || currentActive.requestId === active.requestId)
+      && (!sendingRequestIdRef.current || sendingRequestIdRef.current === active.requestId)
+    )
+    if (ownsCurrentView) {
+      appendLocalStreamError(
+        active.assistantMessageId,
+        active.turnId,
+        errorText,
+        active.requestId,
+        active.timelineAnchorTurnId,
+        active.timelineGroupOrder,
+        { reconcileWithPersistedTurn: true },
+      )
+    }
+    releaseLocalStream(active)
+    queryClient.removeQueries({
+      queryKey: ['play-session-dream-evidence-history', active.sessionId],
+      exact: true,
+    })
+    if (!ownsCurrentView) return false
+
+    const refreshOptions: RefreshSessionDataOptions = {
+      silent: true,
+      preserveLocalMessages: true,
+    }
+    const refreshed = await refreshSessionData(refreshOptions)
+    if (!refreshed && mountedRef.current && sessionIdRef.current === active.sessionId) {
+      setRefreshRecovery({
+        sessionId: active.sessionId,
+        options: refreshOptions,
+      })
+    }
+    return refreshed
+  }, [appendLocalStreamError, queryClient, refreshSessionData, releaseLocalStream])
+
+  const stopActiveStream = useCallback(async ({
+    silent = false,
+    timedOut = false,
+    transportInterrupted = false,
+  }: {
+    silent?: boolean
+    timedOut?: boolean
+    transportInterrupted?: boolean
+  } = {}) => {
+    const active = activeStreamRef.current
+    if (!active) return false
+    if (active.sessionId !== sessionIdRef.current) {
+      logger.info('stale session stream stop ignored', {
+        requestId: active.requestId,
+        requestSessionId: active.sessionId,
+        currentSessionId: sessionIdRef.current,
+      })
+      return false
+    }
+
+    if (stoppingRequestIdRef.current === active.requestId) {
+      logger.info('stream stop duplicate ignored', {
+        requestId: active.requestId,
+        source: active.source,
+        turnId: active.turnId,
+      })
+      return false
+    }
+    stoppingRequestIdRef.current = active.requestId
+    setStoppingRequestId(active.requestId)
+    logger.info('stream stop requested', {
+      requestId: active.requestId,
+      source: active.source,
+      turnId: active.turnId,
+      timedOut,
+      transportInterrupted,
+    })
+
+    try {
+      const result = await (timedOut || transportInterrupted
+        ? stopSessionStreamWithDeadline(active.sessionId, active.requestId)
+        : stopSessionStream(active.sessionId, active.requestId))
+      logger.info('stream stop result received', {
+        requestId: active.requestId,
+        source: active.source,
+        turnId: active.turnId,
+        status: result.status,
+        resultRequestId: result.requestId,
+        timedOut,
+        transportInterrupted,
+      })
+      if (result.status === TURN_CANCEL_STATUS.CANCELLED) {
+        if (transportInterrupted) {
+          const refreshed = await reconcileUnconfirmedStream(active)
+          if (!silent && mountedRef.current && sessionIdRef.current === active.sessionId) {
+            showToast(refreshed
+              ? '流式连接中断，已取消未完成生成并刷新状态'
+              : '流式连接中断，已取消未完成生成，但历史刷新失败')
+          }
+          return false
+        }
+        stopSettledRequestIdsRef.current.add(active.requestId)
+        const currentActive = activeStreamRef.current
+        const ownsCurrentView = (
+          mountedRef.current
+          && sessionIdRef.current === active.sessionId
+          && (!currentActive || currentActive.requestId === active.requestId)
+          && (
+            !sendingRequestIdRef.current
+            || sendingRequestIdRef.current === active.requestId
+          )
+        )
+        if (ownsCurrentView) {
+          markStreamStopped(active.assistantMessageId, active.turnId, active.requestId)
+          if (!silent) {
+            showToast(timedOut ? '生成超时，已停止当前流式响应' : '已停止当前流式响应')
+          }
+        }
+        releaseLocalStream(active)
+        return true
+      }
+      if (result.status === TURN_CANCEL_STATUS.NOT_RUNNING) {
+        const refreshed = await reconcileUnconfirmedStream(active)
+        if (!silent && mountedRef.current && sessionIdRef.current === active.sessionId) {
+          showToast(transportInterrupted
+            ? (refreshed
+              ? '流式连接中断，已刷新状态'
+              : '流式连接中断，但历史刷新失败')
+            : (refreshed
+              ? '生成已结束，但未收到完成确认，已刷新状态'
+              : '生成已结束，但历史刷新失败'))
+        }
+        return false
+      }
+      if (transportInterrupted) {
+        const refreshed = await reconcileUnconfirmedStream(active)
+        if (!silent && mountedRef.current && sessionIdRef.current === active.sessionId) {
+          showToast(refreshed
+            ? '流式连接中断，已刷新状态'
+            : '流式连接中断，但历史刷新失败')
+        }
+        return false
+      }
+      if (!silent && sessionIdRef.current === active.sessionId) {
+        showToast('当前生成状态已变化，未停止')
+      }
+      return false
+    } catch (error) {
+      const stillActive = activeStreamRef.current?.requestId === active.requestId
+      logger.warn('stream stop failed', {
+        requestId: active.requestId,
+        source: active.source,
+        turnId: active.turnId,
+        status: 'error',
+        stillActive,
+        timedOut,
+        transportInterrupted,
+        error,
+      })
+      if (timedOut || transportInterrupted) {
+        const refreshed = await reconcileUnconfirmedStream(
+          active,
+          timedOut
+            ? '生成超时，停止请求失败，前端已结束本地等待。请检查历史后重试。'
+            : UNCONFIRMED_STREAM_END_ERROR,
+        )
+        if (!silent && mountedRef.current && sessionIdRef.current === active.sessionId) {
+          showToast(timedOut
+            ? (refreshed
+              ? '生成超时，已结束本地等待并刷新状态'
+              : '生成超时，停止请求和历史刷新均失败')
+            : (refreshed
+              ? '流式连接中断，已刷新状态'
+              : '流式连接中断，停止请求和历史刷新均失败'))
+        }
+      } else if (stillActive) {
+        if (!silent && sessionIdRef.current === active.sessionId) {
+          showToast('停止失败，生成仍在继续')
+        }
+      } else {
+        queryClient.removeQueries({
+          queryKey: ['play-session-dream-evidence-history', active.sessionId],
+          exact: true,
+        })
+        const refreshOptions: RefreshSessionDataOptions = {
+          silent: true,
+          preserveLocalMessages: true,
+        }
+        const refreshed = await refreshSessionData(refreshOptions)
+        if (!refreshed && sessionIdRef.current === active.sessionId) {
+          setRefreshRecovery({
+            sessionId: active.sessionId,
+            options: refreshOptions,
+          })
+        }
+        if (!silent && sessionIdRef.current === active.sessionId) {
+          showToast(refreshed ? '停止失败，已刷新状态' : '停止失败，历史刷新也失败')
+        }
+      }
+      return false
+    } finally {
+      if (stoppingRequestIdRef.current === active.requestId) {
+        stoppingRequestIdRef.current = null
+        setStoppingRequestId((current) => (current === active.requestId ? null : current))
+      }
+    }
+  }, [
+    logger,
+    markStreamStopped,
+    queryClient,
+    reconcileUnconfirmedStream,
+    refreshSessionData,
+    releaseLocalStream,
+    showToast,
+  ])
 
   const streamLocalTurn = useCallback(async ({
     text,
@@ -537,6 +841,8 @@ export function useSessionStreamTurn({
       source,
       assistantMessageId: assistantMessage.id,
       turnId,
+      timelineAnchorTurnId,
+      timelineGroupOrder,
     }
     sendingRequestIdRef.current = requestId
     const ownsRequest = () => (
@@ -568,11 +874,31 @@ export function useSessionStreamTurn({
     })
     if (pendingToast) showToast(pendingToast)
 
+    streamTimeoutRef.current = {
+      requestId,
+      timer: setTimeout(() => {
+        const active = activeStreamRef.current
+        if (
+          !active
+          || active.requestId !== requestId
+          || active.sessionId !== requestSessionId
+        ) return
+        logger.warn('stream timed out; requesting backend cancellation', {
+          requestId,
+          source,
+          turnId,
+          timeoutMs: PLAY_STREAM_TIMEOUT_MS,
+        })
+        void stopActiveStream({ timedOut: true })
+      }, PLAY_STREAM_TIMEOUT_MS),
+    }
+
     let streamFailure: string | null = null
     let contextThresholdRejected = false
     let contextThresholdMessage = ''
     let activeSession: string | null = null
     let receivedCommittedTurn = false
+    let receivedTerminalEvent = false
     let preserveVisibleFallback = false
     try {
       await consumeChatStream(
@@ -595,6 +921,13 @@ export function useSessionStreamTurn({
                 eventType: event.type,
               })
               return
+            }
+            if (
+              event.type === PLAY_STREAM_EVENT_TYPE.TURN_COMPLETED
+              || event.type === PLAY_STREAM_EVENT_TYPE.ERROR
+            ) {
+              receivedTerminalEvent = true
+              clearScheduledStreamTimeout(requestId)
             }
             if (
               event.eventId < 0
@@ -643,6 +976,15 @@ export function useSessionStreamTurn({
       )
       if (!ownsRequest()) return
       if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) return
+      if (!receivedTerminalEvent) {
+        logger.warn('stream ended without a terminal event; cancelling backend turn', {
+          requestId,
+          source,
+          turnId,
+        })
+        await stopActiveStream({ transportInterrupted: true })
+        return
+      }
       if (streamFailure) throw new Error(streamFailure)
       if (activeSession && activeSession !== sessionId) {
         logger.info('session locator changed', {
@@ -734,6 +1076,7 @@ export function useSessionStreamTurn({
         showToast(errorText)
       }
     } finally {
+      clearScheduledStreamTimeout(requestId)
       if (activeStreamRef.current?.requestId === requestId) activeStreamRef.current = null
       if (sendingRequestIdRef.current === requestId) {
         sendingRequestIdRef.current = null
@@ -744,6 +1087,7 @@ export function useSessionStreamTurn({
   }, [
     appendLocalStreamError,
     appendStreamEvent,
+    clearScheduledStreamTimeout,
     contextPreviewUsage,
     logger,
     onActiveSession,
@@ -758,133 +1102,8 @@ export function useSessionStreamTurn({
     setForceScrollKey,
     setLocalMessages,
     showToast,
+    stopActiveStream,
   ])
-
-  const stopActiveStream = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    const active = activeStreamRef.current
-    if (!active) return false
-    if (active.sessionId !== sessionIdRef.current) {
-      logger.info('stale session stream stop ignored', {
-        requestId: active.requestId,
-        requestSessionId: active.sessionId,
-        currentSessionId: sessionIdRef.current,
-      })
-      return false
-    }
-
-    if (stoppingRequestIdRef.current === active.requestId) {
-      logger.info('stream stop duplicate ignored', {
-        requestId: active.requestId,
-        source: active.source,
-        turnId: active.turnId,
-      })
-      return false
-    }
-    stoppingRequestIdRef.current = active.requestId
-    setStoppingRequestId(active.requestId)
-    logger.info('stream stop requested', {
-      requestId: active.requestId,
-      source: active.source,
-      turnId: active.turnId,
-    })
-
-    try {
-      const result = await stopSessionStream(active.sessionId, active.requestId)
-      logger.info('stream stop result received', {
-        requestId: active.requestId,
-        source: active.source,
-        turnId: active.turnId,
-        status: result.status,
-        resultRequestId: result.requestId,
-      })
-      if (result.status === TURN_CANCEL_STATUS.CANCELLED) {
-        stopSettledRequestIdsRef.current.add(active.requestId)
-        const currentActive = activeStreamRef.current
-        const ownsCurrentView = (
-          mountedRef.current
-          && sessionIdRef.current === active.sessionId
-          && (!currentActive || currentActive.requestId === active.requestId)
-          && (
-            !sendingRequestIdRef.current
-            || sendingRequestIdRef.current === active.requestId
-          )
-        )
-        if (ownsCurrentView) {
-          markStreamStopped(active.assistantMessageId, active.turnId)
-          if (!silent) showToast('已停止当前流式响应')
-        }
-        if (activeStreamRef.current?.requestId === active.requestId) activeStreamRef.current = null
-        active.controller.abort()
-        return true
-      }
-      if (result.status === TURN_CANCEL_STATUS.NOT_RUNNING) {
-        stopSettledRequestIdsRef.current.add(active.requestId)
-        queryClient.removeQueries({
-          queryKey: ['play-session-dream-evidence-history', active.sessionId],
-          exact: true,
-        })
-        const refreshOptions: RefreshSessionDataOptions = {
-          silent: true,
-          preserveLocalMessages: true,
-        }
-        const refreshed = await refreshSessionData(refreshOptions)
-        if (!refreshed && sessionIdRef.current === active.sessionId) {
-          setRefreshRecovery({
-            sessionId: active.sessionId,
-            options: refreshOptions,
-          })
-        }
-        if (!silent && sessionIdRef.current === active.sessionId) {
-          showToast(refreshed ? '生成已结束，已刷新状态' : '生成已结束，但历史刷新失败')
-        }
-        return false
-      }
-      if (!silent && sessionIdRef.current === active.sessionId) {
-        showToast('当前生成状态已变化，未停止')
-      }
-      return false
-    } catch (error) {
-      const stillActive = activeStreamRef.current?.requestId === active.requestId
-      logger.warn('stream stop failed', {
-        requestId: active.requestId,
-        source: active.source,
-        turnId: active.turnId,
-        status: 'error',
-        stillActive,
-        error,
-      })
-      if (stillActive) {
-        if (!silent && sessionIdRef.current === active.sessionId) {
-          showToast('停止失败，生成仍在继续')
-        }
-      } else {
-        queryClient.removeQueries({
-          queryKey: ['play-session-dream-evidence-history', active.sessionId],
-          exact: true,
-        })
-        const refreshOptions: RefreshSessionDataOptions = {
-          silent: true,
-          preserveLocalMessages: true,
-        }
-        const refreshed = await refreshSessionData(refreshOptions)
-        if (!refreshed && sessionIdRef.current === active.sessionId) {
-          setRefreshRecovery({
-            sessionId: active.sessionId,
-            options: refreshOptions,
-          })
-        }
-        if (!silent && sessionIdRef.current === active.sessionId) {
-          showToast(refreshed ? '停止失败，已刷新状态' : '停止失败，历史刷新也失败')
-        }
-      }
-      return false
-    } finally {
-      if (stoppingRequestIdRef.current === active.requestId) {
-        stoppingRequestIdRef.current = null
-        setStoppingRequestId((current) => (current === active.requestId ? null : current))
-      }
-    }
-  }, [logger, markStreamStopped, queryClient, refreshSessionData, showToast])
 
   const handleExitSession = useCallback(() => {
     const active = activeStreamRef.current
@@ -897,6 +1116,7 @@ export function useSessionStreamTurn({
       activeStreamRef.current = null
       stoppingRequestIdRef.current = null
       setStoppingRequestId(null)
+      clearScheduledStreamTimeout(active.requestId)
       queryClient.removeQueries({
         queryKey: ['play-session-dream-evidence-history', active.sessionId],
         exact: true,
@@ -913,7 +1133,7 @@ export function useSessionStreamTurn({
       })
     }
     onExit()
-  }, [logger, onExit, queryClient])
+  }, [clearScheduledStreamTimeout, logger, onExit, queryClient])
 
   const prepareForSessionDeletion = useCallback(() => {
     const active = activeStreamRef.current
@@ -926,8 +1146,9 @@ export function useSessionStreamTurn({
     activeStreamRef.current = null
     stoppingRequestIdRef.current = null
     setStoppingRequestId(null)
+    clearScheduledStreamTimeout(active.requestId)
     active.controller.abort()
-  }, [logger])
+  }, [clearScheduledStreamTimeout, logger])
 
   const retryCompletionRefresh = useCallback(async () => {
     if (

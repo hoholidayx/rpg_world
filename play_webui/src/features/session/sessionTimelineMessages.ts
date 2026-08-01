@@ -123,7 +123,16 @@ export function unreconciledLocalMessages(
   localMessages: SessionTimelineMessage[],
 ) {
   const persistedTurnMessages = historyMessages.filter((message) => Boolean(message.messageId))
+  const persistedAssistantTurns = new Set(
+    persistedTurnMessages
+      .filter((message) => message.role === SESSION_TIMELINE_ROLE.ASSISTANT)
+      .map((message) => message.turnId),
+  )
   return localMessages.filter((localMessage) => {
+    if (
+      localMessage.metadata?.reconcileWithPersistedTurn === true
+      && persistedAssistantTurns.has(localMessage.turnId)
+    ) return false
     if (
       localMessage.role !== SESSION_TIMELINE_ROLE.USER
       && localMessage.role !== SESSION_TIMELINE_ROLE.ASSISTANT
