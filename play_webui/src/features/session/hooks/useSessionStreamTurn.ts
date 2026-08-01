@@ -4,6 +4,7 @@ import { stopSessionStream } from '@/lib/api/chat'
 import { formatStreamErrorText } from '@/lib/stream/formatStreamError'
 import { consumeChatStream } from '@/lib/stream/sse'
 import { PLAY_STREAM_TIMEOUT_MS } from '@/lib/stream/streamTimeout'
+import { createClientUuid } from '@/lib/utils/clientId'
 import { fromTurnUsage, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { TURN_CANCEL_STATUS } from '@/types/command'
 import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent } from '@/types/stream'
@@ -279,7 +280,7 @@ export function useSessionStreamTurn({
               : message,
       ),
       {
-        id: `local-error-${turnId}-${crypto.randomUUID()}`,
+        id: `local-error-${turnId}-${createClientUuid()}`,
         turnId,
         timelineGroupId: `stream:${requestId}`,
         timelineAnchorTurnId,
@@ -338,7 +339,7 @@ export function useSessionStreamTurn({
         return [
           ...current,
           {
-            id: `local-thinking-${turnId}-${crypto.randomUUID()}`,
+            id: `local-thinking-${turnId}-${createClientUuid()}`,
             turnId,
             timelineGroupId: `stream:${requestId}`,
             timelineAnchorTurnId,
@@ -420,7 +421,7 @@ export function useSessionStreamTurn({
       setLocalMessages((current) => [
         ...current,
         {
-          id: `local-tool-${turnId}-${crypto.randomUUID()}`,
+          id: `local-tool-${turnId}-${createClientUuid()}`,
           turnId,
           timelineGroupId: `stream:${requestId}`,
           timelineAnchorTurnId,
@@ -796,7 +797,7 @@ export function useSessionStreamTurn({
     }
 
     const controller = new AbortController()
-    const requestId = crypto.randomUUID()
+    const requestId = createClientUuid()
     const requestSessionId = sessionId
     const timelineGroupOrder = ++nextTimelineGroupOrderRef.current
     const timelineGroup = {

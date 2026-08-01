@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { deleteSessionMessage, truncateSessionTurn, type getSession } from '@/lib/api/sessions'
+import { createClientUuid } from '@/lib/utils/clientId'
 import type { SessionPlayerCharacter } from '@/types/session'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
 import { isContextInputBlocked, isSlashCommandInput } from '../contextWindowGate'
@@ -196,7 +197,7 @@ export function useSessionTimelineActions({
         : persistedLastTurnId
       const playerSpeaker = makePlayerSpeaker(playerCharacter, turnMode)
       const userMessage: SessionTimelineMessage = {
-        id: `local-${source}-user-${turnId}-${crypto.randomUUID()}`,
+        id: `local-${source}-user-${turnId}-${createClientUuid()}`,
         turnId,
         seqInTurn: 1,
         role: SESSION_TIMELINE_ROLE.USER,

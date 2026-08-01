@@ -14,6 +14,7 @@ import {
   type SessionSpeaker,
   type SessionTimelineMessage,
 } from './sessionRoomTypes'
+import { createClientUuid } from '@/lib/utils/clientId'
 
 export const stoppedStreamText = '已停止当前流式响应。'
 
@@ -103,7 +104,7 @@ function systemSpeaker(): SessionSpeaker {
 
 export function streamPlaceholder(turnId: number): SessionTimelineMessage {
   return {
-    id: `local-stream-${turnId}-${crypto.randomUUID()}`,
+    id: `local-stream-${turnId}-${createClientUuid()}`,
     turnId,
     seqInTurn: 2,
     role: SESSION_TIMELINE_ROLE.ASSISTANT,

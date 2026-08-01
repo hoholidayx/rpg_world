@@ -1,4 +1,5 @@
 import { PLAY_STREAM_EVENT_TYPE, TIMELINE_ITEM_TYPE, type PlayStreamEvent, type StreamStatus, type TimelineItem } from '@/types/stream'
+import { createClientUuid } from '@/lib/utils/clientId'
 import { formatStreamErrorText } from './formatStreamError'
 
 type StreamState = {
@@ -16,7 +17,7 @@ function appendAssistantText(items: TimelineItem[], content: string): TimelineIt
   if (last?.type === TIMELINE_ITEM_TYPE.ASSISTANT) {
     return [...items.slice(0, -1), { ...last, content: `${last.content}${content}` }]
   }
-  return [...items, { id: crypto.randomUUID(), type: TIMELINE_ITEM_TYPE.ASSISTANT, content, createdAt: now() }]
+  return [...items, { id: createClientUuid(), type: TIMELINE_ITEM_TYPE.ASSISTANT, content, createdAt: now() }]
 }
 
 export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent): StreamState {
@@ -29,7 +30,7 @@ export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent
         timeline: [
           ...state.timeline,
           {
-            id: crypto.randomUUID(),
+            id: createClientUuid(),
             type: TIMELINE_ITEM_TYPE.THINKING,
             content: event.payload.text,
             createdAt: now(),
@@ -54,7 +55,7 @@ export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent
         timeline: [
           ...state.timeline,
           {
-            id: crypto.randomUUID(),
+            id: createClientUuid(),
             type: TIMELINE_ITEM_TYPE.TOOL,
             content: toolContent,
             createdAt: now(),
@@ -82,7 +83,7 @@ export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent
         timeline: [
           ...state.timeline,
           {
-            id: crypto.randomUUID(),
+            id: createClientUuid(),
             type: TIMELINE_ITEM_TYPE.ERROR,
             content: formatStreamErrorText(event.payload),
             createdAt: now(),
